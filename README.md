@@ -6,9 +6,9 @@ TaskHound hunts for Windows scheduled tasks that run with privileged accounts an
 
 ## Key Features
 
-- **Tier 0 Detection**: Automatically identifies tasks running as classic Tier 0 users
-- **BloodHound Export Integration**: Supports both Legacy BloodHound and BloodHound Community Edition (BHCE) formats
-- **Password Analysis**: Analyzes password age relative to task creation date for DPAPI dump viability
+- **Tier 0 & High Value Detection**: Automatically identifies tasks running as classic Tier 0 and High Value users
+- **BloodHound Integration**: Connect to your live BloodHound Instance or ingest exports
+- **Password Analysis**: Analyzes password age relative to task creation date
 - **Offline Analysis**: Process previously collected XML files
 - **BOF**: BOF implementation for AdaptixC2 (see [BOF/README.md](BOF/README.md))
 
