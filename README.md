@@ -2,7 +2,7 @@
 
 **Windows Privileged Scheduled Task Discovery Tool** for fun and profit.
 
-TaskHound hunts for Windows scheduled tasks that run with privileged accounts and stored credentials. It enumerates tasks over SMB, parses XMLs, and identifies high-value attack opportunities through BloodHound export support.
+TaskHound hunts for Windows scheduled tasks that run with privileged accounts and stored credentials. It enumerates tasks over SMB, parses XMLs, and identifies high-value attack opportunities through BloodHound support.
 
 ## Key Features
 
