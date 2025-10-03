@@ -199,9 +199,58 @@ def _process_offline_host(hostname: str, host_dir: str, hv: Optional[HighValueLo
             all_rows.append(row)
 
     lines = priv_lines + task_lines
+    # Sort tasks by priority: TIER-0 > PRIV > TASK
+    sorted_lines = _sort_tasks_by_priority(lines)
     total = len(xml_files)
     good(f"{hostname}: Found {total} tasks, privileged {priv_count if (hv and hv.loaded) else 'N/A'}")
-    return lines
+    return sorted_lines
+
+
+def _sort_tasks_by_priority(lines: List[str]) -> List[str]:
+    """Sort task blocks by priority: TIER-0 > PRIV > TASK"""
+    if not lines:
+        return lines
+    
+    # Group lines into task blocks (each block starts with a header like [TIER-0])
+    blocks = []
+    current_block = []
+    
+    for line in lines:
+        if line.startswith('\n[') and current_block:
+            # Start of new block, save the previous one
+            blocks.append(current_block)
+            current_block = [line]
+        else:
+            current_block.append(line)
+    
+    # Don't forget the last block
+    if current_block:
+        blocks.append(current_block)
+    
+    # Define priority order
+    def get_block_priority(block):
+        if not block:
+            return 3  # Unknown/default priority
+        
+        first_line = block[0]
+        if '[TIER-0]' in first_line:
+            return 0
+        elif '[PRIV]' in first_line:
+            return 1
+        elif '[TASK]' in first_line:
+            return 2
+        else:
+            return 3
+    
+    # Sort blocks by priority
+    sorted_blocks = sorted(blocks, key=get_block_priority)
+    
+    # Flatten back to a single list
+    result = []
+    for block in sorted_blocks:
+        result.extend(block)
+    
+    return result
 
 
 def _build_row(host: str, rel_path: str, meta: Dict[str, str]) -> Dict[str, Optional[str]]:
@@ -488,6 +537,8 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
             all_rows.append(row)
 
     lines = priv_lines + task_lines
+    # Sort tasks by priority: TIER-0 > PRIV > TASK
+    sorted_lines = _sort_tasks_by_priority(lines)
     backup_msg = f", {total} raw XMLs backed up" if backup_target_dir else ""
     good(f"{target}: Found {total} tasks, privileged {priv_count if (hv and hv.loaded) else 'N/A'}{backup_msg}")
-    return lines
+    return sorted_lines

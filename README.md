@@ -26,6 +26,12 @@ taskhound -u 'homer.simpson' -p 'P@ssw0rd' -d 'thesimpsons.local' -t 'TARGET_HOS
 
 # With BloodHound data support
 taskhound -u 'homer.simpson' -p 'P@ssw0rd' -d 'thesimpsons.local' -t 'TARGET_HOST' --bh-data bloodhound_export.json
+
+# With live BloodHound connection (BHCE)
+taskhound -u 'homer.simpson' -p 'P@ssw0rd' -d 'thesimpsons.local' -t 'TARGET_HOST' --bh-live --bhce --bh-ip 127.0.0.1 --bh-user admin --bh-password 'password'
+
+# With live BloodHound connection (Legacy)
+taskhound -u 'homer.simpson' -p 'P@ssw0rd' -d 'thesimpsons.local' -t 'TARGET_HOST' --bh-live --legacy --bh-ip 127.0.0.1 --bh-user neo4j --bh-password 'password'
 ```
 
 ## Demo Output
@@ -112,12 +118,34 @@ TaskHound uses multiple detection methods for Tier 0 identification:
 - Local Administrators, Domain Controllers
 - Backup/Server/Account/Print Operators
 
+> **Note**: I currently only have a somewhat 'hacky' solution for the TIER-0 vs. PRIV logic for BHCE that checks if the istierzero or highvalue attribute is set AND if the user is actually a member of default TIER-0 groups. This is because if you mark a user as highvalue in the bhce gui, the istierzero attribute get's changed aswell. At this point I don't know if I'm being stupid or if this is actually intended.
+
 ### Data Ingestion
 
-TaskHound supports the parsing of both BloodHound Community Edition and Legacy BloodHound Exports.
-Legacy BloodHound supports both `JSON` and `CSV` while `CSV` is deprecated and will be removed in future releases.
+TaskHound can connect directly to live BloodHound instances for real-time high-value user data. It also supports direct parsing of BloodHound Exports.
 
-You can generate ingestable data with the following queries:
+#### Live BloodHound Connection
+
+**BHCE (Community Edition):**
+```bash
+taskhound -u user -p pass -t target --bh-live --bhce --bh-ip 127.0.0.1 --bh-user admin --bh-password password
+```
+
+**Legacy BloodHound:**
+```bash
+taskhound -u user -p pass -t target --bh-live --legacy --bh-ip 127.0.0.1 --bh-user neo4j --bh-password password
+```
+
+**Configuration File Support:**
+```ini
+[BloodHound]
+ip = 127.0.0.1
+username = admin
+password = ${BH_PASSWORD}
+type = bhce
+```
+
+If you don't need live data or your BloodHound instance is located in an unreachable network, you can generate ingestable data with the following queries:
 
 #### BloodHound Community Edition (BHCE)
 ```cypher
@@ -164,10 +192,11 @@ See [BOF/README.md](BOF/README.md) for a Beacon Object File implementation of th
 ```
 Usage: taskhound [-h] [-u USERNAME] [-p PASSWORD] [-d DOMAIN] [--hashes HASHES] 
                  [-k] [-t TARGET] [--targets-file TARGETS_FILE] [--dc-ip DC_IP]
-                 [--offline OFFLINE] [--bh-data BH_DATA] [--include-ms] 
-                 [--include-local] [--include-all] [--unsaved-creds] [--no-ldap]
-                 [--credguard-detect] [--plain PLAIN] [--json JSON] [--csv CSV] 
-                 [--backup BACKUP] [--no-summary] [--debug]
+                 [--offline OFFLINE] [--bh-data BH_DATA] [--bh-live] [--bh-ip BH_IP]
+                 [--bh-user BH_USER] [--bh-password BH_PASSWORD] [--bhce] [--legacy]
+                 [--bh-save BH_SAVE] [--include-ms] [--include-local] [--include-all] 
+                 [--unsaved-creds] [--no-ldap] [--credguard-detect] [--plain PLAIN] 
+                 [--json JSON] [--csv CSV] [--backup BACKUP] [--no-summary] [--debug]
 
 Authentication:
   -u, --username        Username (required for online mode)
@@ -184,6 +213,17 @@ Targets:
 Scanning:
   --offline OFFLINE     Parse previously collected XML files from directory
   --bh-data BH_DATA     BloodHound export file (CSV/JSON) for high-value detection
+
+BloodHound Live Connection:
+  --bh-live             Enable live BloodHound connection
+  --bh-ip BH_IP         BloodHound server IP address
+  --bh-user BH_USER     BloodHound username
+  --bh-password BH_PASSWORD  BloodHound password
+  --bhce                Use BHCE (Community Edition) connection
+  --legacy              Use Legacy BloodHound (Neo4j) connection
+  --bh-save BH_SAVE     Save retrieved BloodHound data to file
+
+Task Filtering:
   --include-ms          Include \Microsoft tasks (WARNING: very slow)
   --include-local       Include local system accounts (NT AUTHORITY\SYSTEM, etc.)
   --include-all         Include ALL tasks (combines --include-ms, --include-local, 
@@ -209,8 +249,6 @@ TaskHound relies heavily on impacket for SMB/RPC/Kerberos operations. Standard i
 ## Roadmap
 
 When caffeine intake and free time align:
-- BloodHound DB Connector to always query the freshest BloodHound Data without the need for exports/imports
-  - (Will be prioritized as it's needed for the NetExec Module)
 - Dedicated NetExec module (PR in Review)
 - Automated credential blob extraction for offline decryption
 - Support custom Tier-0 mappings instead of just the default ones
@@ -230,7 +268,7 @@ and every contributor to these projects for the amazing work they did for the co
 
 ## Contributing
 
-PRs welcome. Don't expect wonders though - half of this was caffeine-induced vibe-coding.
+PRs welcome. Don't expect wonders though. Half of this was caffeine-induced vibe-coding.
 
 ## License
 

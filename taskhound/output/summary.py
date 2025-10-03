@@ -72,7 +72,7 @@ def print_summary_table(all_rows: List[Dict], backup_dir: str = None, has_hv_dat
     
     # Print additional info hint
     if not has_hv_data:
-        good("NOTE: Tier-0 and privileged task detection requires --bh-data parameter")
+        good("NOTE: Tier-0 and privileged task detection requires --bh-data parameter or a live connection.")
         good("Without high-value target data, Tier-0 and privileged tasks are marked as N/A")
     
     if backup_dir:

@@ -461,10 +461,72 @@ class HighValueLoader:
             self.hv_sids[object_id.upper()] = dict(user_data)
             self.hv_sids[object_id.upper()]["sam"] = sam
         
-        # TODO: Process edges to build group membership information
-        # For now, we rely on other detection methods (admincount, system_tags)
+        # Process edges to build group membership information
+        # This enables accurate Tier-0 classification based on actual group memberships
+        self._process_bhce_edges(nodes, edges)
         
         return True
+    
+    def _process_bhce_edges(self, nodes: Dict[str, Any], edges: List[Dict[str, Any]]) -> None:
+        """Process BHCE edges to extract group membership information"""
+        # Create a mapping of node IDs to group information
+        groups = {}
+        for node_id, node_data in nodes.items():
+            if node_data.get("kind") == "Group":
+                properties = node_data.get("properties", {})
+                groups[node_id] = {
+                    "objectid": properties.get("objectid", ""),
+                    "name": properties.get("name", "")
+                }
+        
+        # Process MemberOf edges to build user group memberships
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+                
+            # Look for MemberOf relationships
+            if edge.get("kind") != "MemberOf" and edge.get("label") != "MemberOf":
+                continue
+                
+            source_id = edge.get("source", "")
+            target_id = edge.get("target", "")
+            
+            if not source_id or not target_id:
+                continue
+                
+            # Find the user (source) and group (target)
+            source_node = nodes.get(source_id, {})
+            target_group = groups.get(target_id)
+            
+            if source_node.get("kind") != "User" or not target_group:
+                continue
+                
+            # Extract user info
+            properties = source_node.get("properties", {})
+            label = source_node.get("label", "")
+            
+            if "@" in label:
+                sam = label.split("@")[0].lower()
+            else:
+                sam = properties.get("samaccountname", "").strip().lower()
+            
+            if not sam or sam not in self.hv_users:
+                continue
+                
+            # Add group membership to user data
+            group_sid = target_group["objectid"]
+            group_name = target_group["name"]
+            
+            if group_sid and group_sid not in self.hv_users[sam]["groups"]:
+                self.hv_users[sam]["groups"].append(group_sid)
+                self.hv_users[sam]["group_names"].append(group_name)
+                
+                # Also update the SID-based lookup
+                user_sid = self.hv_users[sam]["sid"]
+                if user_sid in self.hv_sids:
+                    if group_sid not in self.hv_sids[user_sid]["groups"]:
+                        self.hv_sids[user_sid]["groups"].append(group_sid)
+                        self.hv_sids[user_sid]["group_names"].append(group_name)
     
     def _load_legacy_json(self, data: List[Dict[str, Any]]) -> bool:
         # Load legacy BloodHound format
@@ -535,24 +597,8 @@ class HighValueLoader:
         
         tier0_reasons = []
         
-        # Check 1: BHCE-specific isTierZero flag or system_tags  
-        bhce_tier0_detected = False
-        if self.format_type == "bhce" and user_data.get("istierzero"):
-            bhce_tier0_detected = True
-        
-        system_tags = user_data.get("system_tags", "")
-        if system_tags and "admin_tier_0" in system_tags:
-            bhce_tier0_detected = True
-            
-        if bhce_tier0_detected:
-            tier0_reasons.append("BHCE Tier 0 attribute")
-        
-        # Check 3: AdminSDHolder protection (admincount=1) - works for both formats
-        admincount = user_data.get("admincount")
-        if admincount and str(admincount).lower() in ("1", "true"):
-            tier0_reasons.append("AdminSDHolder")
-        
-        # Check 4: Group membership via SIDs (language independent) - mainly for Legacy format
+        # Check 1: Group membership verification (PRIMARY - most accurate)
+        # This works for both Legacy and BHCE and provides ground truth
         group_sids = user_data.get("groups", [])  # This contains the actual SIDs
         group_names = user_data.get("group_names", [])  # This contains display names
         
@@ -562,6 +608,7 @@ class HighValueLoader:
             sid_to_name = dict(zip(group_sids, group_names))
         
         matching_tier0_groups = []
+        has_actual_tier0_groups = False
         
         for group_sid in group_sids:
             group_sid_upper = group_sid.upper()
@@ -576,16 +623,61 @@ class HighValueLoader:
                         # Use the display name from BloodHound if available, otherwise use default
                         display_name = sid_to_name.get(group_sid, default_name)
                         matching_tier0_groups.append(display_name)
+                        has_actual_tier0_groups = True
                         break
                 elif group_sid_upper == tier0_sid_pattern.upper():
                     # Exact SID match (builtin groups like Administrators)
                     display_name = sid_to_name.get(group_sid, default_name)
                     matching_tier0_groups.append(display_name)
+                    has_actual_tier0_groups = True
                     break
         
-        if matching_tier0_groups:
+        if has_actual_tier0_groups:
             tier0_reasons.append("TIER0 Group Membership")
         
+        # Check 2: AdminSDHolder protection (admincount=1) - works for both formats
+        admincount = user_data.get("admincount")
+        if admincount and str(admincount).lower() in ("1", "true"):
+            tier0_reasons.append("AdminSDHolder")
+        
+        # Check 3: BHCE-specific attributes (FALLBACK - only when no group data)
+        # This addresses the BHCE limitation where high-value auto-assigns tier0 tags
+        # IMPORTANT: Only classify as TIER-0 if we have AdminSDHolder OR actual group memberships
+        # Users with ONLY BHCE tags should be PRIV, not TIER-0
+        has_adminsd_holder = admincount and str(admincount).lower() in ("1", "true")
+        
+        if not has_actual_tier0_groups and not has_adminsd_holder:
+            # User has BHCE tier0 tags but NO actual Tier-0 indicators
+            # This means they were marked as high-value and BHCE auto-assigned tier0 tags
+            # These should be classified as PRIV, not TIER-0
+            bhce_tier0_detected = False
+            if self.format_type == "bhce" and user_data.get("istierzero"):
+                bhce_tier0_detected = True
+            
+            system_tags = user_data.get("system_tags", "")
+            if system_tags and "admin_tier_0" in system_tags:
+                bhce_tier0_detected = True
+                
+            # DO NOT add to tier0_reasons - this makes them PRIV instead of TIER-0
+            # if bhce_tier0_detected:
+            #     tier0_reasons.append("BHCE Tier 0 attribute")
+        
+        elif not has_actual_tier0_groups and has_adminsd_holder:
+            # User has AdminSDHolder but no group memberships detected
+            # Still include BHCE attribute for additional context
+            bhce_tier0_detected = False
+            if self.format_type == "bhce" and user_data.get("istierzero"):
+                bhce_tier0_detected = True
+            
+            system_tags = user_data.get("system_tags", "")
+            if system_tags and "admin_tier_0" in system_tags:
+                bhce_tier0_detected = True
+                
+            if bhce_tier0_detected:
+                tier0_reasons.append("BHCE Tier 0 attribute")
+        
+        # Note: A user with high-value=true but NO actual Tier-0 groups will be classified as PRIV
+        # This fixes the BHCE issue where marking someone as high-value auto-adds tier0 tags
         return len(tier0_reasons) > 0, tier0_reasons
 
     def analyze_password_age(self, runas: str, task_date: str) -> Tuple[str, str]:

@@ -16,16 +16,46 @@ def main():
 
     validate_args(args)
 
-    # Load HighValue data if provided
+    # Load HighValue data - either from file or live BloodHound connection
     hv = None
     hv_loaded = False
-    if args.bh_data:
+    
+    # Try BloodHound live connection first
+    if args.bh_live:
+        try:
+            from .connectors import connect_bloodhound
+            
+            users_data = connect_bloodhound(args)
+            if users_data:
+                # Create a temporary HighValueLoader with the live data
+                hv = HighValueLoader("")  # Empty path since we have live data
+                hv.hv_users = users_data
+                hv.hv_sids = {}
+                
+                # Build SID lookup from users data
+                for sam, user_data in users_data.items():
+                    if 'sid' in user_data and user_data['sid']:
+                        hv.hv_sids[user_data['sid'].upper()] = user_data
+                        hv.hv_sids[user_data['sid'].upper()]['sam'] = sam
+                
+                hv.loaded = True
+                hv.format_type = "bloodhound_live"
+                hv_loaded = True
+                good(f"Live BloodHound data loaded ({len(users_data)} users)")
+            # No else clause needed - connector already prints specific error messages
+                
+        except ImportError as e:
+            warn(f"BloodHound connector not available: {e}")
+            warn("Continuing without high-value data")
+    
+    # Fall back to file-based loading if no live connection
+    elif args.bh_data:
         hv = HighValueLoader(args.bh_data)
         if hv.load():
-            good("High Value target data loaded")
+            good("High Value target data loaded from file")
             hv_loaded = True
         else:
-            warn("Failed to load High Value target data")
+            warn("Failed to load High Value target data from file")
 
     # Process based on mode
     all_rows: List[Dict] = []

@@ -16,6 +16,9 @@ venv/
 .idea/
 .vscode/
 
+# BloodHound Connector Config (contains credentials)
+bh_connector.config
+
 # Example outputs
 examples/out/
 
