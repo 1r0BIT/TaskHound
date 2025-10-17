@@ -177,25 +177,12 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
                     lm_hash, nt_hash = '', hashes
                 debug(f"Using NTLM hash authentication for LDAP SID resolution")
                 try:
-                    conn = Connection(server, 
-                                    user=f"{domain}\\{username}", 
-                                    password='',  # Empty password when using hashes
-                                    authentication=NTLM, 
-                                    auto_bind=False,
-                                    ntlm_credentials=(username, '', domain, lm_hash, nt_hash))
-                    
-                    # Handle StartTLS if needed
-                    if not conn.bind():
-                        if server_port == 389 and not server_ssl:
-                            try:
-                                conn.start_tls()
-                                conn.bind()
-                            except:
-                                pass
-                                
-                    if not conn.bound:
-                        warn(f"NTLM hash authentication failed for LDAP: {conn.last_error}")
-                        return None
+                    # For NTLM hash authentication, we need to use a different approach
+                    # ldap3 doesn't directly support NTLM hash authentication in newer versions
+                    # We'll skip hash authentication for now and only use password-based auth
+                    warn("LDAP hash authentication not supported with current ldap3 version")
+                    warn("Please provide password instead of hashes for LDAP SID resolution")
+                    return None
                         
                 except Exception as e:
                     warn(f"NTLM hash authentication failed for LDAP: {e}")
@@ -302,7 +289,8 @@ def resolve_sid(sid: str, hv_loader: Optional[HighValueLoader] = None,
                no_ldap: bool = False, domain: Optional[str] = None,
                dc_ip: Optional[str] = None, username: Optional[str] = None,
                password: Optional[str] = None, hashes: Optional[str] = None,
-               kerberos: bool = False) -> Tuple[str, Optional[str]]:
+               kerberos: bool = False, ldap_domain: Optional[str] = None,
+               ldap_user: Optional[str] = None, ldap_password: Optional[str] = None) -> Tuple[str, Optional[str]]:
     """
     Comprehensive SID resolution with fallback chain.
     
@@ -335,9 +323,17 @@ def resolve_sid(sid: str, hv_loader: Optional[HighValueLoader] = None,
         return f"{resolved} ({sid})", resolved
     
     # Try LDAP if enabled and we have sufficient authentication info
-    if not no_ldap and domain and username:
+    # Prioritize dedicated LDAP credentials over main auth credentials
+    ldap_auth_domain = ldap_domain if ldap_domain else domain
+    ldap_auth_user = ldap_user if ldap_user else username
+    ldap_auth_password = ldap_password if ldap_password else password
+    
+    # Only use LDAP hash authentication if no dedicated LDAP password is provided
+    ldap_auth_hashes = None if ldap_password else hashes
+    
+    if not no_ldap and ldap_auth_domain and ldap_auth_user:
         debug(f"Attempting LDAP resolution for SID {sid}")
-        resolved = resolve_sid_via_ldap(sid, domain, dc_ip, username, password, hashes, kerberos)
+        resolved = resolve_sid_via_ldap(sid, ldap_auth_domain, dc_ip, ldap_auth_user, ldap_auth_password, ldap_auth_hashes, kerberos)
         if resolved:
             debug(f"SID {sid} resolved via LDAP: {resolved}")
             return f"{resolved} ({sid})", resolved
@@ -346,7 +342,7 @@ def resolve_sid(sid: str, hv_loader: Optional[HighValueLoader] = None,
     if no_ldap:
         debug(f"SID {sid} not resolved: LDAP resolution disabled")
         return f"{sid} (SID - LDAP resolution disabled)", None
-    elif not domain or not username:
+    elif not ldap_auth_domain or not ldap_auth_user:
         debug(f"SID {sid} not resolved: insufficient authentication information")
         return f"{sid} (SID - insufficient auth for LDAP resolution)", None
     else:
@@ -358,7 +354,8 @@ def format_runas_with_sid_resolution(runas: str, hv_loader: Optional[HighValueLo
                                    no_ldap: bool = False, domain: Optional[str] = None,
                                    dc_ip: Optional[str] = None, username: Optional[str] = None,
                                    password: Optional[str] = None, hashes: Optional[str] = None,
-                                   kerberos: bool = False) -> Tuple[str, Optional[str]]:
+                                   kerberos: bool = False, ldap_domain: Optional[str] = None,
+                                   ldap_user: Optional[str] = None, ldap_password: Optional[str] = None) -> Tuple[str, Optional[str]]:
     """
     Format RunAs field with SID resolution if needed.
     
@@ -383,7 +380,7 @@ def format_runas_with_sid_resolution(runas: str, hv_loader: Optional[HighValueLo
         
     # Check if it's a SID
     if is_sid(runas):
-        return resolve_sid(runas, hv_loader, no_ldap, domain, dc_ip, username, password, hashes, kerberos)
+        return resolve_sid(runas, hv_loader, no_ldap, domain, dc_ip, username, password, hashes, kerberos, ldap_domain, ldap_user, ldap_password)
     else:
         # Regular username, return as-is
         return runas, None

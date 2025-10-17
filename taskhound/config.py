@@ -48,10 +48,17 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--include-all", action="store_true",
                     help="Include ALL tasks (equivalent to --include-ms --include-local --unsaved-creds) - WARNING: VERY SLOW AND NOISY!")
     scan.add_argument("--unsaved-creds", action='store_true', help="Show scheduled tasks that do not store credentials (unsaved credentials)")
-    scan.add_argument("--no-ldap", action='store_true', 
-                    help="Disable LDAP queries for SID resolution (improves OPSEC but reduces user-friendliness)")
     scan.add_argument("--credguard-detect", action='store_true', default=False,
         help="EXPERIMENTAL: Attempt to detect Credential Guard status via remote registry (default: off). Only use if you know your environment supports it.")
+
+    # LDAP/SID Resolution options
+    ldap = ap.add_argument_group('LDAP/SID Resolution options',
+                                description='Alternative credentials for SID lookups. Useful when you only have NTLM hashes or local admin access (domain="."). SID resolution can use lower-privilege plaintext credentials.')
+    ldap.add_argument("--no-ldap", action='store_true', 
+                    help="Disable LDAP queries for SID resolution (improves OPSEC but reduces user-friendliness)")
+    ldap.add_argument("--ldap-user", help="Alternative username for SID lookup (can be different from main auth credentials)")
+    ldap.add_argument("--ldap-password", help="Alternative password for SID lookup (plaintext only - hashes not supported)")
+    ldap.add_argument("--ldap-domain", help="Alternative domain for SID lookup (can be different from main auth domain)")
 
     # Output options
     out = ap.add_argument_group('Output options')

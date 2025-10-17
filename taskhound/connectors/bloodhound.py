@@ -174,6 +174,7 @@ class BloodHoundConnector:
                 return False
                 
             good(f"Connected to BHCE at {self.ip}:8080")
+            info("Collecting high-value user data - this may take a moment depending on database size and connection speed...")
             
         except requests.exceptions.ConnectionError:
             warn(f"BloodHound BHCE connection failed at {self.ip}:8080")
@@ -183,115 +184,115 @@ class BloodHoundConnector:
             warn(f"BloodHound BHCE connection timed out at {self.ip}:8080")
             return False
             
-            # Comprehensive query for BHCE - includes high-value, admincount, and Tier 0 group members
-            comprehensive_query = """
-            MATCH (u:User)
-            WHERE coalesce(u.system_tags, "") CONTAINS "admin_tier_0"
-               OR u.highvalue = true
-               OR u.admincount = true
-            RETURN DISTINCT 
-                u.objectid as sid,
-                u.name as name,
-                u.samaccountname as samaccountname,
-                u.domain as domain,
-                u.admincount as admincount,
-                u.pwdlastset as pwdlastset,
-                u.lastlogon as lastlogon,
-                coalesce(u.system_tags, "") as system_tags,
-                u.highvalue as highvalue
-            UNION
-            MATCH (u:User)-[:MemberOf*1..]->(g:Group)
-            WHERE g.objectid =~ 'S-1-5-32-544.*'
-               OR g.objectid =~ '.*-512$'
-               OR g.objectid =~ '.*-519$'
-               OR g.objectid =~ '.*-518$'
-               OR g.objectid =~ '.*-516$'
-               OR g.objectid =~ '.*-526$'
-               OR g.objectid =~ '.*-527$'
-               OR g.objectid =~ '.*-500$'
-            RETURN DISTINCT 
-                u.objectid as sid,
-                u.name as name,
-                u.samaccountname as samaccountname,
-                u.domain as domain,
-                u.admincount as admincount,
-                u.pwdlastset as pwdlastset,
-                u.lastlogon as lastlogon,
-                coalesce(u.system_tags, "") as system_tags,
-                u.highvalue as highvalue
-            ORDER BY name
-            """
+        # Comprehensive query for BHCE - includes high-value, admincount, and Tier 0 group members
+        comprehensive_query = """
+        MATCH (u:User)
+        WHERE coalesce(u.system_tags, "") CONTAINS "admin_tier_0"
+           OR u.highvalue = true
+           OR u.admincount = true
+        RETURN DISTINCT 
+            u.objectid as sid,
+            u.name as name,
+            u.samaccountname as samaccountname,
+            u.domain as domain,
+            u.admincount as admincount,
+            u.pwdlastset as pwdlastset,
+            u.lastlogon as lastlogon,
+            coalesce(u.system_tags, "") as system_tags,
+            u.highvalue as highvalue
+        UNION
+        MATCH (u:User)-[:MemberOf*1..]->(g:Group)
+        WHERE g.objectid =~ 'S-1-5-32-544.*'
+           OR g.objectid =~ '.*-512$'
+           OR g.objectid =~ '.*-519$'
+           OR g.objectid =~ '.*-518$'
+           OR g.objectid =~ '.*-516$'
+           OR g.objectid =~ '.*-526$'
+           OR g.objectid =~ '.*-527$'
+           OR g.objectid =~ '.*-500$'
+        RETURN DISTINCT 
+            u.objectid as sid,
+            u.name as name,
+            u.samaccountname as samaccountname,
+            u.domain as domain,
+            u.admincount as admincount,
+            u.pwdlastset as pwdlastset,
+            u.lastlogon as lastlogon,
+            coalesce(u.system_tags, "") as system_tags,
+            u.highvalue as highvalue
+        ORDER BY name
+        """
+        
+        # Single comprehensive query for all users
+        query_data = {
+            "query": comprehensive_query,
+            "include_properties": True
+        }
+        
+        try:
+            response = requests.post(
+                f"{base_url}/api/v2/graphs/cypher",
+                headers=headers,
+                json=query_data,
+                timeout=30
+            )
             
-            # Single comprehensive query for all high-value and Tier 0 users
-            query_data = {
-                "query": comprehensive_query,
-                "include_properties": True
-            }
-            
-            try:
-                response = requests.post(
-                    f"{base_url}/api/v2/graphs/cypher",
-                    headers=headers,
-                    json=query_data,
-                    timeout=30
-                )
-                
-                if response.status_code != 200:
-                    warn(f"BloodHound BHCE query failed - HTTP {response.status_code}")
-                    if response.status_code == 400:
-                        warn("Query format error - check Cypher syntax")
-                    return False
-                
-                # Parse response with JSON sanitization
-                sanitized_response = _sanitize_json_response(response.text)
-                result = json.loads(sanitized_response)
-                
-                # Parse BHCE results - handle the actual BHCE response format
-                if 'data' in result:
-                    response_data = result['data']
-                    users_found = set()  # Track unique users
-                    
-                    # BHCE returns nodes in a different format than expected
-                    if 'nodes' in response_data:
-                        # Handle direct node results (from simple user queries)
-                        nodes = response_data['nodes']
-                        for node_id, node_data in nodes.items():
-                            if node_data.get('kind') == 'User':
-                                properties = node_data.get('properties', {})
-                                # Get group memberships for this user
-                                username = properties.get('samaccountname', '')
-                                group_sids, group_names = self._get_user_groups_bhce(
-                                    username, headers, base_url
-                                )
-                                properties['group_sids'] = group_sids
-                                properties['group_names'] = group_names
-                                self._process_bhce_user(properties, users_found)
-                    
-                    elif isinstance(response_data, list):
-                        # Handle list format (from path queries)
-                        for item in response_data:
-                            if isinstance(item, dict) and 'segments' in item:
-                                # Extract users from path segments
-                                for segment in item.get('segments', []):
-                                    start_node = segment.get('start', {})
-                                    if start_node.get('labels') and 'User' in start_node['labels']:
-                                        self._process_bhce_user(start_node.get('properties', {}), users_found)
-                            
-                            # Handle direct user results (from fallback query)
-                            elif isinstance(item, dict):
-                                sam = _safe_get_sam(item, 'samaccountname')
-                                if sam and sam not in users_found:
-                                    self._process_bhce_user(item, users_found)
-                    
-                    good(f"Retrieved {len(self.users_data)} high-value users from BHCE")
-                    return True
-                else:
-                    warn("No data found in BHCE response")
-                    return True
-                    
-            except requests.exceptions.Timeout:
-                warn("BloodHound BHCE query timed out")
+            if response.status_code != 200:
+                warn(f"BloodHound BHCE query failed - HTTP {response.status_code}")
+                if response.status_code == 400:
+                    warn("Query format error - check Cypher syntax")
                 return False
+            
+            # Parse response with JSON sanitization
+            sanitized_response = _sanitize_json_response(response.text)
+            result = json.loads(sanitized_response)
+            
+            # Parse BHCE results - handle the actual BHCE response format
+            if 'data' in result:
+                response_data = result['data']
+                users_found = set()  # Track unique users
+                
+                # BHCE returns nodes in a different format than expected
+                if 'nodes' in response_data:
+                    # Handle direct node results (from simple user queries)
+                    nodes = response_data['nodes']
+                    for node_id, node_data in nodes.items():
+                        if node_data.get('kind') == 'User':
+                            properties = node_data.get('properties', {})
+                            # Get group memberships for this user
+                            username = properties.get('samaccountname', '')
+                            group_sids, group_names = self._get_user_groups_bhce(
+                                username, headers, base_url
+                            )
+                            properties['group_sids'] = group_sids
+                            properties['group_names'] = group_names
+                            self._process_bhce_user(properties, users_found)
+                
+                elif isinstance(response_data, list):
+                    # Handle list format (from path queries)
+                    for item in response_data:
+                        if isinstance(item, dict) and 'segments' in item:
+                            # Extract users from path segments
+                            for segment in item.get('segments', []):
+                                start_node = segment.get('start', {})
+                                if start_node.get('labels') and 'User' in start_node['labels']:
+                                    self._process_bhce_user(start_node.get('properties', {}), users_found)
+                        
+                        # Handle direct user results (from fallback query)
+                        elif isinstance(item, dict):
+                            sam = _safe_get_sam(item, 'samaccountname')
+                            if sam and sam not in users_found:
+                                self._process_bhce_user(item, users_found)
+                
+                good(f"Retrieved {len(self.users_data)} high-value users from BHCE")
+                return True
+            else:
+                warn("No data found in BHCE response")
+                return True
+                
+        except requests.exceptions.Timeout:
+            warn("BloodHound BHCE query timed out")
+            return False
     
     def _query_legacy(self) -> bool:
         """Query Legacy BloodHound via Neo4j Bolt"""
@@ -312,6 +313,7 @@ class BloodHoundConnector:
                 result.single()[0]  # This will raise an exception if connection fails
             
             good(f"Connected to Legacy BloodHound at {self.ip}:7687")
+            info("Collecting high-value user data - this may take a moment depending on database size and connection speed...")
             
         except Exception as e:
             if "authentication" in str(e).lower() or "credentials" in str(e).lower():
@@ -321,61 +323,61 @@ class BloodHoundConnector:
                 warn("Check if Neo4j is running and accessible")
             return False
             
-            # Comprehensive query for both high-value and Tier 0 users
-            # This combines high-value detection with Tier 0 group membership
-            comprehensive_query = """
-            MATCH (u:User)
-            WHERE u.highvalue = true
-               OR u.admincount = true
-            OPTIONAL MATCH (u)-[:MemberOf*1..]->(g:Group)
-            WITH u, properties(u) as all_props, collect(g.name) as groups, collect(g.objectid) as group_sids
-            RETURN u.samaccountname AS SamAccountName, all_props, groups, group_sids
-            ORDER BY SamAccountName
-            UNION
-            MATCH (u:User)-[:MemberOf*1..]->(g:Group)
-            WHERE g.objectid =~ 'S-1-5-32-544.*'
-               OR g.objectid =~ '.*-512$'
-               OR g.objectid =~ '.*-519$'
-               OR g.objectid =~ '.*-518$'
-               OR g.objectid =~ '.*-516$'
-               OR g.objectid =~ '.*-526$'
-               OR g.objectid =~ '.*-527$'
-               OR g.objectid =~ '.*-500$'
-            OPTIONAL MATCH (u)-[:MemberOf*1..]->(all_g:Group)
-            WITH u, properties(u) as all_props, collect(all_g.name) as groups, collect(all_g.objectid) as group_sids
-            RETURN u.samaccountname AS SamAccountName, all_props, groups, group_sids
-            ORDER BY SamAccountName
-            """
-            
-            try:
-                with driver.session() as session:
-                    users_found = set()
-                    
-                    # Single comprehensive query instead of multiple queries
-                    try:
-                        result = session.run(comprehensive_query)
-                        for record in result:
-                            self._process_legacy_user(record, users_found)
-                        
-                        if len(users_found) == 0:
-                            warn("No high-value or Tier 0 users found in Legacy BloodHound")
-                        else:
-                            good(f"Retrieved {len(users_found)} high-value users from Legacy BloodHound")
-                            
-                    except Exception as e:
-                        warn(f"Legacy BloodHound query failed: {e}")
-                        return False
+        # Comprehensive query for both high-value and Tier 0 users
+        # This combines high-value detection with Tier 0 group membership
+        comprehensive_query = """
+        MATCH (u:User)
+        WHERE u.highvalue = true
+           OR u.admincount = true
+        OPTIONAL MATCH (u)-[:MemberOf*1..]->(g:Group)
+        WITH u, properties(u) as all_props, collect(g.name) as groups, collect(g.objectid) as group_sids
+        RETURN u.samaccountname AS SamAccountName, all_props, groups, group_sids
+        ORDER BY SamAccountName
+        UNION
+        MATCH (u:User)-[:MemberOf*1..]->(g:Group)
+        WHERE g.objectid =~ 'S-1-5-32-544.*'
+           OR g.objectid =~ '.*-512$'
+           OR g.objectid =~ '.*-519$'
+           OR g.objectid =~ '.*-518$'
+           OR g.objectid =~ '.*-516$'
+           OR g.objectid =~ '.*-526$'
+           OR g.objectid =~ '.*-527$'
+           OR g.objectid =~ '.*-500$'
+        OPTIONAL MATCH (u)-[:MemberOf*1..]->(all_g:Group)
+        WITH u, properties(u) as all_props, collect(all_g.name) as groups, collect(all_g.objectid) as group_sids
+        RETURN u.samaccountname AS SamAccountName, all_props, groups, group_sids
+        ORDER BY SamAccountName
+        """
+        
+        try:
+            with driver.session() as session:
+                users_found = set()
                 
-                driver.close()
-                return True
-                
-            except Exception as e:
+                # Single comprehensive query instead of multiple queries
                 try:
-                    driver.close()
-                except:
-                    pass
-                warn(f"BloodHound query execution failed: {e}")
-                return False
+                    result = session.run(comprehensive_query)
+                    for record in result:
+                        self._process_legacy_user(record, users_found)
+                    
+                    if len(users_found) == 0:
+                        warn("No high-value or Tier 0 users found in Legacy BloodHound")
+                    else:
+                        good(f"Retrieved {len(users_found)} high-value users from Legacy BloodHound")
+                        
+                except Exception as e:
+                    warn(f"Legacy BloodHound query failed: {e}")
+                    return False
+            
+            driver.close()
+            return True
+            
+        except Exception as e:
+            try:
+                driver.close()
+            except:
+                pass
+            warn(f"BloodHound query execution failed: {e}")
+            return False
     
     def _get_user_groups_bhce(self, username: str, headers: dict, base_url: str) -> tuple:
         """Get group memberships for a user in BHCE"""

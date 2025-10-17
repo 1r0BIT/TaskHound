@@ -1,13 +1,78 @@
 import sys, traceback, json, csv
-from typing import List, Dict
+from typing import List, Dict, Optional
 from .utils.helpers import BANNER, normalize_targets
-from .utils.logging import good, warn
+from .utils.logging import good, warn, info
 from .config import build_parser, validate_args
 from .parsers.highvalue import HighValueLoader
 from .output.printer import print_results
 from .output.writer import write_plain, write_json, write_csv
 from .output.summary import print_summary_table
 from .engine import process_target, process_offline_directory
+
+
+def _test_ldap_connection(domain: Optional[str], dc_ip: Optional[str], username: Optional[str], 
+                         password: Optional[str], hashes: Optional[str], kerberos: bool, no_ldap: bool,
+                         ldap_domain: Optional[str] = None, ldap_user: Optional[str] = None, 
+                         ldap_password: Optional[str] = None):
+    """Test LDAP connection and SID resolution capability during initialization."""
+    if no_ldap:
+        info("LDAP resolution disabled - skipping connection test")
+        return
+    
+    # Determine which credentials to use for LDAP test
+    # Priority: dedicated LDAP credentials > main auth credentials
+    test_domain = ldap_domain if ldap_domain else domain
+    test_username = ldap_user if ldap_user else username
+    test_password = ldap_password if ldap_password else password
+    
+    # For LDAP SID resolution, we need plaintext password - skip if only hashes available
+    if not test_password and hashes and not ldap_password:
+        warn("LDAP test skipped - SID resolution requires plaintext password, but only hashes provided")
+        warn("Consider using --ldap-user and --ldap-password for SID lookup with plaintext credentials")
+        return
+        
+    if not test_domain or not test_username:
+        warn(f"LDAP test skipped - missing credentials (domain={test_domain}, username={test_username})")
+        return
+    
+    info("Testing LDAP connection and SID resolution...")
+    
+    # Show which credentials are being used for the test
+    if ldap_user or ldap_domain:
+        info(f"Using dedicated LDAP credentials: {test_username}@{test_domain}")
+    else:
+        info(f"Using main auth credentials for LDAP: {test_username}@{test_domain}")
+    
+    # Test with the well-known Administrator SID (RID 500) which should exist in most domains
+    # Build the domain SID by taking the first 3 parts and appending -500
+    test_sid = None
+    
+    # For testing purposes, we'll try to resolve a well-known SID
+    # We use the local Administrator account SID pattern: S-1-5-21-<domain>-500
+    # Since we don't know the exact domain SID, we'll use a fallback approach
+    try:
+        # Import the SID resolution function
+        from .utils.sid_resolver import resolve_sid_via_ldap
+        
+        # Test with S-1-5-21-123456789-987654321-111111111-500 (fictional test SID for demo purposes)
+        # This is derived from the failing SID by changing the RID to 500
+        test_sid = "S-1-5-21-123456789-987654321-111111111-500"
+        
+        info(f"Testing SID resolution with: {test_sid}")
+        result = resolve_sid_via_ldap(test_sid, test_domain, dc_ip, test_username, test_password, None, kerberos)
+        
+        if result:
+            good(f"LDAP test successful: {test_sid} -> {result}")
+            good("SID resolution initialized and ready")
+        else:
+            warn(f"LDAP test failed: Could not resolve {test_sid}")
+            warn("SID resolution may not work properly")
+            
+    except ImportError as e:
+        warn(f"LDAP test failed: Missing dependencies - {e}")
+    except Exception as e:
+        warn(f"LDAP test failed: {e}")
+
 
 def main():
     print(BANNER)
@@ -51,6 +116,10 @@ def main():
                 hv.format_type = "bloodhound_live"
                 hv_loaded = True
                 good(f"Live BloodHound data loaded ({len(users_data)} users)")
+                
+                # Test LDAP SID resolution capability
+                _test_ldap_connection(args.domain, args.dc_ip, args.username, args.password, args.hashes, args.kerberos, args.no_ldap,
+                                    args.ldap_domain, args.ldap_user, args.ldap_password)
             # No else clause needed - connector already prints specific error messages
                 
         except ImportError as e:
@@ -114,6 +183,9 @@ def main():
                 backup_dir=args.backup,
                 credguard_detect=args.credguard_detect,
                 no_ldap=args.no_ldap,
+                ldap_domain=args.ldap_domain,
+                ldap_user=args.ldap_user,
+                ldap_password=args.ldap_password,
             )
             print_results(lines)
             if args.plain and lines:

@@ -1,5 +1,9 @@
 # TaskHound
 
+<div align="center">
+  <img width="1024" height="1024" alt="TaskHound Logo" src="https://github.com/user-attachments/assets/325b57e9-b96a-4de7-9974-736fd58fa70c" />
+</div>
+
 **Windows Privileged Scheduled Task Discovery Tool** for fun and profit.
 
 TaskHound hunts for Windows scheduled tasks that run with privileged accounts and stored credentials. It enumerates tasks over SMB, parses XMLs, and identifies high-value attack opportunities through BloodHound support.
@@ -8,6 +12,7 @@ TaskHound hunts for Windows scheduled tasks that run with privileged accounts an
 
 - **Tier 0 & High Value Detection**: Automatically identifies tasks running as classic Tier 0 and High Value users
 - **BloodHound Integration**: Connect to your live BloodHound Instance or ingest exports
+- **SID Resolution**: Supports LDAP for SID lookups when encountered in tasks
 - **Password Analysis**: Analyzes password age relative to task creation date
 - **Offline Analysis**: Process previously collected XML files
 - **BOF**: BOF implementation for AdaptixC2 (see [BOF/README.md](BOF/README.md))
@@ -23,15 +28,6 @@ pip install .
 
 # Basic usage
 taskhound -u 'homer.simpson' -p 'P@ssw0rd' -d 'thesimpsons.local' -t 'TARGET_HOST'
-
-# With BloodHound data support
-taskhound -u 'homer.simpson' -p 'P@ssw0rd' -d 'thesimpsons.local' -t 'TARGET_HOST' --bh-data bloodhound_export.json
-
-# With live BloodHound connection (BHCE)
-taskhound -u 'homer.simpson' -p 'P@ssw0rd' -d 'thesimpsons.local' -t 'TARGET_HOST' --bh-live --bhce --bh-ip 127.0.0.1 --bh-user admin --bh-password 'password'
-
-# With live BloodHound connection (Legacy)
-taskhound -u 'homer.simpson' -p 'P@ssw0rd' -d 'thesimpsons.local' -t 'TARGET_HOST' --bh-live --legacy --bh-ip 127.0.0.1 --bh-user neo4j --bh-password 'password'
 ```
 
 ## Demo Output
@@ -58,6 +54,7 @@ TTTTT  AAA   SSS  K   K H   H  OOO  U   U N   N DDDD
         What    : C:\Scripts\backup.exe --daily
         Author  : THESIMPSONS\Administrator  
         Date    : 2025-09-18T23:04:37.3089851
+        Trigger : Calendar (starts 2025-09-18 23:00, every 1 day, daily)
         Reason  : AdminSDHolder; TIER0 Group Membership
         Password Analysis : Password changed BEFORE task creation, password is valid!
         Next Step: Try DPAPI Dump / Task Manipulation
@@ -68,6 +65,7 @@ TTTTT  AAA   SSS  K   K H   H  OOO  U   U N   N DDDD
         What    : C:\Tools\cleanup.exe
         Author  : THESIMPSONS\Administrator
         Date    : 2025-09-18T23:05:43.0854575
+        Trigger : Calendar (starts 2025-09-19 02:00, every 6 hours, daily)
         Reason  : High Value match found
         Password Analysis : Password changed AFTER task creation, Password could be stale
         Next Step: Try DPAPI Dump / Task Manipulation
@@ -78,6 +76,7 @@ TTTTT  AAA   SSS  K   K H   H  OOO  U   U N   N DDDD
         What    : C:\Windows\System32\cmd.exe /c backup
         Author  : SYSTEM
         Date    : 2025-09-15T08:15:22.1234567
+        Trigger : Time at 2025-09-16 03:00
 
 [TASK] Windows\System32\Tasks\UserTask
         Enabled : False
@@ -85,6 +84,7 @@ TTTTT  AAA   SSS  K   K H   H  OOO  U   U N   N DDDD
         What    : C:\Windows\System32\notepad.exe
         Author  : THESIMPSONS\bart.simpson
         Date    : 2025-09-18T12:30:15.1234567
+        Trigger : Logon
 
 ================================================================================
 SUMMARY
@@ -171,9 +171,26 @@ ORDER BY SamAccountName
 
 TaskHound tries to automatically resolve SIDs to samaccountnames for improved readability when encountered in a task.
 Before using any outbound connection, it will try to resolve them using the supplied BloodHound data.
-If there is no data found or wasn't supplied, taskhound will then try to look up the SID via LDAP unless supressed with `--no-ldap`
+If there is no data found or wasn't supplied, taskhound will then try to look up the SID via LDAP unless supressed with `--no-ldap`.
 
-> **NOTE**: To use this reliably with kerberos auth you need a working krb5.conf.  
+### Dedicated LDAP Credentials
+
+When using NTLM hashes for main authentication, you can provide separate credentials for LDAP SID resolution:
+
+```bash
+# Main auth with NTLM hash, separate LDAP credentials for SID resolution
+taskhound -u 'homer.simpson' --hashes ':5d41402abc4b2a76b9719d911017c592' -d 'thesimpsons.local' -t 'TARGET_HOST' --ldap-user 'marge.simpson' --ldap-password 'M@rg3P@ss' --ldap-domain 'thesimpsons.local'
+
+# Or when you only have local admin access via LAPS Password or SAMDumps (domain='.')
+taskhound -u 'Administrator' -p 'L0c@lAdm1n!' -d '.' -t 'TARGET_HOST' --ldap-user 'bart.simpson' --ldap-password 'B@rtP@ss' --ldap-domain 'thesimpsons.local'
+```
+
+**Why separate LDAP credentials?**
+- The ldap3 library doesn't support NTLM hash authentication in current versions
+- You might only have local admin access but need domain LDAP for SID resolution
+- Allows using lower-privilege accounts specifically for SID lookups
+
+> **NOTE**: To use this reliably with kerberos auth you need a working krb5.conf.
 
 ## EXPERIMENTAL Features
 
@@ -195,8 +212,10 @@ Usage: taskhound [-h] [-u USERNAME] [-p PASSWORD] [-d DOMAIN] [--hashes HASHES]
                  [--offline OFFLINE] [--bh-data BH_DATA] [--bh-live] [--bh-ip BH_IP]
                  [--bh-user BH_USER] [--bh-password BH_PASSWORD] [--bhce] [--legacy]
                  [--bh-save BH_SAVE] [--include-ms] [--include-local] [--include-all] 
-                 [--unsaved-creds] [--no-ldap] [--credguard-detect] [--plain PLAIN] 
-                 [--json JSON] [--csv CSV] [--backup BACKUP] [--no-summary] [--debug]
+                 [--unsaved-creds] [--no-ldap] [--ldap-user LDAP_USER] 
+                 [--ldap-password LDAP_PASSWORD] [--ldap-domain LDAP_DOMAIN]
+                 [--credguard-detect] [--plain PLAIN] [--json JSON] [--csv CSV] 
+                 [--backup BACKUP] [--no-summary] [--debug]
 
 Authentication:
   -u, --username        Username (required for online mode)
@@ -223,13 +242,18 @@ BloodHound Live Connection:
   --legacy              Use Legacy BloodHound (Neo4j) connection
   --bh-save BH_SAVE     Save retrieved BloodHound data to file
 
+LDAP/SID Resolution:
+  --ldap-user LDAP_USER     Separate username for LDAP SID resolution
+  --ldap-password LDAP_PASSWORD  Separate password for LDAP SID resolution  
+  --ldap-domain LDAP_DOMAIN     Separate domain for LDAP SID resolution
+  --no-ldap             Disable LDAP queries for SID resolution
+
 Task Filtering:
   --include-ms          Include \Microsoft tasks (WARNING: very slow)
   --include-local       Include local system accounts (NT AUTHORITY\SYSTEM, etc.)
   --include-all         Include ALL tasks (combines --include-ms, --include-local, 
                         --unsaved-creds - WARNING: very slow and noisy)
   --unsaved-creds       Show tasks without stored credentials
-  --no-ldap             Disable LDAP queries for SID resolution
   --credguard-detect    EXPERIMENTAL: Detect Credential Guard via remote registry
 
 Output:
