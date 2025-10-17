@@ -11,6 +11,11 @@ Author: 0xr0BIT
 import json
 import sys
 from typing import Dict, List, Optional, Any
+import requests
+try:
+    from neo4j import GraphDatabase
+except ImportError:
+    GraphDatabase = None
 from ..utils.logging import good, warn, info
 
 
@@ -127,59 +132,56 @@ class BloodHoundConnector:
     
     def _query_bhce(self) -> bool:
         """Query BHCE via API"""
+        # BHCE typically runs on port 8080
+        base_url = f"http://{self.ip}:8080"
+        
+        # BHCE uses token-based authentication
+        login_data = {
+            "login_method": "secret",
+            "username": self.username,
+            "secret": self.password
+        }
+        
+        # Get authentication token
         try:
-            import requests
+            login_response = requests.post(f"{base_url}/api/v2/login", json=login_data, timeout=10)
+            if login_response.status_code == 401:
+                warn("BloodHound login failed - invalid credentials")
+                return False
+            elif login_response.status_code != 200:
+                warn(f"BloodHound login failed - HTTP {login_response.status_code}")
+                return False
             
-            # BHCE typically runs on port 8080
-            base_url = f"http://{self.ip}:8080"
+            # Extract token from response (with JSON sanitization)
+            sanitized_response = _sanitize_json_response(login_response.text)
+            token_data = json.loads(sanitized_response)
+            if 'data' not in token_data or 'session_token' not in token_data['data']:
+                warn("BloodHound login failed - no token in response")
+                return False
             
-            # BHCE uses token-based authentication
-            login_data = {
-                "login_method": "secret",
-                "username": self.username,
-                "secret": self.password
+            token = token_data['data']['session_token']
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json',
+                'accept': 'application/json',
+                'Prefer': '0'
             }
             
-            # Get authentication token
-            try:
-                login_response = requests.post(f"{base_url}/api/v2/login", json=login_data, timeout=10)
-                if login_response.status_code == 401:
-                    warn("BloodHound login failed - invalid credentials")
-                    return False
-                elif login_response.status_code != 200:
-                    warn(f"BloodHound login failed - HTTP {login_response.status_code}")
-                    return False
-                
-                # Extract token from response (with JSON sanitization)
-                sanitized_response = _sanitize_json_response(login_response.text)
-                token_data = json.loads(sanitized_response)
-                if 'data' not in token_data or 'session_token' not in token_data['data']:
-                    warn("BloodHound login failed - no token in response")
-                    return False
-                
-                token = token_data['data']['session_token']
-                headers = {
-                    'Authorization': f'Bearer {token}',
-                    'Content-Type': 'application/json',
-                    'accept': 'application/json',
-                    'Prefer': '0'
-                }
-                
-                # Test connection with token
-                response = requests.get(f"{base_url}/api/version", headers=headers, timeout=10)
-                if response.status_code != 200:
-                    warn(f"BloodHound connection failed - HTTP {response.status_code}")
-                    return False
-                    
-                good(f"Connected to BHCE at {self.ip}:8080")
-                
-            except requests.exceptions.ConnectionError:
-                warn(f"Connection to BloodHound BHCE at {self.ip}:8080 failed")
-                warn("Check if BHCE is running and accessible")
+            # Test connection with token
+            response = requests.get(f"{base_url}/api/version", headers=headers, timeout=10)
+            if response.status_code != 200:
+                warn(f"BloodHound connection failed - HTTP {response.status_code}")
                 return False
-            except requests.exceptions.Timeout:
-                warn(f"Connection to BloodHound BHCE at {self.ip}:8080 timed out")
-                return False
+                
+            good(f"Connected to BHCE at {self.ip}:8080")
+            
+        except requests.exceptions.ConnectionError:
+            warn(f"BloodHound BHCE connection failed at {self.ip}:8080")
+            warn("Check if BHCE is running and accessible")
+            return False
+        except requests.exceptions.Timeout:
+            warn(f"BloodHound BHCE connection timed out at {self.ip}:8080")
+            return False
             
             # Comprehensive query for BHCE - includes high-value, admincount, and Tier 0 group members
             comprehensive_query = """
@@ -290,36 +292,34 @@ class BloodHoundConnector:
             except requests.exceptions.Timeout:
                 warn("BloodHound BHCE query timed out")
                 return False
-        except ImportError:
-            warn("requests library not installed - required for BHCE API connection")
-            warn("Install with: pip install requests")
-            return False
     
     def _query_legacy(self) -> bool:
         """Query Legacy BloodHound via Neo4j Bolt"""
+        if GraphDatabase is None:
+            warn("neo4j library not installed - required for Legacy BloodHound connection")
+            warn("Install with: pip install neo4j")
+            return False
+            
+        # Legacy BloodHound typically uses port 7687
+        uri = f"bolt://{self.ip}:7687"
+        
         try:
-            from neo4j import GraphDatabase
+            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))
             
-            # Legacy BloodHound typically uses port 7687
-            uri = f"bolt://{self.ip}:7687"
+            # Test connection
+            with driver.session() as session:
+                result = session.run("MATCH (n) RETURN count(n) LIMIT 1")
+                result.single()[0]  # This will raise an exception if connection fails
             
-            try:
-                driver = GraphDatabase.driver(uri, auth=(self.username, self.password))
-                
-                # Test connection
-                with driver.session() as session:
-                    result = session.run("MATCH (n) RETURN count(n) LIMIT 1")
-                    result.single()[0]  # This will raise an exception if connection fails
-                
-                good(f"Connected to Legacy BloodHound at {self.ip}:7687")
-                
-            except Exception as e:
-                if "authentication" in str(e).lower() or "credentials" in str(e).lower():
-                    warn("BloodHound login failed - invalid credentials")
-                else:
-                    warn(f"Connection to Legacy BloodHound at {self.ip}:7687 failed")
-                    warn("Check if Neo4j is running and accessible")
-                return False
+            good(f"Connected to Legacy BloodHound at {self.ip}:7687")
+            
+        except Exception as e:
+            if "authentication" in str(e).lower() or "credentials" in str(e).lower():
+                warn("BloodHound login failed - invalid credentials")
+            else:
+                warn(f"BloodHound Legacy connection failed at {self.ip}:7687")
+                warn("Check if Neo4j is running and accessible")
+            return False
             
             # Comprehensive query for both high-value and Tier 0 users
             # This combines high-value detection with Tier 0 group membership
@@ -376,11 +376,6 @@ class BloodHoundConnector:
                     pass
                 warn(f"BloodHound query execution failed: {e}")
                 return False
-                
-        except ImportError:
-            warn("neo4j library not installed - required for Legacy BloodHound connection")
-            warn("Install with: pip install neo4j")
-            return False
     
     def _get_user_groups_bhce(self, username: str, headers: dict, base_url: str) -> tuple:
         """Get group memberships for a user in BHCE"""
@@ -388,8 +383,6 @@ class BloodHoundConnector:
             return [], []
         
         try:
-            import requests
-            
             # Query for this user's group memberships using samaccountname
             group_query = f"""
             MATCH (u:User {{samaccountname: "{username}"}})-[:MemberOf*1..]->(g:Group)
