@@ -14,6 +14,93 @@ from typing import Dict, List, Optional, Any
 from ..utils.logging import good, warn, info
 
 
+def _safe_get_sam(data: dict, key: str) -> str:
+    """
+    Safely extract SAM account name from data, handling None values.
+    
+    Args:
+        data: Dictionary containing user data
+        key: Key to look up ('SamAccountName', 'samaccountname', etc.)
+        
+    Returns:
+        Lowercase SAM account name as string, empty string if None/missing
+    """
+    value = data.get(key, '')
+    if value is None:
+        return ''
+    return str(value).lower()
+
+
+def _sanitize_string_value(value: str) -> str:
+    """
+    Sanitize individual string values that might contain problematic backslashes.
+    This is for processing individual field values from databases/APIs.
+    """
+    if not isinstance(value, str):
+        return value
+    
+    # For individual string values, we just need to ensure they're properly handled
+    # when converting to JSON later. The main issue is with JSON parsing, not storage.
+    return value
+
+
+def _sanitize_json_response(response_text: str) -> str:
+    """
+    Sanitize JSON response text to handle unescaped backslashes that break JSON parsing.
+    
+    This commonly occurs in Active Directory Distinguished Names like:
+    "CN=LASTNAME\\, FIRSTNAME,OU=..."
+    
+    Args:
+        response_text: Raw JSON response text that may contain unescaped backslashes
+        
+    Returns:
+        Sanitized JSON string with properly escaped backslashes
+    """
+    # Replace single backslashes with double backslashes, but be careful not to 
+    # double-escape already escaped sequences
+    
+    # First, temporarily replace already properly escaped sequences
+    import uuid
+    placeholder = str(uuid.uuid4())
+    
+    # Protect already escaped sequences (\\, \", \n, \r, \t, \/, \b, \f, \u)
+    protected = response_text.replace('\\\\', placeholder + 'BACKSLASH')
+    protected = protected.replace('\\"', placeholder + 'QUOTE')
+    protected = protected.replace('\\n', placeholder + 'NEWLINE')
+    protected = protected.replace('\\r', placeholder + 'RETURN')
+    protected = protected.replace('\\t', placeholder + 'TAB')
+    protected = protected.replace('\\/', placeholder + 'SLASH')
+    protected = protected.replace('\\b', placeholder + 'BACKSPACE')
+    protected = protected.replace('\\f', placeholder + 'FORMFEED')
+    
+    # Protect unicode escapes (\uXXXX)
+    import re
+    unicode_pattern = r'\\u[0-9a-fA-F]{4}'
+    unicode_matches = re.findall(unicode_pattern, protected)
+    for i, match in enumerate(unicode_matches):
+        protected = protected.replace(match, f'{placeholder}UNICODE{i}')
+    
+    # Now escape any remaining single backslashes
+    protected = protected.replace('\\', '\\\\')
+    
+    # Restore the protected sequences
+    protected = protected.replace(placeholder + 'BACKSLASH', '\\\\')
+    protected = protected.replace(placeholder + 'QUOTE', '\\"')
+    protected = protected.replace(placeholder + 'NEWLINE', '\\n')
+    protected = protected.replace(placeholder + 'RETURN', '\\r')
+    protected = protected.replace(placeholder + 'TAB', '\\t')
+    protected = protected.replace(placeholder + 'SLASH', '\\/')
+    protected = protected.replace(placeholder + 'BACKSPACE', '\\b')
+    protected = protected.replace(placeholder + 'FORMFEED', '\\f')
+    
+    # Restore unicode escapes
+    for i, match in enumerate(unicode_matches):
+        protected = protected.replace(f'{placeholder}UNICODE{i}', match)
+    
+    return protected
+
+
 class BloodHoundConnector:
     """Simple BloodHound connector for both BHCE and Legacy"""
     
@@ -63,8 +150,9 @@ class BloodHoundConnector:
                     warn(f"BloodHound login failed - HTTP {login_response.status_code}")
                     return False
                 
-                # Extract token from response
-                token_data = login_response.json()
+                # Extract token from response (with JSON sanitization)
+                sanitized_response = _sanitize_json_response(login_response.text)
+                token_data = json.loads(sanitized_response)
                 if 'data' not in token_data or 'session_token' not in token_data['data']:
                     warn("BloodHound login failed - no token in response")
                     return False
@@ -184,7 +272,9 @@ class BloodHoundConnector:
                         warn("Query format error - check Cypher syntax")
                     return False
                 
-                result = response.json()
+                # Parse response with JSON sanitization
+                sanitized_response = _sanitize_json_response(response.text)
+                result = json.loads(sanitized_response)
                 
                 # Parse BHCE results - handle the actual BHCE response format
                 if 'data' in result:
@@ -219,7 +309,7 @@ class BloodHoundConnector:
                             
                             # Handle direct user results (from fallback query)
                             elif isinstance(item, dict):
-                                sam = item.get('samaccountname', '').lower()
+                                sam = _safe_get_sam(item, 'samaccountname')
                                 if sam and sam not in users_found:
                                     self._process_bhce_user(item, users_found)
                     
@@ -244,7 +334,9 @@ class BloodHoundConnector:
                     warn("Query format error - check Cypher syntax")
                 return False
             
-            result = response.json()
+            # Parse response with JSON sanitization
+            sanitized_response = _sanitize_json_response(response.text)
+            result = json.loads(sanitized_response)
             
             # Parse results - handle both path results and direct user results
             if 'data' in result:
@@ -262,7 +354,7 @@ class BloodHoundConnector:
                     
                     # Handle direct user results (from tier0 query)
                     elif isinstance(item, dict):
-                        sam = item.get('samaccountname', '').lower()
+                        sam = _safe_get_sam(item, 'samaccountname')
                         if sam and sam not in users_found:
                             self._process_bhce_user(item, users_found)
                 
@@ -401,7 +493,9 @@ class BloodHoundConnector:
             )
             
             if response.status_code == 200:
-                result = response.json()
+                # Parse response with JSON sanitization
+                sanitized_response = _sanitize_json_response(response.text)
+                result = json.loads(sanitized_response)
                 group_sids = []
                 group_names = []
                 
@@ -410,9 +504,9 @@ class BloodHoundConnector:
                     nodes = result['data']['nodes']
                     for node_id, node_data in nodes.items():
                         if node_data.get('kind') == 'Group':
-                            properties = node_data.get('properties', {})
-                            objectid = properties.get('objectid', '')
-                            name = properties.get('name', '')
+                            properties = node_data.get('properties', {}) or {}
+                            objectid = properties.get('objectid', '') or ''
+                            name = properties.get('name', '') or ''
                             
                             if objectid:
                                 group_sids.append(objectid)
@@ -427,44 +521,48 @@ class BloodHoundConnector:
 
     def _process_bhce_user(self, user_data: dict, users_found: set):
         """Process a user from BHCE format and add to users_data"""
-        sam = user_data.get('samaccountname', '').lower()
+        sam = _safe_get_sam(user_data, 'samaccountname')
         if not sam or sam in users_found:
             return
             
         users_found.add(sam)
         self.users_data[sam] = {
-            'sid': user_data.get('objectid', user_data.get('sid', '')),
+            'sid': user_data.get('objectid', user_data.get('sid', '')) or '',
             'samaccountname': sam,
-            'domain': user_data.get('domain', ''),
+            'domain': user_data.get('domain', '') or '',
             'admincount': user_data.get('admincount', False),
             'pwdlastset': user_data.get('pwdlastset'),
             'lastlogon': user_data.get('lastlogon'),
-            'system_tags': user_data.get('system_tags', ''),
+            'system_tags': user_data.get('system_tags', '') or '',
             'highvalue': user_data.get('highvalue', False),
-            'groups': user_data.get('group_sids', []),  # Actual group SIDs
-            'group_names': user_data.get('group_names', [])
+            'groups': user_data.get('group_sids', []) or [],  # Actual group SIDs
+            'group_names': user_data.get('group_names', []) or []
         }
     
     def _process_legacy_user(self, record, users_found: set):
         """Process a user from Legacy BloodHound format (matches README query)"""
-        sam = record.get('SamAccountName', '').lower()
+        sam = _safe_get_sam(record, 'SamAccountName')
         if not sam or sam in users_found:
             return
             
         users_found.add(sam)
-        all_props = record.get('all_props', {})
-        groups = record.get('groups', [])
-        group_sids = record.get('group_sids', [])
+        all_props = record.get('all_props', {}) or {}  # Ensure it's never None
+        groups = record.get('groups', []) or []        # Ensure it's never None
+        group_sids = record.get('group_sids', []) or []  # Ensure it's never None
+        
+        # Ensure all_props is a dictionary
+        if not isinstance(all_props, dict):
+            all_props = {}
         
         self.users_data[sam] = {
             'SamAccountName': sam,
             'all_props': all_props,
             'groups': group_sids,  # SIDs for compatibility with existing code
             'group_names': groups,  # Display names
-            # Extract common fields from all_props for compatibility
-            'sid': all_props.get('objectid', ''),
+            # Extract common fields from all_props for compatibility (with None safety)
+            'sid': all_props.get('objectid', '') or '',
             'samaccountname': sam,
-            'domain': all_props.get('domain', ''),
+            'domain': all_props.get('domain', '') or '',
             'admincount': all_props.get('admincount', False),
             'pwdlastset': all_props.get('pwdlastset'),
             'lastlogon': all_props.get('lastlogon'),

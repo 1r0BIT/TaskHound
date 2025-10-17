@@ -16,6 +16,63 @@ from typing import Dict, Any, Iterable, Optional, Tuple, List
 from ..utils.logging import warn
 
 
+def _sanitize_json_string(json_str: str) -> str:
+    """
+    Sanitize JSON string to handle unescaped backslashes that break JSON parsing.
+    
+    This commonly occurs in Active Directory Distinguished Names like:
+    "CN=LASTNAME\\, FIRSTNAME,OU=..."
+    
+    Args:
+        json_str: Raw JSON string that may contain unescaped backslashes
+        
+    Returns:
+        Sanitized JSON string with properly escaped backslashes
+    """
+    # Replace single backslashes with double backslashes, but be careful not to 
+    # double-escape already escaped sequences
+    
+    # First, temporarily replace already properly escaped sequences
+    import uuid
+    placeholder = str(uuid.uuid4())
+    
+    # Protect already escaped sequences (\\, \", \n, \r, \t, \/, \b, \f, \u)
+    protected = json_str.replace('\\\\', placeholder + 'BACKSLASH')
+    protected = protected.replace('\\"', placeholder + 'QUOTE')
+    protected = protected.replace('\\n', placeholder + 'NEWLINE')
+    protected = protected.replace('\\r', placeholder + 'RETURN')
+    protected = protected.replace('\\t', placeholder + 'TAB')
+    protected = protected.replace('\\/', placeholder + 'SLASH')
+    protected = protected.replace('\\b', placeholder + 'BACKSPACE')
+    protected = protected.replace('\\f', placeholder + 'FORMFEED')
+    
+    # Protect unicode escapes (\uXXXX)
+    import re
+    unicode_pattern = r'\\u[0-9a-fA-F]{4}'
+    unicode_matches = re.findall(unicode_pattern, protected)
+    for i, match in enumerate(unicode_matches):
+        protected = protected.replace(match, f'{placeholder}UNICODE{i}')
+    
+    # Now escape any remaining single backslashes
+    protected = protected.replace('\\', '\\\\')
+    
+    # Restore the protected sequences
+    protected = protected.replace(placeholder + 'BACKSLASH', '\\\\')
+    protected = protected.replace(placeholder + 'QUOTE', '\\"')
+    protected = protected.replace(placeholder + 'NEWLINE', '\\n')
+    protected = protected.replace(placeholder + 'RETURN', '\\r')
+    protected = protected.replace(placeholder + 'TAB', '\\t')
+    protected = protected.replace(placeholder + 'SLASH', '\\/')
+    protected = protected.replace(placeholder + 'BACKSPACE', '\\b')
+    protected = protected.replace(placeholder + 'FORMFEED', '\\f')
+    
+    # Restore unicode escapes
+    for i, match in enumerate(unicode_matches):
+        protected = protected.replace(f'{placeholder}UNICODE{i}', match)
+    
+    return protected
+
+
 def _convert_timestamp(timestamp_value) -> Optional[datetime]:
     # Convert various timestamp formats to datetime.
     # Supports Windows FILETIME, Unix timestamps, and string representations.
@@ -369,7 +426,10 @@ class HighValueLoader:
 
     def _load_json(self) -> bool:
         with open(self.path, "r", encoding="utf-8-sig") as f:
-            data = json.load(f)
+            # Read raw content and sanitize backslashes before JSON parsing
+            raw_content = f.read()
+            sanitized_content = _sanitize_json_string(raw_content)
+            data = json.loads(sanitized_content)
         if not data:
             return False
         
@@ -432,7 +492,8 @@ class HighValueLoader:
             if "@" in label:
                 sam = label.split("@")[0].lower()
             else:
-                sam = properties.get("samaccountname", "").strip().lower()
+                sam_value = properties.get("samaccountname", "") or ""
+                sam = str(sam_value).strip().lower()
             
             if not sam:
                 continue
@@ -508,7 +569,8 @@ class HighValueLoader:
             if "@" in label:
                 sam = label.split("@")[0].lower()
             else:
-                sam = properties.get("samaccountname", "").strip().lower()
+                sam_value = properties.get("samaccountname", "") or ""
+                sam = str(sam_value).strip().lower()
             
             if not sam or sam not in self.hv_users:
                 continue
