@@ -514,7 +514,8 @@ def connect_bloodhound(args) -> Optional[Dict[str, Any]]:
     # Determine BloodHound type
     bh_type = 'bhce' if args.bhce else 'legacy'
     
-    good(f"Connecting to {bh_type.upper()} BloodHound at {args.bh_ip}...")
+    display_type = 'BHCE' if args.bhce else 'Legacy'
+    good(f"Connecting to {display_type} BloodHound at {args.bh_ip}...")
     
     # Create connector and attempt connection
     connector = BloodHoundConnector(
