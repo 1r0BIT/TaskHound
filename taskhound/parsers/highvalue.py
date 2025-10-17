@@ -622,7 +622,7 @@ class HighValueLoader:
         val = runas.strip()
         # SID form
         if val.upper().startswith("S-1-5-"):
-            return val in self.hv_sids
+            return val.upper() in self.hv_sids  # Convert to uppercase for consistent lookup
         # NETBIOS\sam or just sam
         if "\\" in val:
             sam = val.split("\\", 1)[1].lower()
@@ -645,7 +645,7 @@ class HighValueLoader:
         
         # Look up user data from BloodHound
         if val.upper().startswith("S-1-5-"):
-            user_data = self.hv_sids.get(val)
+            user_data = self.hv_sids.get(val.upper())  # Convert to uppercase for consistent lookup
         else:
             # NETBIOS\sam or just sam
             if "\\" in val:
@@ -763,7 +763,7 @@ class HighValueLoader:
         
         # Look up user data (same logic as check_tier0)
         if val.upper().startswith("S-1-5-"):
-            user_data = self.hv_sids.get(val)
+            user_data = self.hv_sids.get(val.upper())  # Convert to uppercase for consistent lookup
         else:
             if "\\" in val:
                 sam = val.split("\\", 1)[1].lower()

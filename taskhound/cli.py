@@ -29,6 +29,15 @@ def main():
             if users_data:
                 # Create a temporary HighValueLoader with the live data
                 hv = HighValueLoader("")  # Empty path since we have live data
+                
+                # Convert timestamps to datetime objects (like HighValueLoader.load() does)
+                from .parsers.highvalue import _convert_timestamp
+                for sam, user_data in users_data.items():
+                    if 'pwdlastset' in user_data:
+                        user_data['pwdlastset'] = _convert_timestamp(user_data['pwdlastset'])
+                    if 'lastlogon' in user_data:
+                        user_data['lastlogon'] = _convert_timestamp(user_data['lastlogon'])
+                
                 hv.hv_users = users_data
                 hv.hv_sids = {}
                 

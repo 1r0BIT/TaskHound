@@ -32,6 +32,13 @@ debug_*.py
 test_*.json
 test_*.csv
 
+# Live debug data and test results (contains sensitive data)
+live_debug/
+test_*debug*.py
+test_*analysis*.py
+test_*case*.py
+create_debug_engine.py
+
 # macOS
 .DS_Store
 
