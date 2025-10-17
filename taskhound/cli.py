@@ -10,10 +10,36 @@ from .output.summary import print_summary_table
 from .engine import process_target, process_offline_directory
 
 
+def _extract_domain_sid_from_hv(hv_loader):
+    """Extract a domain SID from BloodHound high-value data for realistic LDAP testing."""
+    if not hv_loader or not hv_loader.loaded:
+        return None
+    
+    # Try tier_zero_users first, then high_value_users as fallback
+    user_collections = []
+    if hasattr(hv_loader, "tier_zero_users") and hv_loader.tier_zero_users:
+        user_collections.append(hv_loader.tier_zero_users)
+    if hasattr(hv_loader, "high_value_users") and hv_loader.high_value_users:
+        user_collections.append(hv_loader.high_value_users)
+    
+    for users in user_collections:
+        for sam, user_data in users.items():
+            if "objectid" in user_data:
+                sid = user_data["objectid"]
+                if sid and sid.startswith("S-1-5-21-"):
+                    # Extract domain part (everything except the RID)
+                    parts = sid.split("-")
+                    if len(parts) >= 7:  # S-1-5-21-xxx-xxx-xxx-yyy
+                        domain_sid = "-".join(parts[:-1])  # Remove the RID
+                        return f"{domain_sid}-500"  # Replace with Administrator RID
+    
+    return None
+
+
 def _test_ldap_connection(domain: Optional[str], dc_ip: Optional[str], username: Optional[str], 
                          password: Optional[str], hashes: Optional[str], kerberos: bool, no_ldap: bool,
                          ldap_domain: Optional[str] = None, ldap_user: Optional[str] = None, 
-                         ldap_password: Optional[str] = None):
+                         ldap_password: Optional[str] = None, hv_loader=None):
     """Test LDAP connection and SID resolution capability during initialization."""
     if no_ldap:
         info("LDAP resolution disabled - skipping connection test")
@@ -54,9 +80,15 @@ def _test_ldap_connection(domain: Optional[str], dc_ip: Optional[str], username:
         # Import the SID resolution function
         from .utils.sid_resolver import resolve_sid_via_ldap
         
-        # Test with S-1-5-21-123456789-987654321-111111111-500 (fictional test SID)
-        # This is derived from the failing SID by changing the RID to 500
-        test_sid = "S-1-5-21-123456789-987654321-111111111-500"
+        # Try to get a realistic test SID from BloodHound data first
+        test_sid = _extract_domain_sid_from_hv(hv_loader)
+        
+        if not test_sid:
+            info("No BloodHound data available - skipping SID resolution test")
+            info("LDAP connectivity test completed (SID resolution will be tested during actual execution)")
+            return
+        else:
+            info("Using domain SID derived from BloodHound data for realistic testing")
         
         info(f"Testing SID resolution with: {test_sid}")
         result = resolve_sid_via_ldap(test_sid, test_domain, dc_ip, test_username, test_password, None, kerberos)
@@ -119,7 +151,7 @@ def main():
                 
                 # Test LDAP SID resolution capability
                 _test_ldap_connection(args.domain, args.dc_ip, args.username, args.password, args.hashes, args.kerberos, args.no_ldap,
-                                    args.ldap_domain, args.ldap_user, args.ldap_password)
+                                    args.ldap_domain, args.ldap_user, args.ldap_password, hv)
             # No else clause needed - connector already prints specific error messages
                 
         except ImportError as e:
