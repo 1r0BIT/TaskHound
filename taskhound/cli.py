@@ -54,7 +54,7 @@ def _test_ldap_connection(domain: Optional[str], dc_ip: Optional[str], username:
         # Import the SID resolution function
         from .utils.sid_resolver import resolve_sid_via_ldap
         
-        # Test with S-1-5-21-123456789-987654321-111111111-500 (fictional test SID for demo purposes)
+        # Test with S-1-5-21-123456789-987654321-111111111-500 (fictional test SID)
         # This is derived from the failing SID by changing the RID to 500
         test_sid = "S-1-5-21-123456789-987654321-111111111-500"
         
