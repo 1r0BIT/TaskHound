@@ -181,30 +181,12 @@ class BloodHoundConnector:
                 warn(f"Connection to BloodHound BHCE at {self.ip}:8080 timed out")
                 return False
             
-            # Query for high-value users using the README BHCE query
-            # Note: BHCE query returns paths, we need to extract user data from them
-            cypher_query = """
-            MATCH (n)
-            WHERE coalesce(n.system_tags, "") CONTAINS "admin_tier_0"
-               OR n.highvalue = true
-            MATCH p = (n)-[:MemberOf*1..]->(g:Group)
-            RETURN p;
-            """
-            
-            # BHCE supports Cypher queries through /api/v2/graphs/cypher
-            # First get high-value users, then get their group memberships separately
-            cypher_query = """
+            # Comprehensive query for BHCE - includes high-value, admincount, and Tier 0 group members
+            comprehensive_query = """
             MATCH (u:User)
             WHERE coalesce(u.system_tags, "") CONTAINS "admin_tier_0"
                OR u.highvalue = true
                OR u.admincount = true
-            RETURN u
-            """
-            
-            # Also have a fallback query for Tier 0 users specifically
-            tier0_query = """
-            MATCH (u:User)
-            WHERE u.admincount = true
             RETURN DISTINCT 
                 u.objectid as sid,
                 u.name as name,
@@ -238,9 +220,9 @@ class BloodHoundConnector:
             ORDER BY name
             """
             
-            # Try the main high-value query first with correct BHCE format
+            # Single comprehensive query for all high-value and Tier 0 users
             query_data = {
-                "query": cypher_query,
+                "query": comprehensive_query,
                 "include_properties": True
             }
             
@@ -251,20 +233,6 @@ class BloodHoundConnector:
                     json=query_data,
                     timeout=30
                 )
-                
-                if response.status_code != 200:
-                    warn(f"BHCE high-value query failed - HTTP {response.status_code}, trying Tier 0 query")
-                    # Fall back to Tier 0 query
-                    query_data = {
-                        "query": tier0_query,
-                        "include_properties": True
-                    }
-                    response = requests.post(
-                        f"{base_url}/api/v2/graphs/cypher",
-                        headers=headers,
-                        json=query_data,
-                        timeout=30
-                    )
                 
                 if response.status_code != 200:
                     warn(f"BloodHound BHCE query failed - HTTP {response.status_code}")
@@ -326,51 +294,6 @@ class BloodHoundConnector:
             warn("requests library not installed - required for BHCE API connection")
             warn("Install with: pip install requests")
             return False
-            
-            # Process the successful response
-            if response.status_code != 200:
-                warn(f"BloodHound query failed - HTTP {response.status_code}")
-                if response.status_code == 400:
-                    warn("Query format error - check Cypher syntax")
-                return False
-            
-            # Parse response with JSON sanitization
-            sanitized_response = _sanitize_json_response(response.text)
-            result = json.loads(sanitized_response)
-            
-            # Parse results - handle both path results and direct user results
-            if 'data' in result:
-                data_items = result['data']
-                users_found = set()  # Track unique users
-                
-                for item in data_items:
-                    # Handle path results (from main query)
-                    if isinstance(item, dict) and 'segments' in item:
-                        # Extract users from path segments
-                        for segment in item.get('segments', []):
-                            start_node = segment.get('start', {})
-                            if start_node.get('labels') and 'User' in start_node['labels']:
-                                self._process_bhce_user(start_node.get('properties', {}), users_found)
-                    
-                    # Handle direct user results (from tier0 query)
-                    elif isinstance(item, dict):
-                        sam = _safe_get_sam(item, 'samaccountname')
-                        if sam and sam not in users_found:
-                            self._process_bhce_user(item, users_found)
-                
-                good(f"Retrieved {len(self.users_data)} high-value users from BHCE")
-                return True
-            else:
-                warn("No high-value users found in BHCE")
-                return True
-                
-        except requests.exceptions.Timeout:
-            warn("BloodHound query timed out")
-            return False
-        except ImportError:
-            warn("requests library not installed - required for BHCE API connection")
-            warn("Install with: pip install requests")
-            return False
     
     def _query_legacy(self) -> bool:
         """Query Legacy BloodHound via Neo4j Bolt"""
@@ -398,19 +321,12 @@ class BloodHoundConnector:
                     warn("Check if Neo4j is running and accessible")
                 return False
             
-            # Query for high-value users using the README Legacy query
-            cypher_query = """
-            MATCH (u:User {highvalue:true})
-            OPTIONAL MATCH (u)-[:MemberOf*1..]->(g:Group)
-            WITH u, properties(u) as all_props, collect(g.name) as groups, collect(g.objectid) as group_sids
-            RETURN u.samaccountname AS SamAccountName, all_props, groups, group_sids
-            ORDER BY SamAccountName
-            """
-            
-            # Also query for Tier 0 users specifically - simplified for compatibility
-            tier0_query = """
+            # Comprehensive query for both high-value and Tier 0 users
+            # This combines high-value detection with Tier 0 group membership
+            comprehensive_query = """
             MATCH (u:User)
-            WHERE u.admincount = true
+            WHERE u.highvalue = true
+               OR u.admincount = true
             OPTIONAL MATCH (u)-[:MemberOf*1..]->(g:Group)
             WITH u, properties(u) as all_props, collect(g.name) as groups, collect(g.objectid) as group_sids
             RETURN u.samaccountname AS SamAccountName, all_props, groups, group_sids
@@ -435,29 +351,29 @@ class BloodHoundConnector:
                 with driver.session() as session:
                     users_found = set()
                     
-                    # Try main high-value query first
+                    # Single comprehensive query instead of multiple queries
                     try:
-                        result = session.run(cypher_query)
+                        result = session.run(comprehensive_query)
                         for record in result:
                             self._process_legacy_user(record, users_found)
+                        
+                        if len(users_found) == 0:
+                            warn("No high-value or Tier 0 users found in Legacy BloodHound")
+                        else:
+                            good(f"Retrieved {len(users_found)} high-value users from Legacy BloodHound")
+                            
                     except Exception as e:
-                        warn(f"Legacy high-value query failed: {e}, trying Tier 0 query")
-                    
-                    # Try Tier 0 query if main query didn't find much or failed
-                    if len(users_found) < 5:  # Arbitrary threshold
-                        try:
-                            result = session.run(tier0_query)
-                            for record in result:
-                                self._process_legacy_user(record, users_found)
-                        except Exception as e:
-                            warn(f"Legacy Tier 0 query also failed: {e}")
+                        warn(f"Legacy BloodHound query failed: {e}")
+                        return False
                 
                 driver.close()
-                good(f"Retrieved {len(self.users_data)} high-value users from Legacy BloodHound")
                 return True
                 
             except Exception as e:
-                driver.close()
+                try:
+                    driver.close()
+                except:
+                    pass
                 warn(f"BloodHound query execution failed: {e}")
                 return False
                 
