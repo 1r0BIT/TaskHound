@@ -15,7 +15,30 @@ def _extract_domain_sid_from_hv(hv_loader):
     if not hv_loader or not hv_loader.loaded:
         return None
     
-    # Try tier_zero_users first, then high_value_users as fallback
+    # Check hv_sids first (this is where BloodHound live data is stored)
+    if hasattr(hv_loader, "hv_sids") and hv_loader.hv_sids:
+        for sid, user_data in hv_loader.hv_sids.items():
+            if sid and sid.startswith("S-1-5-21-"):
+                # Extract domain part (everything except the RID)
+                parts = sid.split("-")
+                if len(parts) >= 7:  # S-1-5-21-xxx-xxx-xxx-yyy
+                    domain_sid = "-".join(parts[:-1])  # Remove the RID
+                    result_sid = f"{domain_sid}-500"  # Replace with Administrator RID
+                    return result_sid
+    
+    # Fallback: check hv_users if available
+    if hasattr(hv_loader, "hv_users") and hv_loader.hv_users:
+        for sam, user_data in hv_loader.hv_users.items():
+            if "objectid" in user_data or "sid" in user_data:
+                sid = user_data.get("objectid") or user_data.get("sid")
+                if sid and sid.startswith("S-1-5-21-"):
+                    parts = sid.split("-")
+                    if len(parts) >= 7:
+                        domain_sid = "-".join(parts[:-1])
+                        result_sid = f"{domain_sid}-500"
+                        return result_sid
+    
+    # Legacy fallback: Try tier_zero_users and high_value_users (for file-based data)
     user_collections = []
     if hasattr(hv_loader, "tier_zero_users") and hv_loader.tier_zero_users:
         user_collections.append(hv_loader.tier_zero_users)
@@ -97,8 +120,16 @@ def _test_ldap_connection(domain: Optional[str], dc_ip: Optional[str], username:
             good(f"LDAP test successful: {test_sid} -> {result}")
             good("SID resolution initialized and ready")
         else:
-            warn(f"LDAP test failed: Could not resolve {test_sid}")
-            warn("SID resolution may not work properly")
+            # Check if the domain SID from BloodHound matches the target domain
+            if test_sid:
+                test_domain_sid = "-".join(test_sid.split("-")[:-1])  # Remove RID to get domain SID
+                warn(f"LDAP test failed: Could not resolve {test_sid}")
+                info(f"This may be normal if BloodHound data is from a different domain than the target")
+                info(f"BloodHound domain SID: {test_domain_sid}")
+                info(f"SID resolution will still work for actual SIDs from the target domain")
+            else:
+                warn(f"LDAP test failed: Could not resolve {test_sid}")
+                warn("SID resolution may not work properly")
             
     except ImportError as e:
         warn(f"LDAP test failed: Missing dependencies - {e}")
