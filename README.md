@@ -1,9 +1,8 @@
 <p align="center">
   <img width="350" height="350" alt="TaskHound Logo" src="https://github.com/user-attachments/assets/325b57e9-b96a-4de7-9974-736fd58fa70c" />
+  <strong>Windows Privileged Scheduled Task Discovery Tool</strong> for fun and profit.
 </p>
 <hr />
-
-**Windows Privileged Scheduled Task Discovery Tool** for fun and profit.
 
 TaskHound hunts for Windows scheduled tasks that run with privileged accounts and stored credentials. It enumerates tasks over SMB, parses XMLs, and identifies high-value attack opportunities through BloodHound support.
 
