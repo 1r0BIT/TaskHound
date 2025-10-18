@@ -1,6 +1,7 @@
-<div align="center">
+<p align="center">
   <img width="350" height="350" alt="TaskHound Logo" src="https://github.com/user-attachments/assets/325b57e9-b96a-4de7-9974-736fd58fa70c" />
-</div>
+</p>
+<hr />
 
 **Windows Privileged Scheduled Task Discovery Tool** for fun and profit.
 
