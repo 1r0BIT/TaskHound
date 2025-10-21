@@ -40,7 +40,8 @@ def main():
             include_local=args.include_local,
             all_rows=all_rows,
             debug=args.debug,
-            no_ldap=args.no_ldap
+            no_ldap=args.no_ldap,
+            dpapi_key=args.dpapi_key
         )
         print_results(lines)
     else:
@@ -75,6 +76,8 @@ def main():
                 backup_dir=args.backup,
                 credguard_detect=args.credguard_detect,
                 no_ldap=args.no_ldap,
+                loot=args.loot,
+                dpapi_key=args.dpapi_key,
             )
             print_results(lines)
             if args.plain and lines:

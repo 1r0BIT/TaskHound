@@ -21,6 +21,7 @@ examples/out/
 
 # Test data and outputs
 tests/
+dpapi_loot/
 
 # Debug and temporary files
 debug_*.py
@@ -34,6 +35,7 @@ test_*.csv
 
 # Environment files
 .env
+bh_connector.config
 
 # Lockfiles
 poetry.lock

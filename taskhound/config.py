@@ -36,6 +36,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Disable LDAP queries for SID resolution (improves OPSEC but reduces user-friendliness)")
     scan.add_argument("--credguard-detect", action='store_true', default=False,
         help="EXPERIMENTAL: Attempt to detect Credential Guard status via remote registry (default: off). Only use if you know your environment supports it.")
+    
+    # DPAPI decryption options
+    dpapi = ap.add_argument_group('DPAPI Credential Decryption')
+    dpapi.add_argument("--loot", action='store_true', default=False,
+        help="Automatically download and decrypt ALL Task Scheduler credential blobs (requires --dpapi-key)")
+    dpapi.add_argument("--dpapi-key", 
+        help="DPAPI_SYSTEM userkey from LSA secrets dump (hex format, e.g., 0x51e43225e5b43b25d3768a2ae7f99934cb35d3ea)")
 
     # Output options
     out = ap.add_argument_group('Output options')
@@ -117,3 +124,32 @@ def validate_args(args):
     if args.kerberos and args.target and is_ipv4(args.target.strip()):
         print("[!] Targets verification failed. Please supply hostnames or fqdns or switch to NTLM Auth (Kerberos doesn't like IP addresses)")
         sys.exit(1)
+
+    # DPAPI key with multiple targets validation
+    if args.dpapi_key and args.targets_file and not args.offline:
+        print("[!] ERROR: --dpapi-key cannot be used with --targets-file")
+        print("[!] Each target has a unique DPAPI key - you cannot use the same key for multiple targets")
+        print()
+        print("[*] Valid workflows:")
+        print("    1. Single target with key:  --target <host> --loot --dpapi-key <key>")
+        print("    2. Collect from multiple:   --targets-file <file> --loot (without --dpapi-key)")
+        print("       Then decrypt offline:    --offline dpapi_loot/<target> --dpapi-key <target_key>")
+        sys.exit(1)
+    
+    # DPAPI loot validation for online mode
+    if args.loot and not args.offline:
+        # Online mode: --loot can work with or without --dpapi-key
+        # With key: live decryption
+        # Without key: offline collection
+        if not args.dpapi_key:
+            print("[*] --loot specified without --dpapi-key")
+            print("[*] Will collect DPAPI files for offline decryption")
+            print("[!] To decrypt immediately, obtain dpapi_userkey with: nxc smb <target> -u <user> -p <pass> --lsa")
+            print()
+    
+    # DPAPI offline decryption validation
+    if args.offline and args.dpapi_key:
+        # Offline mode with DPAPI key: decrypt previously collected files
+        print("[*] Offline mode with --dpapi-key enabled")
+        print("[*] Will decrypt DPAPI files from offline directory")
+        print()
