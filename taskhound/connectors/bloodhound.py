@@ -243,13 +243,37 @@ class BloodHoundConnector:
 
                 elif isinstance(response_data, list):
                     # Handle list format (from path queries)
+                    # Paths contain user→group relationships via MemberOf edges
                     for item in response_data:
                         if isinstance(item, dict) and 'segments' in item:
-                            # Extract users from path segments
+                            # Extract user and their group memberships from path
+                            user_node = None
+                            group_sids = []
+                            group_names = []
+
                             for segment in item.get('segments', []):
                                 start_node = segment.get('start', {})
+                                end_node = segment.get('end', {})
+
+                                # Find the user node (should be at start of path)
                                 if start_node.get('labels') and 'User' in start_node['labels']:
-                                    self._process_bhce_user(start_node.get('properties', {}), users_found)
+                                    if user_node is None:
+                                        user_node = start_node.get('properties', {})
+
+                                # Collect groups from end nodes
+                                if end_node.get('labels') and 'Group' in end_node['labels']:
+                                    group_props = end_node.get('properties', {})
+                                    group_sid = group_props.get('objectid', '')
+                                    group_name = group_props.get('name', '')
+                                    if group_sid and group_sid not in group_sids:
+                                        group_sids.append(group_sid)
+                                        group_names.append(group_name)
+
+                            # Process user with collected group memberships
+                            if user_node:
+                                user_node['group_sids'] = group_sids
+                                user_node['group_names'] = group_names
+                                self._process_bhce_user(user_node, users_found)
 
                         # Handle direct user results (from fallback query)
                         elif isinstance(item, dict):
