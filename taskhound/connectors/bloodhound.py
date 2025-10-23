@@ -185,43 +185,15 @@ class BloodHoundConnector:
             warn(f"BloodHound BHCE connection timed out at {self.ip}:8080")
             return False
 
-        # Comprehensive query for BHCE - includes high-value, admincount, and Tier 0 group members
+        # Comprehensive query for BHCE - simplified format that BHCE actually supports
+        # BHCE requires path-based queries, not direct property returns
         comprehensive_query = """
-        MATCH (u:User)
-        WHERE coalesce(u.system_tags, "") CONTAINS "admin_tier_0"
-           OR u.highvalue = true
-           OR u.admincount = true
-        RETURN DISTINCT 
-            u.objectid as sid,
-            u.name as name,
-            u.samaccountname as samaccountname,
-            u.domain as domain,
-            u.admincount as admincount,
-            u.pwdlastset as pwdlastset,
-            u.lastlogon as lastlogon,
-            coalesce(u.system_tags, "") as system_tags,
-            u.highvalue as highvalue
-        UNION
-        MATCH (u:User)-[:MemberOf*1..]->(g:Group)
-        WHERE g.objectid =~ 'S-1-5-32-544.*'
-           OR g.objectid =~ '.*-512$'
-           OR g.objectid =~ '.*-519$'
-           OR g.objectid =~ '.*-518$'
-           OR g.objectid =~ '.*-516$'
-           OR g.objectid =~ '.*-526$'
-           OR g.objectid =~ '.*-527$'
-           OR g.objectid =~ '.*-500$'
-        RETURN DISTINCT 
-            u.objectid as sid,
-            u.name as name,
-            u.samaccountname as samaccountname,
-            u.domain as domain,
-            u.admincount as admincount,
-            u.pwdlastset as pwdlastset,
-            u.lastlogon as lastlogon,
-            coalesce(u.system_tags, "") as system_tags,
-            u.highvalue as highvalue
-        ORDER BY name
+        MATCH (n)
+        WHERE coalesce(n.system_tags, "") CONTAINS "admin_tier_0"
+           OR n.highvalue = true
+           OR n.admincount = true
+        MATCH p = (n)-[:MemberOf*0..]->(g:Group)
+        RETURN p
         """
 
         # Single comprehensive query for all users
