@@ -143,7 +143,7 @@ def _process_offline_host(hostname: str, host_dir: str, hv: Optional[HighValueLo
                 if not (row.get("credentials_hint") == "no_saved_credentials" and not show_unsaved_creds):
                     priv_lines.extend(_format_block("TIER-0", rel_path, runas, what, meta.get("author"), meta.get("date"), 
                                                    extra_reason=reason, password_analysis=password_analysis, 
-                                                   hv=hv, no_ldap=no_ldap, enabled=meta.get("enabled")))
+                                                   hv=hv, no_ldap=no_ldap, dc_ip=None, enabled=meta.get("enabled"), ldap_domain=None, ldap_user=None, ldap_password=None, meta=meta))
                     priv_count += 1
                     row["type"] = "TIER-0"
                     row["reason"] = reason
@@ -166,7 +166,7 @@ def _process_offline_host(hostname: str, host_dir: str, hv: Optional[HighValueLo
                 if not (row.get("credentials_hint") == "no_saved_credentials" and not show_unsaved_creds):
                     priv_lines.extend(_format_block("PRIV", rel_path, runas, what, meta.get("author"), meta.get("date"), 
                                                    extra_reason=reason, password_analysis=password_analysis, 
-                                                   hv=hv, no_ldap=no_ldap, enabled=meta.get("enabled")))
+                                                   hv=hv, no_ldap=no_ldap, dc_ip=None, enabled=meta.get("enabled"), ldap_domain=None, ldap_user=None, ldap_password=None, meta=meta))
                     priv_count += 1
                     row["type"] = "PRIV"
                     row["reason"] = reason
@@ -190,8 +190,8 @@ def _process_offline_host(hostname: str, host_dir: str, hv: Optional[HighValueLo
             if should_include_task:
                 if not (row.get("credentials_hint") == "no_saved_credentials" and not show_unsaved_creds):
                     task_lines.extend(_format_block("TASK", rel_path, runas, what, meta.get("author"), meta.get("date"), 
-                                                   password_analysis=password_analysis, hv=hv, no_ldap=no_ldap, 
-                                                   enabled=meta.get("enabled")))
+                                                   password_analysis=password_analysis, hv=hv, no_ldap=no_ldap, dc_ip=None,
+                                                   enabled=meta.get("enabled"), ldap_domain=None, ldap_user=None, ldap_password=None, meta=meta))
             row["password_analysis"] = password_analysis
 
         # By default omit tasks that explicitly have no saved credentials unless the user asked to show them
@@ -199,9 +199,58 @@ def _process_offline_host(hostname: str, host_dir: str, hv: Optional[HighValueLo
             all_rows.append(row)
 
     lines = priv_lines + task_lines
+    # Sort tasks by priority: TIER-0 > PRIV > TASK
+    sorted_lines = _sort_tasks_by_priority(lines)
     total = len(xml_files)
     good(f"{hostname}: Found {total} tasks, privileged {priv_count if (hv and hv.loaded) else 'N/A'}")
-    return lines
+    return sorted_lines
+
+
+def _sort_tasks_by_priority(lines: List[str]) -> List[str]:
+    """Sort task blocks by priority: TIER-0 > PRIV > TASK"""
+    if not lines:
+        return lines
+    
+    # Group lines into task blocks (each block starts with a header like [TIER-0])
+    blocks = []
+    current_block = []
+    
+    for line in lines:
+        if line.startswith('\n[') and current_block:
+            # Start of new block, save the previous one
+            blocks.append(current_block)
+            current_block = [line]
+        else:
+            current_block.append(line)
+    
+    # Don't forget the last block
+    if current_block:
+        blocks.append(current_block)
+    
+    # Define priority order
+    def get_block_priority(block):
+        if not block:
+            return 3  # Unknown/default priority
+        
+        first_line = block[0]
+        if '[TIER-0]' in first_line:
+            return 0
+        elif '[PRIV]' in first_line:
+            return 1
+        elif '[TASK]' in first_line:
+            return 2
+        else:
+            return 3
+    
+    # Sort blocks by priority
+    sorted_blocks = sorted(blocks, key=get_block_priority)
+    
+    # Flatten back to a single list
+    result = []
+    for block in sorted_blocks:
+        result.extend(block)
+    
+    return result
 
 
 def _build_row(host: str, rel_path: str, meta: Dict[str, str]) -> Dict[str, Optional[str]]:
@@ -230,17 +279,113 @@ def _build_row(host: str, rel_path: str, meta: Dict[str, str]) -> Dict[str, Opti
         "date": meta.get("date"),
         "logon_type": meta.get("logon_type"),
         "enabled": meta.get("enabled"),
+        "trigger_type": meta.get("trigger_type"),
+        "start_boundary": meta.get("start_boundary"),
+        "interval": meta.get("interval"),
+        "duration": meta.get("duration"),
+        "days_interval": meta.get("days_interval"),
         "reason": None,
         "credentials_hint": credentials_hint,
     }
 
 
+def _format_trigger_info(meta: Dict[str, str]) -> Optional[str]:
+    """Format trigger information for display"""
+    trigger_type = meta.get("trigger_type")
+    if not trigger_type:
+        return None
+        
+    trigger_parts = [trigger_type]
+    
+    if trigger_type == "Calendar":
+        # Format calendar trigger details
+        start_boundary = meta.get("start_boundary")
+        interval = meta.get("interval")
+        duration = meta.get("duration")
+        days_interval = meta.get("days_interval")
+        
+        details = []
+        if start_boundary:
+            # Parse the start boundary for better display
+            try:
+                from datetime import datetime
+                # Handle both with and without timezone
+                if 'T' in start_boundary:
+                    if start_boundary.endswith('Z'):
+                        dt = datetime.fromisoformat(start_boundary[:-1])
+                    elif '+' in start_boundary or start_boundary.count('-') > 2:
+                        # Has timezone, try to parse
+                        dt = datetime.fromisoformat(start_boundary.replace('Z', '+00:00'))
+                    else:
+                        dt = datetime.fromisoformat(start_boundary)
+                    details.append(f"starts {dt.strftime('%Y-%m-%d %H:%M')}")
+                else:
+                    details.append(f"starts {start_boundary}")
+            except:
+                if start_boundary:
+                    details.append(f"starts {start_boundary}")
+        
+        if interval:
+            # Parse ISO 8601 duration format (PT5M = 5 minutes)
+            interval_display = interval
+            if interval.startswith('PT'):
+                interval_clean = interval[2:]  # Remove 'PT' prefix
+                if interval_clean.endswith('M'):
+                    minutes = interval_clean[:-1]
+                    interval_display = f"{minutes} minutes"
+                elif interval_clean.endswith('H'):
+                    hours = interval_clean[:-1]
+                    interval_display = f"{hours} hours"
+                elif interval_clean.endswith('S'):
+                    seconds = interval_clean[:-1]
+                    interval_display = f"{seconds} seconds"
+            details.append(f"every {interval_display}")
+        
+        if duration:
+            # Parse ISO 8601 duration format (P1D = 1 day)
+            duration_display = duration
+            if duration.startswith('P'):
+                duration_clean = duration[1:]  # Remove 'P' prefix
+                if duration_clean.endswith('D'):
+                    days = duration_clean[:-1]
+                    duration_display = f"{days} day{'s' if days != '1' else ''}"
+                elif 'T' in duration_clean:
+                    # Has time component
+                    duration_display = duration  # Keep original for complex durations
+            details.append(f"for {duration_display}")
+        
+        if days_interval:
+            if days_interval == "1":
+                details.append("daily")
+            else:
+                details.append(f"every {days_interval} days")
+        
+        if details:
+            trigger_parts.append(f"({', '.join(details)})")
+            
+    elif trigger_type == "Time":
+        start_boundary = meta.get("start_boundary")
+        if start_boundary:
+            try:
+                from datetime import datetime
+                if 'T' in start_boundary:
+                    dt = datetime.fromisoformat(start_boundary.replace('Z', '+00:00') if start_boundary.endswith('Z') else start_boundary)
+                    trigger_parts.append(f"at {dt.strftime('%Y-%m-%d %H:%M')}")
+                else:
+                    trigger_parts.append(f"at {start_boundary}")
+            except:
+                trigger_parts.append(f"at {start_boundary}")
+    
+    return " ".join(trigger_parts) if len(trigger_parts) > 1 else trigger_type
+
+
 def _format_block(kind: str, rel_path: str, runas: str, what: str, author: str, date: str, 
                   extra_reason: Optional[str] = None, password_analysis: Optional[str] = None,
                   hv: Optional[HighValueLoader] = None, no_ldap: bool = False, 
-                  domain: Optional[str] = None, username: Optional[str] = None, 
+                  domain: Optional[str] = None, dc_ip: Optional[str] = None, username: Optional[str] = None, 
                   password: Optional[str] = None, hashes: Optional[str] = None,
-                  enabled: Optional[str] = None) -> List[str]:
+                  enabled: Optional[str] = None, ldap_domain: Optional[str] = None, ldap_user: Optional[str] = None, 
+                  ldap_password: Optional[str] = None, meta: Optional[Dict[str, str]] = None) -> List[str]:
     # Format a small pretty-print block used by the CLI output.
     #
     # kind is either 'TIER-0', 'PRIV' (privileged/high-value) or 'TASK' (normal task).
@@ -253,7 +398,7 @@ def _format_block(kind: str, rel_path: str, runas: str, what: str, author: str, 
     
     # Resolve SID in RunAs field for better display
     display_runas, resolved_username = format_runas_with_sid_resolution(
-        runas, hv, no_ldap, domain, username, password, hashes
+        runas, hv, no_ldap, domain, dc_ip, username, password, hashes, False, ldap_domain, ldap_user, ldap_password
     )
         
     base = [f"\n{header} {rel_path}"]
@@ -269,6 +414,12 @@ def _format_block(kind: str, rel_path: str, runas: str, what: str, author: str, 
         base.append(f"        Author  : {author}")
     if date:
         base.append(f"        Date    : {date}")
+    
+    # Add trigger information if available
+    if meta:
+        trigger_info = _format_trigger_info(meta)
+        if trigger_info:
+            base.append(f"        Trigger : {trigger_info}")
     
     if kind in ["TIER-0", "PRIV"]:
         if extra_reason:
@@ -302,9 +453,13 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
                    hv: Optional[HighValueLoader], debug: bool,
                    all_rows: List[Dict], hashes: Optional[str] = None,
                    show_unsaved_creds: bool = False, backup_dir: Optional[str] = None,
-                   credguard_detect: bool = False, no_ldap: bool = False) -> List[str]:
+                   credguard_detect: bool = False, no_ldap: bool = False,
+                   ldap_domain: Optional[str] = None, ldap_user: Optional[str] = None,
+                   ldap_password: Optional[str] = None) -> List[str]:
     # Connect to `target`, enumerate scheduled tasks, and return printable lines.
     #
+    # TEMPORARY DEBUG: Show what credentials were received
+    
     # - Attempts SMB authentication using either cleartext password or hashes.
     # - Performs a quick check to see if the C$ share and Tasks folder are
     #   accessible (this serves as a proxy for local admin rights).
@@ -434,8 +589,8 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
                 if not (row.get("credentials_hint") == "no_saved_credentials" and not show_unsaved_creds):
                     priv_lines.extend(_format_block("TIER-0", rel_path, runas, what, meta.get("author"), meta.get("date"), 
                                                    extra_reason=reason, password_analysis=password_analysis, 
-                                                   hv=hv, no_ldap=no_ldap, domain=domain, username=username, 
-                                                   password=password, hashes=hashes, enabled=meta.get("enabled")))
+                                                   hv=hv, no_ldap=no_ldap, domain=domain, dc_ip=dc_ip, username=username, 
+                                                   password=password, hashes=hashes, enabled=meta.get("enabled"), ldap_domain=ldap_domain, ldap_user=ldap_user, ldap_password=ldap_password, meta=meta))
                     priv_count += 1
                     row["type"] = "TIER-0"
                     row["reason"] = reason
@@ -456,8 +611,8 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
                 if not (row.get("credentials_hint") == "no_saved_credentials" and not show_unsaved_creds):
                     priv_lines.extend(_format_block("PRIV", rel_path, runas, what, meta.get("author"), meta.get("date"), 
                                                    extra_reason=reason, password_analysis=password_analysis, 
-                                                   hv=hv, no_ldap=no_ldap, domain=domain, username=username, 
-                                                   password=password, hashes=hashes, enabled=meta.get("enabled")))
+                                                   hv=hv, no_ldap=no_ldap, domain=domain, dc_ip=dc_ip, username=username, 
+                                                   password=password, hashes=hashes, enabled=meta.get("enabled"), ldap_domain=ldap_domain, ldap_user=ldap_user, ldap_password=ldap_password, meta=meta))
                     priv_count += 1
                     row["type"] = "PRIV"
                     row["reason"] = reason
@@ -481,13 +636,16 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
                 if not (row.get("credentials_hint") == "no_saved_credentials" and not show_unsaved_creds):
                     task_lines.extend(_format_block("TASK", rel_path, runas, what, meta.get("author"), meta.get("date"), 
                                                    password_analysis=password_analysis, hv=hv, no_ldap=no_ldap, 
-                                                   domain=domain, username=username, password=password, hashes=hashes, enabled=meta.get("enabled")))
+                                                   domain=domain, dc_ip=dc_ip, username=username, password=password, hashes=hashes, enabled=meta.get("enabled"),
+                                                   ldap_domain=ldap_domain, ldap_user=ldap_user, ldap_password=ldap_password, meta=meta))
             row["password_analysis"] = password_analysis
             
         if not (row.get("credentials_hint") == "no_saved_credentials" and not show_unsaved_creds):
             all_rows.append(row)
 
     lines = priv_lines + task_lines
+    # Sort tasks by priority: TIER-0 > PRIV > TASK
+    sorted_lines = _sort_tasks_by_priority(lines)
     backup_msg = f", {total} raw XMLs backed up" if backup_target_dir else ""
     good(f"{target}: Found {total} tasks, privileged {priv_count if (hv and hv.loaded) else 'N/A'}{backup_msg}")
-    return lines
+    return sorted_lines
