@@ -1,4 +1,3 @@
-import sys, traceback, json, csv
 from typing import List, Dict, Optional
 from .utils.helpers import BANNER, normalize_targets
 from .utils.logging import good, warn, info
@@ -124,9 +123,9 @@ def _test_ldap_connection(domain: Optional[str], dc_ip: Optional[str], username:
             if test_sid:
                 test_domain_sid = "-".join(test_sid.split("-")[:-1])  # Remove RID to get domain SID
                 warn(f"LDAP test failed: Could not resolve {test_sid}")
-                info(f"This may be normal if BloodHound data is from a different domain than the target")
+                info("This may be normal if BloodHound data is from a different domain than the target")
                 info(f"BloodHound domain SID: {test_domain_sid}")
-                info(f"SID resolution will still work for actual SIDs from the target domain")
+                info("SID resolution will still work for actual SIDs from the target domain")
             else:
                 warn(f"LDAP test failed: Could not resolve {test_sid}")
                 warn("SID resolution may not work properly")
@@ -211,7 +210,8 @@ def main():
             include_local=args.include_local,
             all_rows=all_rows,
             debug=args.debug,
-            no_ldap=args.no_ldap
+            no_ldap=args.no_ldap,
+            dpapi_key=args.dpapi_key
         )
         print_results(lines)
     else:
@@ -249,6 +249,8 @@ def main():
                 ldap_domain=args.ldap_domain,
                 ldap_user=args.ldap_user,
                 ldap_password=args.ldap_password,
+                loot=args.loot,
+                dpapi_key=args.dpapi_key,
             )
             print_results(lines)
             if args.plain and lines:

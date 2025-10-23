@@ -1,0 +1,56 @@
+{
+  "_comment": "Live test configuration for TaskHound",
+  "_note": "Copy this to live_test_config.json and fill in your lab details",
+  
+  "domain": "badsuccessor.lab",
+  "username": "highpriv",
+  "password": "P@ssw0rd1339.",
+  "dc_ip": "192.0.2.54",
+  "dns_server": "192.0.2.54",
+  
+  "targets": {
+    "dc": "192.0.2.54",
+    "testclient": "192.0.2.68"
+  },
+  
+  "dpapi_keys": {
+    "dc": "0x51e43225e5b43b25d3768a2ae7f99934cb35d3ea",
+    "testclient": "0x20cce42a4195093cd57dfc4dd88f99bb1edf077b"
+  },
+  
+  "bloodhound_data_files": {
+    "legacy": "test_data/legacy_bh_data.json",
+    "bhce": "test_data/bhce_bh_data.json"
+  },
+  
+  "bloodhound_live": {
+    "legacy": {
+      "enabled": true,
+      "ip": "192.0.2.51",
+      "user": "neo4j",
+      "password": "P@ssw0rd1337.",
+      "type": "legacy"
+    },
+    "bhce": {
+      "enabled": true,
+      "ip": "127.0.0.1",
+      "user": "admin",
+      "password": "P@ssw0rd1337.",
+      "type": "bhce"
+    }
+  },
+  
+  "ldap": {
+    "user": "highpriv",
+    "password": "P@ssw0rd1339.",
+    "domain": "badsuccessor.lab"
+  },
+  
+  "notes": [
+    "Keep this file secure - it contains credentials!",
+    "This file is gitignored by default",
+    "DC: 192.0.2.54 / TestClient: 192.0.2.68",
+    "Each target has unique DPAPI key",
+    "Use make test-live to run these tests"
+  ]
+}

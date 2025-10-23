@@ -309,7 +309,7 @@ class HighValueLoader:
                         parsed = json.loads(groups_str)
                         if isinstance(parsed, list):
                             group_names = [str(x) for x in parsed]
-                    except:
+                    except Exception:
                         group_names = [groups_str.strip('[]')]
                         
         # Handle group_sids array
@@ -325,7 +325,7 @@ class HighValueLoader:
                         parsed = json.loads(sids_str)
                         if isinstance(parsed, list):
                             groups = [str(x) for x in parsed]
-                    except:
+                    except Exception:
                         groups = [sids_str.strip('[]')]
         
         # Create user data starting with all_props and add our additional fields
@@ -387,7 +387,7 @@ class HighValueLoader:
                                 groups = [str(x) for x in parsed]
                             else:
                                 group_names = [str(x) for x in parsed]
-                    except:
+                    except Exception:
                         # Fallback to single item
                         if data_str.startswith('S-1-5-'):
                             groups = [data_str.strip('[]')]
@@ -436,13 +436,13 @@ class HighValueLoader:
         # Detect format type
         if self._is_bhce_format(data):
             self.format_type = "bhce"
-            print(f"[+] BloodHound Community Edition export detected")
+            print("[+] BloodHound Community Edition export detected")
             return self._load_bhce_json(data)
         elif isinstance(data, list) and len(data) > 0:
             # Check if it's legacy format
             if self._has_fields(data[0].keys()):
                 self.format_type = "legacy"
-                print(f"[+] Legacy BloodHound export detected")
+                print("[+] Legacy BloodHound export detected")
                 return self._load_legacy_json(data)
             else:
                 self._schema_help()

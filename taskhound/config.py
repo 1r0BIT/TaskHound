@@ -1,5 +1,4 @@
 import argparse, os, subprocess, sys, traceback
-from .utils.logging import warn
 from .utils.helpers import is_ipv4
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,6 +49,13 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--unsaved-creds", action='store_true', help="Show scheduled tasks that do not store credentials (unsaved credentials)")
     scan.add_argument("--credguard-detect", action='store_true', default=False,
         help="EXPERIMENTAL: Attempt to detect Credential Guard status via remote registry (default: off). Only use if you know your environment supports it.")
+    
+    # DPAPI decryption options
+    dpapi = ap.add_argument_group('DPAPI Credential Decryption')
+    dpapi.add_argument("--loot", action='store_true', default=False,
+        help="Automatically download and decrypt ALL Task Scheduler credential blobs (requires --dpapi-key)")
+    dpapi.add_argument("--dpapi-key", 
+        help="DPAPI_SYSTEM userkey from LSA secrets dump (hex format, e.g., 0x51e43225e5b43b25d3768a2ae7f99934cb35d3ea)")
 
     # LDAP/SID Resolution options
     ldap = ap.add_argument_group('LDAP/SID Resolution options',
@@ -72,6 +78,51 @@ def build_parser() -> argparse.ArgumentParser:
     misc = ap.add_argument_group('Misc')
     misc.add_argument("--debug", action="store_true", help="Enable debug output (print full stack traces)")
     return ap
+
+
+
+
+def load_bloodhound_config():
+    """Load BloodHound configuration from config file"""
+    import configparser
+    import os
+    from pathlib import Path
+    
+    # Look for config file in current directory first, then user's home
+    config_paths = [
+        Path.cwd() / "bh_connector.config",
+        Path.home() / ".taskhound" / "bh_connector.config",
+        Path.home() / "bh_connector.config"
+    ]
+    
+    for config_path in config_paths:
+        if config_path.exists():
+            try:
+                config = configparser.ConfigParser()
+                config.read(config_path)
+                
+                if 'BloodHound' in config:
+                    bh_section = config['BloodHound']
+                    config_data = {}
+                    
+                    # Extract configuration values
+                    for key in ['ip', 'username', 'password', 'type', 'save_file']:
+                        if key in bh_section:
+                            value = bh_section[key].strip()
+                            # Handle environment variable substitution
+                            if value.startswith('${') and value.endswith('}'):
+                                env_var = value[2:-1]
+                                value = os.environ.get(env_var, value)
+                            config_data[key] = value
+                    
+                    return config_data
+                    
+            except Exception as e:
+                print(f"[!] Warning: Error parsing config file {config_path}: {e}")
+                continue
+    
+    return None
+
 
 def validate_args(args):
     # Handle --include-all flag expansion and warnings
@@ -147,48 +198,6 @@ def validate_args(args):
             print("[!] ERROR: Cannot use both --bh-live and --bh-data simultaneously")
             print("[!] Choose either live connection OR file import")
             sys.exit(1)
-
-
-def load_bloodhound_config():
-    """Load BloodHound configuration from config file"""
-    import configparser
-    import os
-    from pathlib import Path
-    
-    # Look for config file in current directory first, then user's home
-    config_paths = [
-        Path.cwd() / "bh_connector.config",
-        Path.home() / ".taskhound" / "bh_connector.config",
-        Path.home() / "bh_connector.config"
-    ]
-    
-    for config_path in config_paths:
-        if config_path.exists():
-            try:
-                config = configparser.ConfigParser()
-                config.read(config_path)
-                
-                if 'BloodHound' in config:
-                    bh_section = config['BloodHound']
-                    config_data = {}
-                    
-                    # Extract configuration values
-                    for key in ['ip', 'username', 'password', 'type', 'save_file']:
-                        if key in bh_section:
-                            value = bh_section[key].strip()
-                            # Handle environment variable substitution
-                            if value.startswith('${') and value.endswith('}'):
-                                env_var = value[2:-1]
-                                value = os.environ.get(env_var, value)
-                            config_data[key] = value
-                    
-                    return config_data
-                    
-            except Exception as e:
-                print(f"[!] Warning: Error parsing config file {config_path}: {e}")
-                continue
-    
-    return None
     
     # Offline mode validation
     if args.offline:
@@ -212,6 +221,14 @@ def load_bloodhound_config():
     if not (args.target or args.targets_file):
         print("[!] Either --target or --targets-file is required for online mode")
         sys.exit(1)
+    
+    # LDAP requires FQDN format - warn if domain appears to be NetBIOS
+    if not args.no_ldap and not args.ldap_domain and '.' not in args.domain:
+        print("[!] WARNING: Domain appears to be NetBIOS format (e.g., 'DOMAIN')")
+        print("[!] LDAP features require FQDN format (e.g., 'domain.local')")
+        print("[!] Use --ldap-domain with FQDN or change --domain to FQDN")
+        print("[!] Continuing, but LDAP SID resolution may fail")
+        print()
 
     # KRB5 cache vs username mismatch
     if args.kerberos and "KRB5CCNAME" in os.environ:
@@ -222,7 +239,7 @@ def load_bloodhound_config():
                     cache_principal = line.split(":", 1)[1].strip()
                     cache_user = cache_principal.split("@")[0]
                     if cache_user.lower() != args.username.lower():
-                        print(f"[!] Kerberos ticket cache user mismatch!")
+                        print("[!] Kerberos ticket cache user mismatch!")
                         print(f"    KRB5CCNAME contains tickets for: {cache_user}")
                         print(f"    But you supplied username     : {args.username}")
                         print("[!] Aborting. Please kdestroy your cache or use the matching user.")
@@ -244,3 +261,32 @@ def load_bloodhound_config():
     if args.kerberos and args.target and is_ipv4(args.target.strip()):
         print("[!] Targets verification failed. Please supply hostnames or fqdns or switch to NTLM Auth (Kerberos doesn't like IP addresses)")
         sys.exit(1)
+
+    # DPAPI key with multiple targets validation
+    if args.dpapi_key and args.targets_file and not args.offline:
+        print("[!] ERROR: --dpapi-key cannot be used with --targets-file")
+        print("[!] Each target has a unique DPAPI key - you cannot use the same key for multiple targets")
+        print()
+        print("[*] Valid workflows:")
+        print("    1. Single target with key:  --target <host> --loot --dpapi-key <key>")
+        print("    2. Collect from multiple:   --targets-file <file> --loot (without --dpapi-key)")
+        print("       Then decrypt offline:    --offline dpapi_loot/<target> --dpapi-key <target_key>")
+        sys.exit(1)
+    
+    # DPAPI loot validation for online mode
+    if args.loot and not args.offline:
+        # Online mode: --loot can work with or without --dpapi-key
+        # With key: live decryption
+        # Without key: offline collection
+        if not args.dpapi_key:
+            print("[*] --loot specified without --dpapi-key")
+            print("[*] Will collect DPAPI files for offline decryption")
+            print("[!] To decrypt immediately, obtain dpapi_userkey with: nxc smb <target> -u <user> -p <pass> --lsa")
+            print()
+    
+    # DPAPI offline decryption validation
+    if args.offline and args.dpapi_key:
+        # Offline mode with DPAPI key: decrypt previously collected files
+        print("[*] Offline mode with --dpapi-key enabled")
+        print("[*] Will decrypt DPAPI files from offline directory")
+        print()

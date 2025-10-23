@@ -6,7 +6,7 @@
 import re
 import socket
 import struct
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple
 from ..utils.logging import warn, info, debug
 from ..parsers.highvalue import HighValueLoader
 
@@ -161,7 +161,7 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
         if kerberos and not hashes:
             # Only use Kerberos if specifically requested and no hashes provided
             try:
-                debug(f"Attempting Kerberos authentication for LDAP SID resolution")
+                debug("Attempting Kerberos authentication for LDAP SID resolution")
                 conn = Connection(server, authentication=SASL, sasl_mechanism=KERBEROS, auto_bind=True)
             except Exception as e:
                 warn(f"Kerberos authentication failed for LDAP, falling back to NTLM: {e}")
@@ -175,7 +175,7 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
                     lm_hash, nt_hash = hashes.split(':', 1)
                 else:
                     lm_hash, nt_hash = '', hashes
-                debug(f"Using NTLM hash authentication for LDAP SID resolution")
+                debug("Using NTLM hash authentication for LDAP SID resolution")
                 try:
                     # For NTLM hash authentication, we need to use a different approach
                     # ldap3 doesn't directly support NTLM hash authentication in newer versions
@@ -189,7 +189,7 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
                     return None
             else:
                 # Username/password authentication with NTLM
-                debug(f"Using NTLM username/password authentication for LDAP SID resolution")
+                debug("Using NTLM username/password authentication for LDAP SID resolution")
                 try:
                     # Try NTLM first
                     conn = Connection(server, 
@@ -202,7 +202,7 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
                     if server_port == 389 and not server_ssl:
                         try:
                             conn.start_tls()
-                        except:
+                        except Exception:
                             pass
                             
                     if not conn.bind():
@@ -217,7 +217,7 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
                         if server_port == 389 and not server_ssl:
                             try:
                                 conn.start_tls()
-                            except:
+                            except Exception:
                                 pass
                                 
                         if not conn.bind():

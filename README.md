@@ -15,7 +15,7 @@ TaskHound hunts for Windows scheduled tasks that run with privileged accounts an
 - **BloodHound Integration**: Connect to your live BloodHound Instance or ingest exports
 - **DPAPI Support**: Collect and decrypt DPAPI blobs from scheduled tasks
 - **SID Resolution**: Supports LDAP for SID lookups when encountered in tasks
-- **Password Analysis**: Analyzes password age relative to task creation date for DPAPI dump viability
+- **Password Analysis**: Analyzes password age relative to task creation date
 - **Offline Analysis**: Process previously collected XML files
 - **BOF**: BOF implementation for AdaptixC2 (see [BOF/README.md](BOF/README.md))
 
@@ -316,7 +316,6 @@ TaskHound relies heavily on impacket for SMB/RPC/Kerberos operations. Standard i
 
 When caffeine intake and free time align:
 - Dedicated NetExec module (PR in Review)
-- Support custom Tier-0 mappings instead of just the default ones
 - OpenGraph integration for attack path mapping  
 
 ## Disclaimer
@@ -329,7 +328,7 @@ TaskHound is strictly an **audit and educational tool**. Use only in environment
 
 [SpecterOps/BloodHound](https://github.com/SpecterOps/BloodHound) - Active Directory attack path analysis
 
-[skelsec/dpapick3](https://github.com/skelsec/dpapick3) - DPAPI decryption library and implementation reference
+[tijldeneut/DPAPIck3](https://github.com/tijldeneut/DPAPIck3) - DPAPI decryption implementation reference
 
 [Pupy Project](https://github.com/n1nj4sec/pupy) - DPAPI SYSTEM masterkey decryption techniques
 

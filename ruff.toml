@@ -1,0 +1,51 @@
+# Ruff configuration for TaskHound
+# https://docs.astral.sh/ruff/
+
+# Target Python 3.8+ for compatibility
+target-version = "py38"
+
+# Line length
+line-length = 120
+
+[lint]
+# Enable these rule categories
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+]
+
+# Ignore specific rules
+ignore = [
+    "E501",  # Line too long (handled by formatter)
+    "B008",  # Do not perform function call in argument defaults
+    "N802",  # Function name should be lowercase (impacket uses mixed case)
+    "N806",  # Variable should be lowercase (impacket uses mixed case)
+]
+
+# Exclude paths
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "*.egg-info",
+]
+
+[format]
+# Use double quotes for strings
+quote-style = "double"
+
+# Indent with spaces
+indent-style = "space"
+
+# Line ending style
+line-ending = "auto"

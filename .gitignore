@@ -1,60 +1,120 @@
-# Python
+# =============================================================================
+# SENSITIVE FILES - DO NOT COMMIT!
+# =============================================================================
+# Configuration files with credentials
+bh_connector.config
+tests/live_test_config.json
+tests/LIVE_TESTS.md
+
+# Real/production test data
+tests/test_data/*_real.json
+tests/test_data/*_live.json
+
+# Environment files
+.env
+.env.local
+
+# =============================================================================
+# PYTHON BUILD & CACHE
+# =============================================================================
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*.egg-info/
-*.eggs/
+*$py.class
+*.so
+
+# Distribution / packaging
 dist/
 build/
+*.egg-info/
+*.egg
+MANIFEST
 
-# Virtualenvs
-.venv/
+# Virtual environments
 venv/
+env/
+.venv/
+ENV/
 
-# Tools
+# =============================================================================
+# TESTING & COVERAGE
+# =============================================================================
+# Pytest
 .pytest_cache/
+.tox/
+
+# Coverage reports
 .coverage
-.idea/
-.vscode/
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
 
-# BloodHound Connector Config (contains credentials)
-bh_connector.config
-
-# Example outputs
-examples/out/
-
-# Test data and outputs
-tests/
+# =============================================================================
+# TOOL OUTPUT & TEMPORARY FILES
+# =============================================================================
+# TaskHound output directories
 dpapi_loot/
+out/
+output/
+loot/
+backup/
 
-# Debug and temporary files
-debug_*.py
+# Export files
 *_output.csv
 *_output.json
+*_output.txt
+
+# Temporary test files
 test_*.json
 test_*.csv
+test_*.txt
 
-# Live debug data and test results (contains sensitive data)
+# Log files
+*.log
+*.log.*
+
+# Debug scripts
+debug_*.py
 live_debug/
 test_*debug*.py
 test_*analysis*.py
 test_*case*.py
 create_debug_engine.py
 
+# =============================================================================
+# IDE & EDITOR
+# =============================================================================
+# VS Code
+.vscode/
+
+# PyCharm / IntelliJ
+.idea/
+
+# Vim
+*.swp
+*.swo
+*~
+.*.sw?
+
 # macOS
 .DS_Store
+.AppleDouble
+.LSOverride
 
-# Environment files
-.env
-bh_connector.config
+# =============================================================================
+# CODE QUALITY TOOLS
+# =============================================================================
+.ruff_cache/
+.mypy_cache/
+.pytype/
 
-# Lockfiles
-poetry.lock
-Pipfile.lock
-
-# BOF compilation artifacts
+# =============================================================================
+# BOF COMPILATION ARTIFACTS
+# =============================================================================
 *.o
 *.obj
 *.exe
 BOF/AdaptixC2/taskhound.o
 BOF/AdaptixC2/taskhound.exe
-Import_Tests/

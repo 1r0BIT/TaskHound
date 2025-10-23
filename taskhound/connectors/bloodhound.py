@@ -9,8 +9,7 @@ Author: 0xr0BIT
 """
 
 import json
-import sys
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 import requests
 try:
     from neo4j import GraphDatabase
@@ -374,7 +373,7 @@ class BloodHoundConnector:
         except Exception as e:
             try:
                 driver.close()
-            except:
+            except Exception:
                 pass
             warn(f"BloodHound query execution failed: {e}")
             return False
