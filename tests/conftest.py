@@ -1,9 +1,10 @@
 """
 Pytest configuration and shared fixtures for TaskHound tests.
 """
-import pytest
 import json
 from pathlib import Path
+
+import pytest
 
 
 @pytest.fixture
@@ -20,20 +21,20 @@ def live_config():
     Create a file: tests/live_test_config.json based on live_test_config.json.example
     """
     config_file = Path(__file__).parent / "live_test_config.json"
-    
+
     if not config_file.exists():
         pytest.skip(f"Live test config not found: {config_file}\n"
                    f"Copy live_test_config.json.example to live_test_config.json and edit with your lab details")
-    
+
     with open(config_file) as f:
         config = json.load(f)
-    
+
     # Validate required fields
     required = ["domain", "username", "password", "targets", "dc_ip"]
     for field in required:
         if field not in config:
             pytest.skip(f"Required field '{field}' missing in live_test_config.json")
-    
+
     return config
 
 

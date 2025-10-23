@@ -5,10 +5,10 @@ These tests validate that both features work together:
 - Extract credentials using DPAPI
 - Use those credentials for BloodHound ingestion
 """
-import pytest
 import subprocess
 from pathlib import Path
 
+import pytest
 
 pytestmark = [pytest.mark.slow, pytest.mark.live]
 
@@ -24,10 +24,10 @@ def test_dpapi_extraction_with_bloodhound_legacy(
     3. Upload results to BloodHound Legacy
     """
     bh_config = live_config.get("bloodhound_live", {}).get("legacy", {})
-    
+
     if not bh_config.get("enabled", False):
         pytest.skip("BloodHound Legacy not configured in live_test_config.json")
-    
+
     # Run TaskHound with both DPAPI and BloodHound options
     cmd = [
         "python", "-m", "taskhound",
@@ -44,11 +44,11 @@ def test_dpapi_extraction_with_bloodhound_legacy(
         "--bh-password", bh_config["password"],
         "--dc-ip", live_config["dc_ip"],
     ]
-    
+
     result = subprocess.run(
         cmd, capture_output=True, text=True, cwd=Path(__file__).parent.parent
     )
-    
+
     # Basic execution validation
     assert result.returncode == 0, f"TaskHound failed: {result.stderr}"
     assert "decrypted" in result.stdout.lower() or "bloodhound" in result.stdout.lower()
@@ -63,10 +63,10 @@ def test_dpapi_extraction_with_bloodhound_ce(
     Uses test client for variety in tested systems.
     """
     bh_config = live_config.get("bloodhound_live", {}).get("bhce", {})
-    
+
     if not bh_config.get("enabled", False):
         pytest.skip("BloodHound CE not configured in live_test_config.json")
-    
+
     cmd = [
         "python", "-m", "taskhound",
         "--target", target_client,
@@ -82,10 +82,10 @@ def test_dpapi_extraction_with_bloodhound_ce(
         "--bh-password", bh_config["password"],
         "--dc-ip", live_config["dc_ip"],
     ]
-    
+
     result = subprocess.run(
         cmd, capture_output=True, text=True, cwd=Path(__file__).parent.parent
     )
-    
+
     assert result.returncode == 0, f"TaskHound failed: {result.stderr}"
     assert "decrypted" in result.stdout.lower() or "bloodhound" in result.stdout.lower()

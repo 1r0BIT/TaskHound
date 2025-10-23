@@ -7,8 +7,9 @@ import re
 import socket
 import struct
 from typing import Optional, Tuple
-from ..utils.logging import warn, info, debug
+
 from ..parsers.highvalue import HighValueLoader
+from ..utils.logging import debug, info, warn
 
 
 def is_sid(value: str) -> bool:
@@ -34,26 +35,26 @@ def sid_to_binary(sid_string: str) -> Optional[bytes]:
     try:
         if not sid_string.startswith('S-'):
             return None
-            
+
         parts = sid_string[2:].split('-')
         if len(parts) < 3:
             return None
-            
+
         revision = int(parts[0])
         authority = int(parts[1])
         subauthorities = [int(x) for x in parts[2:]]
-        
+
         # Pack the SID according to Windows SID binary format
         # Revision (1 byte) + SubAuthorityCount (1 byte) + Authority (6 bytes) + SubAuthorities (4 bytes each)
         binary_sid = struct.pack('B', revision)  # Revision
         binary_sid += struct.pack('B', len(subauthorities))  # SubAuthorityCount
         binary_sid += struct.pack('>Q', authority)[2:]  # Authority (6 bytes, big-endian)
-        
+
         for subauth in subauthorities:
             binary_sid += struct.pack('<I', subauth)  # SubAuthorities (little-endian)
-            
+
         return binary_sid
-        
+
     except (ValueError, struct.error) as e:
         debug(f"Error converting SID {sid_string} to binary: {e}")
         return None
@@ -72,7 +73,7 @@ def resolve_sid_from_bloodhound(sid: str, hv_loader: Optional[HighValueLoader]) 
     """
     if not hv_loader or not hv_loader.loaded:
         return None
-        
+
     # Check if SID exists in BloodHound data
     user_data = hv_loader.hv_sids.get(sid)
     if user_data:
@@ -81,11 +82,11 @@ def resolve_sid_from_bloodhound(sid: str, hv_loader: Optional[HighValueLoader]) 
         if username:
             info(f"Resolved SID {sid} to {username} via BloodHound data")
             return username.strip().strip('"')
-    
+
     return None
 
 
-def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None, 
+def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
                         username: Optional[str] = None, password: Optional[str] = None,
                         hashes: Optional[str] = None, kerberos: bool = False) -> Optional[str]:
     """
@@ -104,19 +105,19 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
         Username if resolved via LDAP, None otherwise
     """
     try:
-        from ldap3 import Server, Connection, ALL, NTLM, SASL, KERBEROS
-        from ldap3.core.exceptions import LDAPException, LDAPBindError
-        
+        from ldap3 import ALL, KERBEROS, NTLM, SASL, Connection, Server
+        from ldap3.core.exceptions import LDAPBindError, LDAPException
+
     except ImportError:
         warn("ldap3 library not available - SID resolution via LDAP disabled")
         return None
-    
+
     # Convert SID to binary format for LDAP search
     binary_sid = sid_to_binary(sid)
     if not binary_sid:
         warn(f"Failed to convert SID {sid} to binary format")
         return None
-    
+
     try:
         # Determine DC address
         if not dc_ip:
@@ -126,13 +127,13 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
             except socket.gaierror:
                 warn(f"Could not resolve domain {domain} to IP for LDAP query")
                 return None
-        
+
         # Create LDAP server connection with proper timeout settings and SSL support
         # Try LDAPS first (636), then LDAP with StartTLS (389), then plain LDAP as fallback
         server = None
         server_ssl = False
         server_port = 389
-        
+
         for port, use_ssl, use_tls in [(636, True, False), (389, False, True), (389, False, False)]:
             try:
                 debug(f"Trying LDAP connection on port {port}, SSL={use_ssl}, TLS={use_tls}")
@@ -151,11 +152,11 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
                 debug(f"Connection to {dc_ip}:{port} failed: {e}")
                 server = None
                 continue
-                
+
         if not server:
             warn(f"Could not establish LDAP connection to {dc_ip} on any port")
             return None
-        
+
         # Determine authentication method - prioritize NTLM over Kerberos for reliability
         conn = None
         if kerberos and not hashes:
@@ -166,7 +167,7 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
             except Exception as e:
                 warn(f"Kerberos authentication failed for LDAP, falling back to NTLM: {e}")
                 conn = None
-        
+
         # Use NTLM authentication (more reliable for our use case)
         if not conn:
             if hashes:
@@ -183,7 +184,7 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
                     warn("LDAP hash authentication not supported with current ldap3 version")
                     warn("Please provide password instead of hashes for LDAP SID resolution")
                     return None
-                        
+
                 except Exception as e:
                     warn(f"NTLM hash authentication failed for LDAP: {e}")
                     return None
@@ -192,19 +193,19 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
                 debug("Using NTLM username/password authentication for LDAP SID resolution")
                 try:
                     # Try NTLM first
-                    conn = Connection(server, 
-                                    user=f"{domain}\\{username}", 
-                                    password=password, 
-                                    authentication=NTLM, 
+                    conn = Connection(server,
+                                    user=f"{domain}\\{username}",
+                                    password=password,
+                                    authentication=NTLM,
                                     auto_bind=False)
-                    
+
                     # Handle StartTLS if needed
                     if server_port == 389 and not server_ssl:
                         try:
                             conn.start_tls()
                         except Exception:
                             pass
-                            
+
                     if not conn.bind():
                         debug(f"NTLM bind failed, trying simple bind: {conn.last_error}")
                         # Try simple bind as fallback
@@ -212,55 +213,55 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
                                         user=f"{username}@{domain}",
                                         password=password,
                                         auto_bind=False)
-                        
+
                         # Handle StartTLS for simple bind too
                         if server_port == 389 and not server_ssl:
                             try:
                                 conn.start_tls()
                             except Exception:
                                 pass
-                                
+
                         if not conn.bind():
                             warn(f"All authentication methods failed: {conn.last_error}")
                             return None
                 except Exception as e:
                     warn(f"Authentication failed for LDAP: {e}")
                     return None
-        
+
         if not conn or not conn.bound:
             warn(f"Failed to bind to LDAP server {dc_ip} for SID resolution")
             return None
-        
+
         debug(f"Successfully bound to LDAP server {dc_ip}")
-        
+
         # Build search base DN from domain
         base_dn = ','.join([f"DC={part}" for part in domain.split('.')])
         debug(f"Using LDAP base DN: {base_dn}")
-        
+
         # Create search filter using binary SID
         # The binary SID needs to be properly escaped for LDAP
         binary_sid_escaped = ''.join([f'\\{b:02x}' for b in binary_sid])
         search_filter = f"(objectSid={binary_sid_escaped})"
         debug(f"LDAP search filter: {search_filter}")
-        
+
         # Perform the search
         search_success = conn.search(
             search_base=base_dn,
             search_filter=search_filter,
             attributes=['samAccountName', 'name', 'displayName', 'objectClass']
         )
-        
+
         if search_success and conn.entries:
             entry = conn.entries[0]
             debug(f"Found LDAP entry: {entry.entry_dn}")
-            
+
             # Try different name attributes in order of preference
             sam_account_name = str(entry.samAccountName) if hasattr(entry, 'samAccountName') and entry.samAccountName else None
             display_name = str(entry.displayName) if hasattr(entry, 'displayName') and entry.displayName else None
             name = str(entry.name) if hasattr(entry, 'name') and entry.name else None
-            
+
             username_resolved = sam_account_name or display_name or name
-            
+
             if username_resolved:
                 info(f"Resolved SID {sid} to {username_resolved} via LDAP")
                 conn.unbind()
@@ -269,10 +270,10 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
                 debug(f"No usable name attribute found in LDAP entry for SID {sid}")
         else:
             debug(f"No LDAP entries found for SID {sid}")
-        
+
         conn.unbind()
         return None
-        
+
     except LDAPBindError as e:
         warn(f"LDAP bind error during SID resolution: {e}")
         return None
@@ -313,31 +314,31 @@ def resolve_sid(sid: str, hv_loader: Optional[HighValueLoader] = None,
     if not is_sid(sid):
         # Not a SID, return as-is
         return sid, None
-    
+
     debug(f"Attempting to resolve SID: {sid}")
-    
+
     # Try BloodHound first
     resolved = resolve_sid_from_bloodhound(sid, hv_loader)
     if resolved:
         debug(f"SID {sid} resolved via BloodHound: {resolved}")
         return f"{resolved} ({sid})", resolved
-    
+
     # Try LDAP if enabled and we have sufficient authentication info
     # Prioritize dedicated LDAP credentials over main auth credentials
     ldap_auth_domain = ldap_domain if ldap_domain else domain
     ldap_auth_user = ldap_user if ldap_user else username
     ldap_auth_password = ldap_password if ldap_password else password
-    
+
     # Only use LDAP hash authentication if no dedicated LDAP password is provided
     ldap_auth_hashes = None if ldap_password else hashes
-    
+
     if not no_ldap and ldap_auth_domain and ldap_auth_user:
         debug(f"Attempting LDAP resolution for SID {sid}")
         resolved = resolve_sid_via_ldap(sid, ldap_auth_domain, dc_ip, ldap_auth_user, ldap_auth_password, ldap_auth_hashes, kerberos)
         if resolved:
             debug(f"SID {sid} resolved via LDAP: {resolved}")
             return f"{resolved} ({sid})", resolved
-    
+
     # Could not resolve - return SID with appropriate explanation
     if no_ldap:
         debug(f"SID {sid} not resolved: LDAP resolution disabled")
@@ -377,7 +378,7 @@ def format_runas_with_sid_resolution(runas: str, hv_loader: Optional[HighValueLo
     """
     if not runas:
         return runas, None
-        
+
     # Check if it's a SID
     if is_sid(runas):
         return resolve_sid(runas, hv_loader, no_ldap, domain, dc_ip, username, password, hashes, kerberos, ldap_domain, ldap_user, ldap_password)

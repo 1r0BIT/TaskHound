@@ -1,7 +1,6 @@
 """
 Test that all modules can be imported without errors.
 """
-import pytest
 
 
 def test_import_cli():
@@ -19,10 +18,8 @@ def test_import_engine():
 
 def test_import_dpapi_modules():
     """Test DPAPI module imports."""
-    from taskhound.dpapi import looter
-    from taskhound.dpapi import parser
-    from taskhound.dpapi import decryptor
-    
+    from taskhound.dpapi import decryptor, looter, parser
+
     assert hasattr(looter, 'loot_credentials')
     assert hasattr(parser, 'DPAPIBlobParser')
     assert hasattr(decryptor, 'DPAPIDecryptor')
@@ -36,19 +33,16 @@ def test_import_bloodhound_connector():
 
 def test_import_parsers():
     """Test parser modules."""
-    from taskhound.parsers import task_xml
-    from taskhound.parsers import highvalue
-    
+    from taskhound.parsers import highvalue, task_xml
+
     assert hasattr(task_xml, 'parse_task_xml')
     assert hasattr(highvalue, 'HighValueLoader')
 
 
 def test_import_utils():
     """Test utility modules."""
-    from taskhound.utils import helpers
-    from taskhound.utils import logging
-    from taskhound.utils import sid_resolver
-    
+    from taskhound.utils import helpers, logging, sid_resolver
+
     # Basic smoke test - modules import without errors
     assert helpers is not None
     assert logging is not None

@@ -25,11 +25,11 @@ def looks_like_domain_user(runas: str) -> bool:
         up = val.upper()
         if up.startswith("S-1-5-18") or up.startswith("S-1-5-19") or up.startswith("S-1-5-20"):
             return False
-        
+
         # Domain SIDs have pattern S-1-5-21-domain-domain-domain-rid
         if up.startswith("S-1-5-21-"):
             return True
-        
+
         # Other SIDs are likely not domain users
         return False
 

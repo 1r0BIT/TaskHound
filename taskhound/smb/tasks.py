@@ -8,8 +8,10 @@
 
 import io
 from typing import List, Tuple
-from ..utils.logging import warn
+
 from impacket.smbconnection import SMBConnection
+
+from ..utils.logging import warn
 
 TASK_ROOT = r"\Windows\System32\Tasks"
 

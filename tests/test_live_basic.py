@@ -1,11 +1,11 @@
 """
 Live tests for basic TaskHound functionality.
 """
-import pytest
-import subprocess
 import json
+import subprocess
 from pathlib import Path
 
+import pytest
 
 pytestmark = [pytest.mark.slow, pytest.mark.live]
 
@@ -20,7 +20,7 @@ def run_taskhound(target, args, live_config):
         "--domain", live_config["domain"],
     ]
     cmd.extend(args)
-    
+
     result = subprocess.run(
         cmd,
         capture_output=True,
@@ -34,7 +34,7 @@ def run_taskhound(target, args, live_config):
 def test_basic_enumeration(live_config, target_dc):
     """Test basic task enumeration against live target."""
     result = run_taskhound(target_dc, [], live_config)
-    
+
     assert result.returncode == 0, f"Command failed: {result.stderr}"
     assert "Found" in result.stdout or "tasks" in result.stdout.lower()
 
@@ -42,20 +42,20 @@ def test_basic_enumeration(live_config, target_dc):
 def test_json_output(live_config, target_dc, sample_output_dir):
     """Test JSON export functionality."""
     json_file = sample_output_dir / "tasks.json"
-    
+
     result = run_taskhound(
         target_dc,
         ["--json", str(json_file)],
         live_config
     )
-    
+
     assert result.returncode == 0, f"Command failed: {result.stderr}"
     assert json_file.exists(), "JSON file not created"
-    
+
     # Validate JSON structure
     with open(json_file) as f:
         data = json.load(f)
-    
+
     assert isinstance(data, list), "JSON should be a list of tasks"
     if data:  # If tasks found
         task = data[0]
@@ -66,15 +66,15 @@ def test_json_output(live_config, target_dc, sample_output_dir):
 def test_xml_backup(live_config, target_dc, sample_output_dir):
     """Test XML backup functionality."""
     backup_dir = sample_output_dir / "xml_backup"
-    
+
     result = run_taskhound(
         target_dc,
         ["--backup", str(backup_dir)],
         live_config
     )
-    
+
     assert result.returncode == 0, f"Command failed: {result.stderr}"
-    
+
     # Check target-specific subdirectory
     target_backup_dir = backup_dir / target_dc
     if target_backup_dir.exists():
@@ -93,7 +93,7 @@ def test_credguard_detection(live_config, target_dc):
         ["--credguard-detect"],
         live_config
     )
-    
+
     assert result.returncode == 0, f"Command failed: {result.stderr}"
     # Output should mention credential guard status
     assert "credential" in result.stdout.lower()
@@ -106,6 +106,6 @@ def test_no_ldap_mode(live_config, target_dc):
         ["--no-ldap"],
         live_config
     )
-    
+
     assert result.returncode == 0, f"Command failed: {result.stderr}"
     assert "Found" in result.stdout or "tasks" in result.stdout.lower()

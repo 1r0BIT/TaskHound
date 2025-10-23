@@ -4,9 +4,8 @@
 # via the SYSTEM\CurrentControlSet\Control\Lsa registry keys. Uses Impacket's RemoteOperations and
 # RemoteRegistry classes. Returns True if Credential Guard is detected, False otherwise.
 
-from impacket.dcerpc.v5 import transport
+from impacket.dcerpc.v5 import rrp, transport
 from impacket.dcerpc.v5.rpcrt import DCERPCException
-from impacket.dcerpc.v5 import rrp
 
 
 def check_credential_guard(smb_conn, host):
@@ -17,7 +16,7 @@ def check_credential_guard(smb_conn, host):
     #
     # Returns True if either key is set to 1, False otherwise or on error.
     try:
-        stringBinding = r'ncacn_np:{}[\pipe\winreg]'.format(host)
+        stringBinding = rf'ncacn_np:{host}[\pipe\winreg]'
         rpctransport = transport.DCERPCTransportFactory(stringBinding)
         rpctransport.set_smb_connection(smb_conn)
         dce = rpctransport.get_dce_rpc()

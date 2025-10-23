@@ -1,5 +1,11 @@
-import argparse, os, subprocess, sys, traceback
+import argparse
+import os
+import subprocess
+import sys
+import traceback
+
 from .utils.helpers import is_ipv4
+
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
@@ -13,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     auth.add_argument("-d", "--domain", help="Domain (required for online mode)")
     auth.add_argument("--hashes", help="NTLM hashes in LM:NT format (or NT-only 32-hex) to use instead of password")
     auth.add_argument("-k", "--kerberos", action="store_true", help="Use Kerberos authentication (supports ccache)")
-    
+
     # Target selection
     target = ap.add_argument_group('Target options')
     target.add_argument("-t", "--target", help="Single target")
@@ -24,22 +30,22 @@ def build_parser() -> argparse.ArgumentParser:
     scan = ap.add_argument_group('Scanning options')
     scan.add_argument("--offline", help="Offline mode: parse previously collected XML files from directory (no authentication required)")
     scan.add_argument("--bh-data", help="Path to High Value Target export (csv/json from Neo4j)")
-    
+
     # BloodHound live connection options
     bh_group = ap.add_argument_group('BloodHound Live Connection')
-    bh_group.add_argument("--bh-live", action="store_true", 
+    bh_group.add_argument("--bh-live", action="store_true",
                          help="Use live BloodHound connection (parameters can be provided via CLI or bh_connector.config file)")
     bh_group.add_argument("--bh-user", help="BloodHound username (or set in config file)")
     bh_group.add_argument("--bh-password", help="BloodHound password (or set in config file)")
     bh_group.add_argument("--bh-ip", default="127.0.0.1", help="BloodHound IP address (default: 127.0.0.1, or set in config file)")
-    
+
     # BloodHound type selection (mutually exclusive)
     bh_type = bh_group.add_mutually_exclusive_group()
     bh_type.add_argument("--bhce", action="store_true", help="Use BloodHound Community Edition (or set type=bhce in config)")
     bh_type.add_argument("--legacy", action="store_true", help="Use Legacy BloodHound (or set type=legacy in config)")
-    
+
     bh_group.add_argument("--bh-save", help="Save BloodHound query results to file (or set save_file in config)")
-    
+
     scan.add_argument("--include-ms", action="store_true",
                     help="Also include \\Microsoft scheduled tasks (WARNING: very slow)")
     scan.add_argument("--include-local", action="store_true",
@@ -49,18 +55,18 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--unsaved-creds", action='store_true', help="Show scheduled tasks that do not store credentials (unsaved credentials)")
     scan.add_argument("--credguard-detect", action='store_true', default=False,
         help="EXPERIMENTAL: Attempt to detect Credential Guard status via remote registry (default: off). Only use if you know your environment supports it.")
-    
+
     # DPAPI decryption options
     dpapi = ap.add_argument_group('DPAPI Credential Decryption')
     dpapi.add_argument("--loot", action='store_true', default=False,
         help="Automatically download and decrypt ALL Task Scheduler credential blobs (requires --dpapi-key)")
-    dpapi.add_argument("--dpapi-key", 
+    dpapi.add_argument("--dpapi-key",
         help="DPAPI_SYSTEM userkey from LSA secrets dump (hex format, e.g., 0x51e43225e5b43b25d3768a2ae7f99934cb35d3ea)")
 
     # LDAP/SID Resolution options
     ldap = ap.add_argument_group('LDAP/SID Resolution options',
                                 description='Alternative credentials for SID lookups. Useful when you only have NTLM hashes or local admin access (domain="."). SID resolution can use lower-privilege plaintext credentials.')
-    ldap.add_argument("--no-ldap", action='store_true', 
+    ldap.add_argument("--no-ldap", action='store_true',
                     help="Disable LDAP queries for SID resolution (improves OPSEC but reduces user-friendliness)")
     ldap.add_argument("--ldap-user", help="Alternative username for SID lookup (can be different from main auth credentials)")
     ldap.add_argument("--ldap-password", help="Alternative password for SID lookup (plaintext only - hashes not supported)")
@@ -87,24 +93,24 @@ def load_bloodhound_config():
     import configparser
     import os
     from pathlib import Path
-    
+
     # Look for config file in current directory first, then user's home
     config_paths = [
         Path.cwd() / "bh_connector.config",
         Path.home() / ".taskhound" / "bh_connector.config",
         Path.home() / "bh_connector.config"
     ]
-    
+
     for config_path in config_paths:
         if config_path.exists():
             try:
                 config = configparser.ConfigParser()
                 config.read(config_path)
-                
+
                 if 'BloodHound' in config:
                     bh_section = config['BloodHound']
                     config_data = {}
-                    
+
                     # Extract configuration values
                     for key in ['ip', 'username', 'password', 'type', 'save_file']:
                         if key in bh_section:
@@ -114,13 +120,13 @@ def load_bloodhound_config():
                                 env_var = value[2:-1]
                                 value = os.environ.get(env_var, value)
                             config_data[key] = value
-                    
+
                     return config_data
-                    
+
             except Exception as e:
                 print(f"[!] Warning: Error parsing config file {config_path}: {e}")
                 continue
-    
+
     return None
 
 
@@ -136,14 +142,14 @@ def validate_args(args):
         args.include_ms = True
         args.include_local = True
         args.unsaved_creds = True
-    
+
     # Validate BloodHound live connection parameters
     if args.bh_live:
         # Check if all parameters are provided via command line
         has_user = args.bh_user is not None
         has_password = args.bh_password is not None
         has_type = args.bhce or args.legacy
-        
+
         # If not all parameters provided, try to load from config file
         if not (has_user and has_password and has_type):
             try:
@@ -153,11 +159,11 @@ def validate_args(args):
                     if not has_user and 'username' in config_data:
                         args.bh_user = config_data['username']
                         has_user = True
-                    
+
                     if not has_password and 'password' in config_data:
                         args.bh_password = config_data['password']
                         has_password = True
-                    
+
                     if not has_type and 'type' in config_data:
                         bh_type = config_data['type'].lower()
                         if bh_type == 'bhce':
@@ -166,21 +172,21 @@ def validate_args(args):
                         elif bh_type == 'legacy':
                             args.legacy = True
                             has_type = True
-                    
+
                     # Set IP from config if not provided
                     if 'ip' in config_data and args.bh_ip == "127.0.0.1":  # Default value
                         args.bh_ip = config_data['ip']
-                    
+
                     # Set save file from config if provided and not set via CLI
                     if 'save_file' in config_data and not args.bh_save:
                         args.bh_save = config_data['save_file']
-                    
+
                     print(f"[+] Loaded BloodHound config: {args.bh_user}@{args.bh_ip} ({config_data.get('type', 'unknown')})")
                 else:
                     print("[!] No bh_connector.config found and missing required parameters")
             except Exception as e:
                 print(f"[!] Error loading BloodHound config: {e}")
-        
+
         # Final validation - ensure all required parameters are now available
         if not has_user:
             print("[!] ERROR: --bh-user is required when using --bh-live")
@@ -198,7 +204,7 @@ def validate_args(args):
             print("[!] ERROR: Cannot use both --bh-live and --bh-data simultaneously")
             print("[!] Choose either live connection OR file import")
             sys.exit(1)
-    
+
     # Offline mode validation
     if args.offline:
         # In offline mode, check that the path exists and is a directory
@@ -210,7 +216,7 @@ def validate_args(args):
             sys.exit(1)
         # Skip authentication validation for offline mode
         return
-    
+
     # Online mode validation - require authentication parameters
     if not args.username:
         print("[!] Username (-u/--username) is required for online mode")
@@ -221,7 +227,7 @@ def validate_args(args):
     if not (args.target or args.targets_file):
         print("[!] Either --target or --targets-file is required for online mode")
         sys.exit(1)
-    
+
     # LDAP requires FQDN format - warn if domain appears to be NetBIOS
     if not args.no_ldap and not args.ldap_domain and '.' not in args.domain:
         print("[!] WARNING: Domain appears to be NetBIOS format (e.g., 'DOMAIN')")
@@ -272,7 +278,7 @@ def validate_args(args):
         print("    2. Collect from multiple:   --targets-file <file> --loot (without --dpapi-key)")
         print("       Then decrypt offline:    --offline dpapi_loot/<target> --dpapi-key <target_key>")
         sys.exit(1)
-    
+
     # DPAPI loot validation for online mode
     if args.loot and not args.offline:
         # Online mode: --loot can work with or without --dpapi-key
@@ -283,7 +289,7 @@ def validate_args(args):
             print("[*] Will collect DPAPI files for offline decryption")
             print("[!] To decrypt immediately, obtain dpapi_userkey with: nxc smb <target> -u <user> -p <pass> --lsa")
             print()
-    
+
     # DPAPI offline decryption validation
     if args.offline and args.dpapi_key:
         # Offline mode with DPAPI key: decrypt previously collected files
