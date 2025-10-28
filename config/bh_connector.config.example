@@ -1,0 +1,45 @@
+# BloodHound Connector Configuration
+# Copy this file to bh_connector.config and update with your credentials
+# DO NOT commit config/bh_connector.config - it's already in .gitignore
+
+[BloodHound]
+# BloodHound connector URI (recommended - supports both BHCE and Legacy)
+# Supports various formats based on BloodHound type:
+#
+# BHCE (type=bhce) examples:
+#   connector = localhost                    # -> http://localhost:8080
+#   connector = http://localhost:8080        # -> http://localhost:8080
+#   connector = https://bh.domain.com        # -> https://bh.domain.com:443
+#
+# Legacy (type=legacy) examples:
+#   connector = localhost                    # -> bolt://localhost:7687
+#   connector = bolt://neo4j.local           # -> bolt://neo4j.local:7687
+#   connector = bolt://neo4j.local:7474      # -> bolt://neo4j.local:7474
+#
+connector = http://127.0.0.1:8080
+
+# Legacy format (deprecated but still supported for backward compatibility)
+# url = http://127.0.0.1:8080  # Older field name
+# ip = 127.0.0.1               # Oldest format (assumes http:// + :8080)
+
+# BloodHound credentials
+username = admin
+password = ${BH_PASSWORD}
+
+# BloodHound type: 'bhce' (BloodHound Community Edition) or 'legacy' (Legacy with Neo4j)
+# IMPORTANT: OpenGraph upload is ONLY compatible with BHCE!
+type = bhce
+
+# Optional: Save query results to file
+# save_file = bloodhound_users.json
+
+# ENVIRONMENT VARIABLE SUBSTITUTION:
+# Use ${VARIABLE_NAME} to reference environment variables
+# Example: password = ${BH_PASSWORD}
+# Then set it with: export BH_PASSWORD=yourpassword
+
+# NOTE FOR LEGACY BLOODHOUND:
+# Legacy BloodHound uses Neo4j with the Bolt protocol:
+#   connector = bolt://localhost:7687  (Neo4j Bolt protocol, default port)
+#   Neo4j browser at http://localhost:7474
+# Remember: OpenGraph is NOT supported with Legacy BloodHound!

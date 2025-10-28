@@ -1,10 +1,12 @@
 # =============================================================================
 # SENSITIVE FILES - DO NOT COMMIT!
 # =============================================================================
-# Configuration files with credentials
-bh_connector.config
+# Configuration and output files with credentials/sensitive data
+config/bh_connector.config
 tests/live_test_config.json
 tests/LIVE_TESTS.md
+opengraph/
+
 
 # Real/production test data
 tests/test_data/*_real.json
@@ -118,3 +120,6 @@ create_debug_engine.py
 *.exe
 BOF/AdaptixC2/taskhound.o
 BOF/AdaptixC2/taskhound.exe
+
+# Config files with credentials
+config/bh_connector.config

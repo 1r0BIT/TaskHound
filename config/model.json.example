@@ -1,0 +1,11 @@
+{
+  "custom_types": {
+    "scheduledtask": {
+      "icon": {
+        "type": "font-awesome",
+        "name": "clock",
+        "color": "#8B5CF6"
+      }
+    }
+  }
+}

@@ -206,7 +206,8 @@ def _process_offline_host(hostname: str, host_dir: str, hv: Optional[HighValueLo
         if meta.get("arguments"):
             what = f"{what} {meta.get('arguments')}"
 
-        row = _build_row(hostname, rel_path, meta)
+        # For offline processing, target_ip is not applicable (already offline)
+        row = _build_row(hostname, rel_path, meta, target_ip=None)
 
         # Determine if the task stores credentials or runs with token/S4U (no stored credentials)
         logon_type = (meta.get("logon_type") or "").strip()
@@ -346,10 +347,12 @@ def _sort_tasks_by_priority(lines: List[str]) -> List[str]:
     return result
 
 
-def _build_row(host: str, rel_path: str, meta: Dict[str, str]) -> Dict[str, Optional[str]]:
+def _build_row(host: str, rel_path: str, meta: Dict[str, str], 
+               target_ip: Optional[str] = None) -> Dict[str, Optional[str]]:
     # Create a structured dict for CSV/JSON export representing a task.
     #
     # Keeps the same keys used by the writer so rows can be dumped directly.
+    # Now includes both FQDN (host) and IP address (target_ip) for flexibility.
 
     # Determine credentials hint based on logon type
     logon_type_raw = meta.get("logon_type")
@@ -363,6 +366,7 @@ def _build_row(host: str, rel_path: str, meta: Dict[str, str]) -> Dict[str, Opti
 
     return {
         "host": host,
+        "target_ip": target_ip,  # Store the original target (IP or hostname)
         "path": rel_path,
         "type": "TASK",
         "runas": meta.get("runas"),
@@ -613,10 +617,24 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
     out_lines: List[str] = []
 
     credguard_status = None
+    server_fqdn = None  # Will store the resolved FQDN from SMB
     try:
         # Prefer explicit hashes parameter over password when provided
         smb = smb_connect(target, domain, username, hashes or password, kerberos=kerberos, dc_ip=dc_ip)
         good(f"{target}: Connected via SMB")
+        
+        # Resolve the actual FQDN from SMB connection
+        # This is critical when target is an IP address - BloodHound needs FQDNs
+        # Tries: 1) SMB hostname, 2) DNS via DC, 3) System DNS
+        from .smb.connection import get_server_fqdn
+        server_fqdn = get_server_fqdn(smb, target_ip=target, dc_ip=dc_ip)
+        if server_fqdn and server_fqdn != "UNKNOWN_HOST":
+            if server_fqdn.upper() != target.upper():
+                info(f"{target}: Resolved FQDN: {server_fqdn}")
+        else:
+            warn(f"{target}: Could not resolve FQDN - using target as-is")
+            server_fqdn = target
+        
         # Credential Guard detection (EXPERIMENTAL, only if enabled)
         if credguard_detect:
             credguard_status = check_credential_guard(smb, target)
@@ -768,7 +786,12 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
         what = meta.get("command") or ""
         if meta.get("arguments"):
             what = f"{what} {meta.get('arguments')}"
-        row = _build_row(target, rel_path, meta)
+        
+        # Use resolved FQDN as host, keep original target as IP
+        # This ensures BloodHound gets proper FQDNs even when connecting via IP
+        hostname = server_fqdn if server_fqdn else target
+        row = _build_row(hostname, rel_path, meta, target_ip=target)
+        
         # Add Credential Guard status to each row
         row["credential_guard"] = credguard_status
         # Determine if the task stores credentials or runs with token/S4U (no stored credentials)

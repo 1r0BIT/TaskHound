@@ -60,6 +60,48 @@ def sid_to_binary(sid_string: str) -> Optional[bytes]:
         return None
 
 
+def binary_to_sid(binary_sid: bytes) -> Optional[str]:
+    """
+    Convert a binary SID (from LDAP objectSid attribute) to string format.
+    
+    Args:
+        binary_sid: Binary representation of SID from LDAP
+        
+    Returns:
+        String representation like "S-1-5-21-...", None if invalid
+    """
+    try:
+        if not binary_sid or len(binary_sid) < 8:
+            return None
+
+        # Unpack the SID binary format
+        revision = struct.unpack('B', binary_sid[0:1])[0]
+        subauth_count = struct.unpack('B', binary_sid[1:2])[0]
+        
+        # Authority is 6 bytes, big-endian (bytes 2-8)
+        # We need to pad it to 8 bytes for unpacking as Q
+        authority = struct.unpack('>Q', b'\x00\x00' + binary_sid[2:8])[0]
+        
+        # Build the SID string
+        sid_parts = [f"S-{revision}-{authority}"]
+        
+        # Extract sub-authorities (4 bytes each, little-endian)
+        offset = 8
+        for _ in range(subauth_count):
+            if offset + 4 > len(binary_sid):
+                debug(f"Binary SID too short for claimed sub-authority count")
+                return None
+            subauth = struct.unpack('<I', binary_sid[offset:offset+4])[0]
+            sid_parts.append(str(subauth))
+            offset += 4
+        
+        return '-'.join(sid_parts)
+
+    except (ValueError, struct.error) as e:
+        debug(f"Error converting binary SID to string: {e}")
+        return None
+
+
 def resolve_sid_from_bloodhound(sid: str, hv_loader: Optional[HighValueLoader]) -> Optional[str]:
     """
     Resolve SID to username using BloodHound data.
@@ -197,7 +239,7 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
                                     user=f"{domain}\\{username}",
                                     password=password,
                                     authentication=NTLM,
-                                    auto_bind=False)
+                                      auto_bind=False)
 
                     # Handle StartTLS if needed
                     if server_port == 389 and not server_ssl:
@@ -282,6 +324,236 @@ def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
         return None
     except Exception as e:
         warn(f"Unexpected error during LDAP SID resolution: {e}")
+        debug(f"Full traceback: {e}", exc_info=True)
+        return None
+
+
+def resolve_name_to_sid_via_ldap(name: str, domain: str, is_computer: bool = False,
+                                 dc_ip: Optional[str] = None,
+                                 username: Optional[str] = None, password: Optional[str] = None,
+                                 hashes: Optional[str] = None, kerberos: bool = False) -> Optional[str]:
+    """
+    Resolve a computer name or username to its SID using LDAP.
+    This is the reverse operation of resolve_sid_via_ldap.
+    
+    Args:
+        name: Computer name (without domain) or username (USER@DOMAIN.TLD format or just USER)
+        domain: Domain name (e.g., "corp.local")
+        is_computer: True if resolving a computer account, False for user
+        dc_ip: Domain controller IP address (optional, will try to resolve if not provided)
+        username: LDAP authentication username (can be different from the name being resolved)
+        password: LDAP authentication password
+        hashes: NTLM hashes for pass-the-hash (format: lm:nt)
+        kerberos: Use Kerberos authentication
+        
+    Returns:
+        SID string (e.g., "S-1-5-21-..."), None if resolution fails
+    """
+    try:
+        from ldap3 import Server, Connection, Tls, NTLM, SIMPLE, AUTO_BIND_NO_TLS
+        from ldap3.core.exceptions import LDAPException, LDAPBindError
+        import ssl
+
+        # Extract just the name part if it's in USER@DOMAIN format
+        search_name = name
+        if '@' in name and not is_computer:
+            search_name = name.split('@')[0]
+        
+        # For computers, strip the trailing $ if present
+        if is_computer and search_name.endswith('$'):
+            search_name = search_name[:-1]
+
+        # If no DC IP provided, try to resolve it
+        if not dc_ip:
+            try:
+                dc_ip = socket.gethostbyname(domain)
+                debug(f"Resolved domain {domain} to DC IP: {dc_ip}")
+            except socket.gaierror:
+                warn(f"Could not resolve domain {domain} to IP address")
+                return None
+
+        # Try LDAPS (636) first, then LDAP (389)
+        for server_port, server_ssl in [(636, True), (389, False)]:
+            try:
+                debug(f"Attempting LDAP connection to {dc_ip}:{server_port} (SSL: {server_ssl})")
+
+                if server_ssl:
+                    # For LDAPS, create TLS object with validation disabled
+                    tls_config = Tls(validate=ssl.CERT_NONE)
+                    server = Server(f"ldaps://{dc_ip}:{server_port}", use_ssl=True, tls=tls_config)
+                else:
+                    server = Server(f"ldap://{dc_ip}:{server_port}", use_ssl=False)
+
+                conn = None
+
+                # Try Kerberos first if requested
+                if kerberos and username and not password and not hashes:
+                    debug(f"Attempting Kerberos authentication")
+                    try:
+                        conn = Connection(server,
+                                        user=f"{username}@{domain}",
+                                        auto_bind=False)
+
+                        if server_port == 389 and not server_ssl:
+                            try:
+                                conn.start_tls()
+                            except Exception:
+                                pass
+
+                        if not conn.bind():
+                            debug(f"Kerberos bind failed: {conn.last_error}")
+                            conn = None
+                    except Exception as e:
+                        debug(f"Kerberos authentication failed: {e}")
+                        conn = None
+
+                # Try NTLM with password or hashes
+                if not conn and username and (password or hashes):
+                    try:
+                        auth_user = f"{domain}\\{username}" if '\\' not in username and '@' not in username else username
+
+                        if hashes:
+                            # Pass-the-hash
+                            debug(f"Attempting NTLM authentication with hashes")
+                            lm_hash, nt_hash = hashes.split(':') if ':' in hashes else ('', hashes)
+                            conn = Connection(server,
+                                            user=auth_user,
+                                            password=f"{lm_hash}:{nt_hash}",
+                                            authentication=NTLM,
+                                            auto_bind=False)
+                        else:
+                            # Password authentication
+                            debug(f"Attempting NTLM authentication with password")
+                            conn = Connection(server,
+                                            user=auth_user,
+                                            password=password,
+                                            authentication=NTLM,
+                                            auto_bind=False)
+
+                        if server_port == 389 and not server_ssl:
+                            try:
+                                conn.start_tls()
+                            except Exception:
+                                pass
+
+                        if not conn.bind():
+                            debug(f"NTLM bind failed: {conn.last_error}")
+                            conn = Connection(server,
+                                            user=f"{username}@{domain}",
+                                            password=password,
+                                            auto_bind=False)
+
+                            if server_port == 389 and not server_ssl:
+                                try:
+                                    conn.start_tls()
+                                except Exception:
+                                    pass
+
+                            if not conn.bind():
+                                debug(f"Simple bind also failed: {conn.last_error}")
+                                conn = None
+                    except Exception as e:
+                        debug(f"NTLM authentication failed: {e}")
+                        conn = None
+
+                # If we got a connection, break the loop
+                if conn and conn.bound:
+                    break
+
+            except Exception as e:
+                debug(f"Failed to connect to {dc_ip}:{server_port}: {e}")
+                continue
+
+        if not conn or not conn.bound:
+            warn(f"Failed to bind to LDAP server {dc_ip} for name resolution")
+            return None
+
+        debug(f"Successfully bound to LDAP server {dc_ip}")
+
+        # Build search base DN from domain
+        base_dn = ','.join([f"DC={part}" for part in domain.split('.')])
+        debug(f"Using LDAP base DN: {base_dn}")
+
+        # Create search filter based on object type
+        if is_computer:
+            # For computers, search by cn (computer name without $)
+            search_filter = f"(&(objectClass=computer)(cn={search_name}))"
+        else:
+            # For users, try both samAccountName and userPrincipalName
+            # Use OR to handle cases where UPN might not be set (e.g., built-in accounts)
+            if '@' in name:
+                # If in UPN format, try both UPN and samAccountName
+                search_filter = f"(&(objectClass=user)(|(userPrincipalName={name})(samAccountName={search_name})))"
+            else:
+                # Otherwise search by samAccountName only
+                search_filter = f"(&(objectClass=user)(samAccountName={search_name}))"
+
+        debug(f"LDAP search filter: {search_filter}")
+
+        # Perform the search
+        search_success = conn.search(
+            search_base=base_dn,
+            search_filter=search_filter,
+            attributes=['objectSid', 'samAccountName', 'cn']
+        )
+
+        if search_success and conn.entries:
+            entry = conn.entries[0]
+            debug(f"Found LDAP entry: {entry.entry_dn}")
+
+            # Extract the binary objectSid
+            if hasattr(entry, 'objectSid') and entry.objectSid:
+                # Handle different ways ldap3 might return the objectSid
+                if hasattr(entry.objectSid, 'value'):
+                    binary_sid = entry.objectSid.value
+                elif hasattr(entry.objectSid, 'raw_values'):
+                    # Sometimes it's in raw_values as a list
+                    binary_sid = entry.objectSid.raw_values[0] if entry.objectSid.raw_values else None
+                else:
+                    binary_sid = entry.objectSid
+                
+                debug(f"objectSid type: {type(binary_sid)}, value: {binary_sid!r}")
+                
+                # Ensure we have bytes
+                if isinstance(binary_sid, str):
+                    # If it's already a string SID, return it
+                    if binary_sid.startswith('S-1-'):
+                        info(f"Resolved {name} to SID {binary_sid} via LDAP (already string)")
+                        conn.unbind()
+                        return binary_sid
+                    else:
+                        debug(f"objectSid is string but not SID format: {binary_sid}")
+                        binary_sid = None
+                
+                if isinstance(binary_sid, bytes):
+                    # Convert binary SID to string
+                    sid_string = binary_to_sid(binary_sid)
+                    
+                    if sid_string:
+                        account_name = str(entry.samAccountName) if hasattr(entry, 'samAccountName') else str(entry.cn) if hasattr(entry, 'cn') else name
+                        info(f"Resolved {account_name} to SID {sid_string} via LDAP")
+                        conn.unbind()
+                        return sid_string
+                    else:
+                        debug(f"Failed to convert binary SID to string for {name}")
+                else:
+                    debug(f"objectSid is not bytes or string SID: {type(binary_sid)}")
+            else:
+                debug(f"No objectSid attribute found in LDAP entry for {name}")
+        else:
+            debug(f"No LDAP entries found for {name}")
+
+        conn.unbind()
+        return None
+
+    except LDAPBindError as e:
+        warn(f"LDAP bind error during name→SID resolution: {e}")
+        return None
+    except LDAPException as e:
+        warn(f"LDAP error during name→SID resolution: {e}")
+        return None
+    except Exception as e:
+        warn(f"Unexpected error during LDAP name→SID resolution: {e}")
         debug(f"Full traceback: {e}", exc_info=True)
         return None
 

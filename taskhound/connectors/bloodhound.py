@@ -512,14 +512,20 @@ def connect_bloodhound(args) -> Optional[Dict[str, Any]]:
 
     # Determine BloodHound type
     bh_type = 'bhce' if args.bhce else 'legacy'
+    is_legacy = bh_type == 'legacy'
+
+    # Extract just the hostname/IP from the connector URI
+    # The connector expects just the hostname, as it adds its own ports
+    from ..output.bloodhound import extract_host_from_connector
+    connector_host = extract_host_from_connector(args.bh_connector)
 
     display_type = 'BHCE' if args.bhce else 'Legacy'
-    good(f"Connecting to {display_type} BloodHound at {args.bh_ip}...")
+    good(f"Connecting to {display_type} BloodHound at {connector_host}...")
 
     # Create connector and attempt connection
     connector = BloodHoundConnector(
         bh_type=bh_type,
-        ip=args.bh_ip,
+        ip=connector_host,  # Just the hostname, connector adds ports
         username=args.bh_user,
         password=args.bh_password
     )

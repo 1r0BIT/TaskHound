@@ -18,7 +18,7 @@ def write_json(path: str, rows: List[Dict]):
     good(f"Wrote JSON results to {path}")
 
 def write_csv(path: str, rows: List[Dict]):
-    fieldnames = ["host","path","type","runas","command","arguments","author","date","logon_type","enabled","trigger_type","start_boundary","interval","duration","days_interval","reason","credentials_hint","credential_guard","password_analysis"]
+    fieldnames = ["host","target_ip","path","type","runas","command","arguments","author","date","logon_type","enabled","trigger_type","start_boundary","interval","duration","days_interval","reason","credentials_hint","credential_guard","password_analysis"]
     with open(path, "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()

@@ -5,57 +5,54 @@ from .engine import process_offline_directory, process_target
 from .output.printer import print_results
 from .output.summary import print_summary_table
 from .output.writer import write_csv, write_json, write_plain
+from .output.opengraph import generate_opengraph_files
+from .output.bloodhound import upload_opengraph_to_bloodhound
 from .parsers.highvalue import HighValueLoader
 from .utils.helpers import BANNER, normalize_targets
-from .utils.logging import good, info, warn
+from .utils.logging import good, info, warn, debug
 
 
 def _extract_domain_sid_from_hv(hv_loader):
-    """Extract a domain SID from BloodHound high-value data for realistic LDAP testing."""
+    """
+    Extract domain SID from BloodHound data. Returns Admin SID (RID 500) for testing.
+    
+    Searches through all available SID sources in the HighValueLoader and returns
+    the first valid domain SID with RID 500 appended (well-known Administrator).
+    
+    Args:
+        hv_loader: HighValueLoader instance with BloodHound data
+        
+    Returns:
+        Domain SID with RID 500 (e.g., "S-1-5-21-XXX-XXX-XXX-500") or None if not found
+    """
     if not hv_loader or not hv_loader.loaded:
         return None
-
-    # Check hv_sids first (this is where BloodHound live data is stored)
-    if hasattr(hv_loader, "hv_sids") and hv_loader.hv_sids:
-        for sid, user_data in hv_loader.hv_sids.items():
+    
+    # Try hv_sids first (keys are SIDs, values are metadata)
+    hv_sids = getattr(hv_loader, 'hv_sids', {})
+    for sid in hv_sids.keys():
+        if sid and sid.startswith("S-1-5-21-"):
+            parts = sid.split("-")
+            if len(parts) >= 7:
+                domain_sid = "-".join(parts[:-1])
+                return f"{domain_sid}-500"
+    
+    # Try other sources (values contain 'objectid' or 'sid' fields)
+    sid_sources = [
+        getattr(hv_loader, 'hv_users', {}),
+        getattr(hv_loader, 'tier_zero_users', {}),
+        getattr(hv_loader, 'high_value_users', {}),
+    ]
+    
+    for source in sid_sources:
+        for item in source.values():
+            sid = item.get('objectid') or item.get('sid')
             if sid and sid.startswith("S-1-5-21-"):
-                # Extract domain part (everything except the RID)
                 parts = sid.split("-")
-                if len(parts) >= 7:  # S-1-5-21-xxx-xxx-xxx-yyy
-                    domain_sid = "-".join(parts[:-1])  # Remove the RID
-                    result_sid = f"{domain_sid}-500"  # Replace with Administrator RID
-                    return result_sid
-
-    # Fallback: check hv_users if available
-    if hasattr(hv_loader, "hv_users") and hv_loader.hv_users:
-        for sam, user_data in hv_loader.hv_users.items():
-            if "objectid" in user_data or "sid" in user_data:
-                sid = user_data.get("objectid") or user_data.get("sid")
-                if sid and sid.startswith("S-1-5-21-"):
-                    parts = sid.split("-")
-                    if len(parts) >= 7:
-                        domain_sid = "-".join(parts[:-1])
-                        result_sid = f"{domain_sid}-500"
-                        return result_sid
-
-    # Legacy fallback: Try tier_zero_users and high_value_users (for file-based data)
-    user_collections = []
-    if hasattr(hv_loader, "tier_zero_users") and hv_loader.tier_zero_users:
-        user_collections.append(hv_loader.tier_zero_users)
-    if hasattr(hv_loader, "high_value_users") and hv_loader.high_value_users:
-        user_collections.append(hv_loader.high_value_users)
-
-    for users in user_collections:
-        for sam, user_data in users.items():
-            if "objectid" in user_data:
-                sid = user_data["objectid"]
-                if sid and sid.startswith("S-1-5-21-"):
-                    # Extract domain part (everything except the RID)
-                    parts = sid.split("-")
-                    if len(parts) >= 7:  # S-1-5-21-xxx-xxx-xxx-yyy
-                        domain_sid = "-".join(parts[:-1])  # Remove the RID
-                        return f"{domain_sid}-500"  # Replace with Administrator RID
-
+                if len(parts) >= 7:
+                    domain_sid = "-".join(parts[:-1])
+                    return f"{domain_sid}-500"
+    
     return None
 
 
@@ -258,10 +255,99 @@ def main():
                 write_plain(args.plain, tgt, lines)
 
     # Exports
+    # Auto-generate JSON if OpenGraph is enabled and no explicit JSON output was specified
+    if args.bh_opengraph and not args.json:
+        # Create output directory if it doesn't exist
+        import os
+        os.makedirs(args.bh_output, exist_ok=True)
+        
+        # Generate JSON path
+        json_path = f"{args.bh_output}/taskhound_data.json"
+        
+        # Warn if file already exists (will be overwritten)
+        if os.path.exists(json_path):
+            warn(f"OpenGraph will overwrite existing file: {json_path}")
+        
+        # Inform user about auto-generation and how to customize
+        info(f"Auto-generating JSON for OpenGraph: {json_path}")
+        info(f"To use a different path, specify --json <path>")
+        
+        args.json = json_path
+    
     if args.json:
         write_json(args.json, all_rows)
     if args.csv:
         write_csv(args.csv, all_rows)
+    if args.opengraph:
+        generate_opengraph_files(args.opengraph, all_rows)
+
+    # BloodHound OpenGraph Integration
+    if args.bh_opengraph:
+        from .config_model import BloodHoundConfig
+        
+        print()
+        info("BloodHound OpenGraph Integration")
+        print("-" * 50)
+        
+        # Create consolidated config from args and config file
+        config_data = getattr(args, '_bh_config_data', None)
+        bh_config = BloodHoundConfig.from_args_and_config(args, config_data)
+        
+        # Build LDAP config for fallback resolution
+        # Use dedicated LDAP credentials if provided, otherwise use main auth
+        ldap_domain = getattr(args, 'ldap_domain', None) or args.domain
+        ldap_user = getattr(args, 'ldap_user', None) or args.username
+        ldap_password = getattr(args, 'ldap_password', None) or args.password
+        
+        ldap_config = None
+        if ldap_domain and ldap_user and (ldap_password or args.hashes):
+            ldap_config = {
+                "domain": ldap_domain,
+                "dc_ip": args.dc_ip,
+                "username": ldap_user,
+                "password": ldap_password,
+                "hashes": args.hashes,
+                "kerberos": args.kerberos
+            }
+            debug(f"LDAP fallback enabled for objectId resolution")
+        else:
+            info(f"LDAP fallback disabled - missing credentials")
+        
+        # Generate OpenGraph files with BloodHound API integration for objectId resolution
+        opengraph_file = generate_opengraph_files(
+            output_dir=bh_config.bh_output,
+            tasks=all_rows,
+            bh_api_url=bh_config.bh_connector if bh_config.has_credentials() else None,
+            bh_username=bh_config.bh_username,
+            bh_password=bh_config.bh_password,
+            ldap_config=ldap_config
+        )
+        
+        # Upload to BloodHound if not disabled and we have credentials
+        if not bh_config.bh_no_upload:
+            if bh_config.has_credentials():
+                print()
+                success = upload_opengraph_to_bloodhound(
+                    opengraph_file=opengraph_file,
+                    bloodhound_url=bh_config.bh_connector,
+                    username=bh_config.bh_username,
+                    password=bh_config.bh_password,
+                    set_icon=bh_config.bh_set_icon,
+                    force_icon=bh_config.bh_force_icon,
+                    icon_name=bh_config.bh_icon,
+                    icon_color=bh_config.bh_color
+                )
+                
+                if not success:
+                    warn("OpenGraph upload failed - files are still saved locally")
+                    warn(f"You can upload manually via BloodHound UI")
+            else:
+                warn("No BloodHound credentials available - skipping upload")
+                warn(f"Configure credentials in config/bh_connector.config or use CLI flags")
+        else:
+            info(f"OpenGraph file generated: {opengraph_file}")
+            info(f"Upload disabled with --bh-no-upload")
+
 
     # Print summary by default (unless disabled)
     if not args.no_summary:

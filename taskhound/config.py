@@ -37,7 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
                          help="Use live BloodHound connection (parameters can be provided via CLI or bh_connector.config file)")
     bh_group.add_argument("--bh-user", help="BloodHound username (or set in config file)")
     bh_group.add_argument("--bh-password", help="BloodHound password (or set in config file)")
-    bh_group.add_argument("--bh-ip", default="127.0.0.1", help="BloodHound IP address (default: 127.0.0.1, or set in config file)")
+    bh_group.add_argument("--bh-connector", default="http://127.0.0.1:8080",
+                         help="BloodHound connector URI (default: http://127.0.0.1:8080, or set in config file). "
+                              "Examples: localhost, http://localhost:8080, https://bh.domain.com, bolt://neo4j.local:7687. "
+                              "Supports both BHCE (http/https) and Legacy (bolt) protocols. "
+                              "If no protocol specified: defaults to http:// for BHCE, bolt:// for Legacy.")
 
     # BloodHound type selection (mutually exclusive)
     bh_type = bh_group.add_mutually_exclusive_group()
@@ -45,6 +49,25 @@ def build_parser() -> argparse.ArgumentParser:
     bh_type.add_argument("--legacy", action="store_true", help="Use Legacy BloodHound (or set type=legacy in config)")
 
     bh_group.add_argument("--bh-save", help="Save BloodHound query results to file (or set save_file in config)")
+
+    # BloodHound OpenGraph Integration (BHCE ONLY)
+    bhog = ap.add_argument_group('BloodHound OpenGraph Integration',
+                                 description='Automatically generate and optionally upload OpenGraph data to BloodHound CE (BHCE ONLY)')
+    bhog.add_argument("--bh-opengraph", action="store_true",
+                     help="Generate BloodHound OpenGraph JSON files (auto-enabled if bh_connector.config has valid BHCE credentials). "
+                          "REQUIRES --bhce or type=bhce in config - NOT compatible with Legacy BloodHound!")
+    bhog.add_argument("--bh-output", default="./opengraph",
+                     help="Directory to save BloodHound OpenGraph files (default: ./opengraph)")
+    bhog.add_argument("--bh-no-upload", action="store_true",
+                     help="Generate OpenGraph files but skip automatic upload to BloodHound (files still saved)")
+    bhog.add_argument("--bh-set-icon", action="store_true",
+                     help="Automatically set custom icon for ScheduledTask nodes after upload")
+    bhog.add_argument("--bh-force-icon", action="store_true",
+                     help="Force icon update even if ScheduledTask icon already exists (requires --bh-set-icon)")
+    bhog.add_argument("--bh-icon", default="heart",
+                     help="Font Awesome icon name for ScheduledTask nodes (default: heart)")
+    bhog.add_argument("--bh-color", default="#8B5CF6",
+                     help="Hex color code for ScheduledTask node icon (default: #8B5CF6 - vibrant purple)")
 
     scan.add_argument("--include-ms", action="store_true",
                     help="Also include \\Microsoft scheduled tasks (WARNING: very slow)")
@@ -77,6 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     out.add_argument("--plain", help="Directory to save normal text output (per target)")
     out.add_argument("--json", help="Write all results to a JSON file")
     out.add_argument("--csv", help="Write all results to a CSV file")
+    out.add_argument("--opengraph", help="Directory to save BloodHound OpenGraph JSON files")
     out.add_argument("--backup", help="Directory to save raw XML task files (per target)")
     out.add_argument("--no-summary", action="store_true", help="Disable summary table at the end of the run")
 
@@ -89,20 +113,54 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def load_bloodhound_config():
-    """Load BloodHound configuration from config file"""
+    """
+    Load BloodHound configuration from config file.
+    
+    Search order:
+    1. TASKHOUND_CONFIG environment variable
+    2. config/bh_connector.config (project config directory)
+    3. ~/.config/taskhound/bh_connector.config (XDG standard - Linux/macOS)
+    4. ~/.taskhound/bh_connector.config (legacy location)
+    5. Current working directory (last resort with warning)
+    """
     import configparser
     import os
     from pathlib import Path
 
-    # Look for config file in current directory first, then user's home
-    config_paths = [
-        Path.cwd() / "bh_connector.config",
+    # 1. Check environment variable first (highest priority)
+    if 'TASKHOUND_CONFIG' in os.environ:
+        env_config_path = Path(os.environ['TASKHOUND_CONFIG'])
+        if env_config_path.exists():
+            config_paths = [env_config_path]
+        else:
+            print(f"[!] WARNING: TASKHOUND_CONFIG points to non-existent file: {env_config_path}")
+            config_paths = []
+    else:
+        config_paths = []
+    
+    # 2-5. Standard search paths
+    config_paths.extend([
+        # 2. Project config directory
+        Path.cwd() / "config" / "bh_connector.config",
+        
+        # 3. User config directory (XDG standard for Linux/macOS)
+        Path.home() / ".config" / "taskhound" / "bh_connector.config",
+        
+        # 4. Legacy location
         Path.home() / ".taskhound" / "bh_connector.config",
-        Path.home() / "bh_connector.config"
-    ]
+        Path.home() / "bh_connector.config",
+        
+        # 5. Current directory (last resort)
+        Path.cwd() / "bh_connector.config",
+    ])
 
     for config_path in config_paths:
         if config_path.exists():
+            # Warn if using current working directory (security concern)
+            if config_path == Path.cwd() / "bh_connector.config":
+                print("[!] WARNING: Using bh_connector.config from current directory")
+                print("[!] This can be a security risk - consider moving to config/bh_connector.config")
+            
             try:
                 config = configparser.ConfigParser()
                 config.read(config_path)
@@ -112,17 +170,31 @@ def load_bloodhound_config():
                     config_data = {}
 
                     # Extract configuration values
-                    for key in ['ip', 'username', 'password', 'type', 'save_file']:
+                    # Support both 'url' (new) and 'ip' (legacy) for backward compatibility
+                    for key in ['url', 'ip', 'username', 'password', 'type', 'save_file']:
                         if key in bh_section:
                             value = bh_section[key].strip()
                             # Handle environment variable substitution
                             if value.startswith('${') and value.endswith('}'):
                                 env_var = value[2:-1]
-                                value = os.environ.get(env_var, value)
+                                if env_var not in os.environ:
+                                    raise ValueError(
+                                        f"Config references undefined environment variable: {env_var}\n"
+                                        f"Set it with: export {env_var}=<value>"
+                                    )
+                                value = os.environ[env_var]
                             config_data[key] = value
+                    
+                    # Convert legacy 'ip' to 'url' if 'url' not present
+                    if 'ip' in config_data and 'url' not in config_data:
+                        config_data['url'] = f"http://{config_data['ip']}:8080"
+                        print(f"[*] Note: Using legacy 'ip' setting. Consider updating config to use 'url' instead.")
 
                     return config_data
 
+            except ValueError as e:
+                # Re-raise environment variable errors
+                raise
             except Exception as e:
                 print(f"[!] Warning: Error parsing config file {config_path}: {e}")
                 continue
@@ -143,6 +215,29 @@ def validate_args(args):
         args.include_local = True
         args.unsaved_creds = True
 
+    # Handle BloodHound OpenGraph integration auto-detection
+    config_data = load_bloodhound_config()
+    
+    # Auto-enable OpenGraph if config exists with BHCE credentials and user didn't explicitly disable
+    if not args.bh_opengraph and config_data:
+        bh_type = config_data.get('type', '').lower()
+        has_username = 'username' in config_data
+        has_password = 'password' in config_data
+        
+        if bh_type == 'bhce' and has_username and has_password:
+            args.bh_opengraph = True
+            # Store config data for later use
+            args._bh_config_data = config_data
+            print(f"[+] BloodHound OpenGraph auto-enabled (found BHCE config: {config_data['username']}@{config_data.get('ip', '127.0.0.1')})")
+            if not args.bh_no_upload:
+                print(f"[*] OpenGraph files will be automatically uploaded to BloodHound (use --bh-no-upload to disable)")
+    
+    # If --bh-opengraph is explicitly set (either by user or auto-enabled above), 
+    # ensure we have config data for upload
+    if args.bh_opengraph and not hasattr(args, '_bh_config_data') and config_data:
+        # Store config data for upload even if not auto-enabled
+        args._bh_config_data = config_data
+
     # Validate BloodHound live connection parameters
     if args.bh_live:
         # Check if all parameters are provided via command line
@@ -153,7 +248,6 @@ def validate_args(args):
         # If not all parameters provided, try to load from config file
         if not (has_user and has_password and has_type):
             try:
-                config_data = load_bloodhound_config()
                 if config_data:
                     # Fill in missing parameters from config
                     if not has_user and 'username' in config_data:
@@ -173,15 +267,25 @@ def validate_args(args):
                             args.legacy = True
                             has_type = True
 
-                    # Set IP from config if not provided
-                    if 'ip' in config_data and args.bh_ip == "127.0.0.1":  # Default value
-                        args.bh_ip = config_data['ip']
+                    # Set connector URI from config if not provided or is default
+                    if 'connector' in config_data:
+                        # Config has connector URI, use it
+                        if args.bh_connector == "http://127.0.0.1:8080":  # Default value
+                            args.bh_connector = config_data['connector']
+                    elif 'url' in config_data:
+                        # Legacy config with url field, use it
+                        if args.bh_connector == "http://127.0.0.1:8080":  # Default value
+                            args.bh_connector = config_data['url']
+                    elif 'ip' in config_data:
+                        # Legacy config with IP, convert to connector
+                        if args.bh_connector == "http://127.0.0.1:8080":  # Default value
+                            args.bh_connector = f"http://{config_data['ip']}:8080"
 
                     # Set save file from config if provided and not set via CLI
                     if 'save_file' in config_data and not args.bh_save:
                         args.bh_save = config_data['save_file']
 
-                    print(f"[+] Loaded BloodHound config: {args.bh_user}@{args.bh_ip} ({config_data.get('type', 'unknown')})")
+                    print(f"[+] Loaded BloodHound config: {args.bh_user}@{args.bh_connector} ({config_data.get('type', 'unknown')})")
                 else:
                     print("[!] No bh_connector.config found and missing required parameters")
             except Exception as e:
@@ -203,6 +307,23 @@ def validate_args(args):
         if args.bh_data:
             print("[!] ERROR: Cannot use both --bh-live and --bh-data simultaneously")
             print("[!] Choose either live connection OR file import")
+            sys.exit(1)
+
+    # Validate BloodHound OpenGraph compatibility - BHCE ONLY!
+    if args.bh_opengraph:
+        # Check if user is trying to use OpenGraph with Legacy BloodHound
+        is_legacy = args.legacy
+        
+        # Also check config data if available
+        if not is_legacy and config_data:
+            is_legacy = config_data.get('type', '').lower() == 'legacy'
+        
+        if is_legacy:
+            print("[!] ERROR: BloodHound OpenGraph is NOT compatible with Legacy BloodHound!")
+            print("[!] OpenGraph requires BloodHound Community Edition (BHCE)")
+            print("[!] Either:")
+            print("[!]   - Remove --bh-opengraph flag to continue with Legacy BloodHound")
+            print("[!]   - Switch to BHCE by using --bhce or setting type=bhce in config")
             sys.exit(1)
 
     # Offline mode validation
