@@ -201,6 +201,8 @@ taskhound -u Administrator -p L0c@lAdm1n! -d . -t moe.thesimpsons.local --ldap-u
 
 ### OpenGraph Attack Path Visualization (BHCE Only)
 
+![1761663911331](https://github.com/user-attachments/assets/7cde5d08-24e8-49f8-9964-ba8e18864550)
+
 TaskHound integrates with BloodHound Community Edition's **OpenGraph** platform to visualize scheduled tasks as first-class graph entities. This enables attack path analysis showing how privileged tasks create escalation opportunities.
 
 **What You Get:**
