@@ -56,12 +56,13 @@ coverage.xml
 # =============================================================================
 # TOOL OUTPUT & TEMPORARY FILES
 # =============================================================================
-# TaskHound output directories
+# TaskHound output directories (but not source code modules)
 dpapi_loot/
 out/
-output/
+/output/
 loot/
 backup/
+opengraph/
 
 # Export files
 *_output.csv
