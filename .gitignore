@@ -5,7 +5,6 @@
 config/bh_connector.config
 tests/live_test_config.json
 tests/LIVE_TESTS.md
-opengraph/
 
 
 # Real/production test data
@@ -121,6 +120,3 @@ create_debug_engine.py
 *.exe
 BOF/AdaptixC2/taskhound.o
 BOF/AdaptixC2/taskhound.exe
-
-# Config files with credentials
-config/bh_connector.config
