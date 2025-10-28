@@ -214,11 +214,10 @@ TaskHound integrates with BloodHound Community Edition's **OpenGraph** platform 
 
 ```bash
 # Collect and auto-upload in one command (bh_connector.config is preferred)
-taskhound -u homer.simpson -p pass -t moe.thesimpsons.local -d thesimpsons.local --bh-set-icon --bh-live --bh-opengraph --bh-output ./opengraph
-```
+taskhound -u homer.simpson -p pass -t moe.thesimpsons.local -d thesimpsons.local --bh-set-icon
 
-# Option 2: Manual generation
-taskhound -u homer.simpson -p pass -d thesimpsons.local -t moe.thesimpsons.local --bh-opengraph --bh-output ./opengraph
+# Manual generation (no upload)
+taskhound -u homer.simpson -p pass -d thesimpsons.local -t moe.thesimpsons.local --bh-opengraph --bh-output ./opengraph --bh-no-upload
 ```
 
 **Features:**
@@ -263,38 +262,6 @@ Checks remote registry for Credential Guard status to determine DPAPI dump feasi
 
 ### BOF Implementation
 See [BOF/README.md](BOF/README.md) for a Beacon Object File implementation of the core collection functionality.
-
-## OPSEC Considerations
-
-TaskHound relies heavily on impacket for SMB/RPC/Kerberos operations. Standard impacket IOCs apply.
-**If you really care about OPSEC**: Use the BOF implementation or collect tasks manually, then analyze offline.
-
-## Roadmap
-
-When caffeine intake and free time align:
-- Dedicated NetExec module (PR in Review)  
-
-## Disclaimer
-
-TaskHound is strictly an **audit and educational tool**. Use only in environments you own or where you have explicit authorization to test. Seriously. Don't be a jerk.
-
-## Acknowledgements
-
-[Fortra/Impacket](https://github.com/fortra/impacket) - SMB/RPC/Kerberos operations
-
-[SpecterOps/BloodHound](https://github.com/SpecterOps/BloodHound) - Active Directory attack path analysis
-
-[Podalirius/bh-opengraph](https://github.com/Podalirius/bh-opengraph) - OpenGraph integration inspiration and implementation guidance
-
-[tijldeneut/DPAPIck3](https://github.com/tijldeneut/DPAPIck3) - DPAPI decryption implementation reference
-
-[Pupy Project](https://github.com/n1nj4sec/pupy) - DPAPI SYSTEM masterkey decryption techniques
-
-[gentilkiwi/mimikatz](https://github.com/gentilkiwi/mimikatz) - DPAPI operations and LSA secrets extraction research
-
-and every contributor to these projects for the amazing work they did for the community.
-
-## Contributing
 
 ## Full Usage Reference
 
@@ -384,7 +351,7 @@ Output:
                         When combined with --loot: creates consolidated output directory
                         Structure: <backup_dir>/<target>/Tasks/ and dpapi_loot/
   --no-summary          Disable summary table (shown by default)
-    --debug               Enable debug output and full stack traces
+  --debug               Enable debug output and full stack traces
 ```
 
 ## OPSEC Considerations
@@ -406,6 +373,8 @@ TaskHound is strictly an **audit and educational tool**. Use only in environment
 [Fortra/Impacket](https://github.com/fortra/impacket) - SMB/RPC/Kerberos operations
 
 [SpecterOps/BloodHound](https://github.com/SpecterOps/BloodHound) - Active Directory attack path analysis
+
+[Podalirius/bh-opengraph](https://github.com/Podalirius/bh-opengraph) - OpenGraph integration inspiration and implementation guidance
 
 [tijldeneut/DPAPIck3](https://github.com/tijldeneut/DPAPIck3) - DPAPI decryption implementation reference
 
