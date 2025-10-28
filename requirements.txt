@@ -5,4 +5,4 @@ pycryptodome>=3.15.0
 requests>=2.25.0
 neo4j>=5.0.0
 dnspython>=2.0.0  # Optional: Enhanced DNS resolution via Domain Controller
-bhopengraph>=1.1.0  # Official BloodHound OpenGraph library
+bhopengraph>=1.1.0  # BloodHound OpenGraph library
