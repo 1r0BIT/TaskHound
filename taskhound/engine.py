@@ -482,8 +482,8 @@ def _format_block(kind: str, rel_path: str, runas: str, what: str, author: str, 
                   domain: Optional[str] = None, dc_ip: Optional[str] = None, username: Optional[str] = None,
                   password: Optional[str] = None, hashes: Optional[str] = None,
                   enabled: Optional[str] = None, ldap_domain: Optional[str] = None, ldap_user: Optional[str] = None,
-                  ldap_password: Optional[str] = None, meta: Optional[Dict[str, str]] = None,
-                  decrypted_creds: Optional[List] = None) -> List[str]:
+                  ldap_password: Optional[str] = None, ldap_hashes: Optional[str] = None,
+                  meta: Optional[Dict[str, str]] = None, decrypted_creds: Optional[List] = None) -> List[str]:
     # Format a small pretty-print block used by the CLI output.
     #
     # kind is either 'TIER-0', 'PRIV' (privileged/high-value) or 'TASK' (normal task).
@@ -496,7 +496,7 @@ def _format_block(kind: str, rel_path: str, runas: str, what: str, author: str, 
 
     # Resolve SID in RunAs field for better display
     display_runas, resolved_username = format_runas_with_sid_resolution(
-        runas, hv, no_ldap, domain, dc_ip, username, password, hashes, False, ldap_domain, ldap_user, ldap_password
+        runas, hv, no_ldap, domain, dc_ip, username, password, hashes, False, ldap_domain, ldap_user, ldap_password, ldap_hashes
     )
 
     base = [f"\n{header} {rel_path}"]
@@ -599,7 +599,7 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
                    show_unsaved_creds: bool = False, backup_dir: Optional[str] = None,
                    credguard_detect: bool = False, no_ldap: bool = False,
                    ldap_domain: Optional[str] = None, ldap_user: Optional[str] = None,
-                   ldap_password: Optional[str] = None,
+                   ldap_password: Optional[str] = None, ldap_hashes: Optional[str] = None,
                    loot: bool = False, dpapi_key: Optional[str] = None) -> List[str]:
     # Connect to `target`, enumerate scheduled tasks, and return printable lines.
     #

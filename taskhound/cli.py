@@ -59,7 +59,7 @@ def _extract_domain_sid_from_hv(hv_loader):
 def _test_ldap_connection(domain: Optional[str], dc_ip: Optional[str], username: Optional[str],
                          password: Optional[str], hashes: Optional[str], kerberos: bool, no_ldap: bool,
                          ldap_domain: Optional[str] = None, ldap_user: Optional[str] = None,
-                         ldap_password: Optional[str] = None, hv_loader=None):
+                         ldap_password: Optional[str] = None, ldap_hashes: Optional[str] = None, hv_loader=None):
     """Test LDAP connection and SID resolution capability during initialization."""
     if no_ldap:
         info("LDAP resolution disabled - skipping connection test")
@@ -70,11 +70,11 @@ def _test_ldap_connection(domain: Optional[str], dc_ip: Optional[str], username:
     test_domain = ldap_domain if ldap_domain else domain
     test_username = ldap_user if ldap_user else username
     test_password = ldap_password if ldap_password else password
+    test_hashes = ldap_hashes if ldap_hashes else hashes
 
-    # For LDAP SID resolution, we need plaintext password - skip if only hashes available
-    if not test_password and hashes and not ldap_password:
-        warn("LDAP test skipped - SID resolution requires plaintext password, but only hashes provided")
-        warn("Consider using --ldap-user and --ldap-password for SID lookup with plaintext credentials")
+    # LDAP SID resolution now supports both passwords and NTLM hashes!
+    if not test_password and not test_hashes:
+        warn("LDAP test skipped - no credentials available (password or hashes)")
         return
 
     if not test_domain or not test_username:
@@ -179,7 +179,7 @@ def main():
 
                 # Test LDAP SID resolution capability
                 _test_ldap_connection(args.domain, args.dc_ip, args.username, args.password, args.hashes, args.kerberos, args.no_ldap,
-                                    args.ldap_domain, args.ldap_user, args.ldap_password, hv)
+                                    args.ldap_domain, args.ldap_user, args.ldap_password, args.ldap_hashes, hv)
             # No else clause needed - connector already prints specific error messages
 
         except ImportError as e:
@@ -247,6 +247,7 @@ def main():
                 ldap_domain=args.ldap_domain,
                 ldap_user=args.ldap_user,
                 ldap_password=args.ldap_password,
+                ldap_hashes=args.ldap_hashes,
                 loot=args.loot,
                 dpapi_key=args.dpapi_key,
             )

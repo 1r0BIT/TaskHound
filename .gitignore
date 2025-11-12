@@ -5,6 +5,7 @@
 config/bh_connector.config
 tests/live_test_config.json
 tests/LIVE_TESTS.md
+.github/copilot-instructions.md
 
 
 # Real/production test data

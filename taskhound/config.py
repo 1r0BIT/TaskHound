@@ -88,11 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     # LDAP/SID Resolution options
     ldap = ap.add_argument_group('LDAP/SID Resolution options',
-                                description='Alternative credentials for SID lookups. Useful when you only have NTLM hashes or local admin access (domain="."). SID resolution can use lower-privilege plaintext credentials.')
+                                description='Alternative credentials for SID lookups. Useful with local admin access (domain=".") or when using different privilege levels. Supports both plaintext passwords and NTLM hashes.')
     ldap.add_argument("--no-ldap", action='store_true',
                     help="Disable LDAP queries for SID resolution (improves OPSEC but reduces user-friendliness)")
     ldap.add_argument("--ldap-user", help="Alternative username for SID lookup (can be different from main auth credentials)")
-    ldap.add_argument("--ldap-password", help="Alternative password for SID lookup (plaintext only - hashes not supported)")
+    ldap.add_argument("--ldap-password", help="Alternative password for SID lookup (plaintext only - use with --ldap-hashes for hash-based auth)")
+    ldap.add_argument("--ldap-hashes", help="Alternative NTLM hashes for SID lookup (format: [LM:]NT, e.g., :2D0AA42EB9B24A64E5427A65552AE1F4 or aad3b435b51404eeaad3b435b51404ee:2D0AA42EB9B24A64E5427A65552AE1F4)")
     ldap.add_argument("--ldap-domain", help="Alternative domain for SID lookup (can be different from main auth domain)")
 
     # Output options
@@ -347,6 +348,12 @@ def validate_args(args):
         sys.exit(1)
     if not (args.target or args.targets_file):
         print("[!] Either --target or --targets-file is required for online mode")
+        sys.exit(1)
+
+    # LDAP password and hashes mutual exclusivity
+    if args.ldap_password and args.ldap_hashes:
+        print("[!] ERROR: Cannot specify both --ldap-password and --ldap-hashes")
+        print("[!] Use --ldap-password for plaintext OR --ldap-hashes for NTLM hashes")
         sys.exit(1)
 
     # LDAP requires FQDN format - warn if domain appears to be NetBIOS

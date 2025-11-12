@@ -2,11 +2,15 @@
 #
 # This module handles resolving Windows SIDs to human-readable usernames
 # using BloodHound data first, then falling back to LDAP queries when available.
+# REFACTORED: Now uses Impacket LDAP with NTLM hash support
 
 import re
 import socket
 import struct
 from typing import Optional, Tuple
+
+from impacket.ldap import ldap as ldap_impacket
+from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
 from ..parsers.highvalue import HighValueLoader
 from ..utils.logging import debug, info, warn
@@ -129,199 +133,145 @@ def resolve_sid_from_bloodhound(sid: str, hv_loader: Optional[HighValueLoader]) 
 
 
 def resolve_sid_via_ldap(sid: str, domain: str, dc_ip: Optional[str] = None,
-                        username: Optional[str] = None, password: Optional[str] = None,
-                        hashes: Optional[str] = None, kerberos: bool = False) -> Optional[str]:
+                         username: Optional[str] = None, password: Optional[str] = None,
+                         hashes: Optional[str] = None, kerberos: bool = False) -> Optional[str]:
     """
-    Resolve SID to username using LDAP query with ldap3 library.
+    Resolve a SID to a username using LDAP queries to a domain controller.
+    
+    This function attempts to query Active Directory via LDAP to resolve a SID to a username.
+    It uses the provided credentials for authentication and supports both NTLM and Kerberos.
+    NOW SUPPORTS NTLM HASH AUTHENTICATION via Impacket LDAP!
     
     Args:
-        sid: Windows SID to resolve
-        domain: Domain name
-        dc_ip: Domain controller IP (optional)
-        username: Authentication username
-        password: Authentication password
-        hashes: NTLM hashes for authentication
+        sid: The Windows SID to resolve (e.g., "S-1-5-21-...")
+        domain: The domain name (e.g., "corp.local")
+        dc_ip: Domain controller IP address (optional, will try to resolve from domain if not provided)
+        username: LDAP authentication username (can be different from the SID being resolved)
+        password: LDAP authentication password
+        hashes: NTLM hashes for pass-the-hash (format: lm:nt or just nt)
         kerberos: Use Kerberos authentication
         
     Returns:
-        Username if resolved via LDAP, None otherwise
+        The resolved username (sAMAccountName), None if resolution fails
     """
     try:
-        from ldap3 import ALL, KERBEROS, NTLM, SASL, Connection, Server
-        from ldap3.core.exceptions import LDAPBindError, LDAPException
+        debug(f"Attempting LDAP resolution for SID: {sid}")
 
-    except ImportError:
-        warn("ldap3 library not available - SID resolution via LDAP disabled")
-        return None
+        if not username or not (password or hashes or kerberos):
+            debug("No valid credentials provided for LDAP SID resolution")
+            return None
 
-    # Convert SID to binary format for LDAP search
-    binary_sid = sid_to_binary(sid)
-    if not binary_sid:
-        warn(f"Failed to convert SID {sid} to binary format")
-        return None
-
-    try:
-        # Determine DC address
+        # If no DC IP provided, try to resolve it
         if not dc_ip:
             try:
                 dc_ip = socket.gethostbyname(domain)
-                debug(f"Resolved domain {domain} to IP {dc_ip}")
+                debug(f"Resolved domain {domain} to DC IP: {dc_ip}")
             except socket.gaierror:
-                warn(f"Could not resolve domain {domain} to IP for LDAP query")
+                warn(f"Could not resolve domain {domain} to IP address")
                 return None
 
-        # Create LDAP server connection with proper timeout settings and SSL support
-        # Try LDAPS first (636), then LDAP with StartTLS (389), then plain LDAP as fallback
-        server = None
-        server_ssl = False
-        server_port = 389
+        # Convert SID to binary format for LDAP search
+        binary_sid = sid_to_binary(sid)
+        if not binary_sid:
+            warn(f"Could not convert SID {sid} to binary format")
+            return None
 
-        for port, use_ssl, use_tls in [(636, True, False), (389, False, True), (389, False, False)]:
+        # Parse NTLM hashes if provided
+        lmhash = ""
+        nthash = ""
+        if hashes:
+            if ':' in hashes:
+                lmhash, nthash = hashes.split(':', 1)
+            else:
+                nthash = hashes
+            debug(f"Using NTLM hash authentication for LDAP SID resolution")
+
+        # Try connection with multiple ports/protocols: LDAPS (636) → LDAP (389)
+        conn = None
+        for use_ssl, target_port in [(True, 636), (False, 389)]:
             try:
-                debug(f"Trying LDAP connection on port {port}, SSL={use_ssl}, TLS={use_tls}")
-                server = Server(dc_ip, port=port, use_ssl=use_ssl, get_info=ALL, connect_timeout=10)
-                # Test connection
-                test_conn = Connection(server)
-                if test_conn.open():
-                    if use_tls:
-                        test_conn.start_tls()
-                    test_conn.unbind()
-                    debug(f"Successfully connected to {dc_ip}:{port} (SSL={use_ssl}, TLS={use_tls})")
-                    server_ssl = use_ssl
-                    server_port = port
-                    break
+                protocol = "ldaps" if use_ssl else "ldap"
+                ldap_url = f"{protocol}://{dc_ip}:{target_port}"
+                debug(f"Attempting LDAP connection to {ldap_url}")
+
+                conn = ldap_impacket.LDAPConnection(ldap_url, dstIp=dc_ip)
+
+                # Authenticate based on available credentials
+                if hashes:
+                    # NTLM hash authentication (NEW CAPABILITY!)
+                    debug(f"Authenticating with NTLM hash as {domain}\\{username}")
+                    conn.login(user=username, password="", domain=domain, lmhash=lmhash, nthash=nthash)
+                elif kerberos:
+                    # Kerberos authentication
+                    debug(f"Authenticating with Kerberos as {username}@{domain}")
+                    # Impacket's LDAP Kerberos requires ticket in cache
+                    conn.kerberosLogin(username, password, domain, lmhash, nthash)
+                else:
+                    # Password authentication
+                    debug(f"Authenticating with password as {domain}\\{username}")
+                    conn.login(user=username, password=password, domain=domain)
+
+                debug(f"Successfully authenticated to LDAP server {dc_ip}")
+                break  # Success, exit loop
+
             except Exception as e:
-                debug(f"Connection to {dc_ip}:{port} failed: {e}")
-                server = None
+                debug(f"Failed to connect/authenticate to {ldap_url}: {e}")
+                conn = None
                 continue
 
-        if not server:
-            warn(f"Could not establish LDAP connection to {dc_ip} on any port")
-            return None
-
-        # Determine authentication method - prioritize NTLM over Kerberos for reliability
-        conn = None
-        if kerberos and not hashes:
-            # Only use Kerberos if specifically requested and no hashes provided
-            try:
-                debug("Attempting Kerberos authentication for LDAP SID resolution")
-                conn = Connection(server, authentication=SASL, sasl_mechanism=KERBEROS, auto_bind=True)
-            except Exception as e:
-                warn(f"Kerberos authentication failed for LDAP, falling back to NTLM: {e}")
-                conn = None
-
-        # Use NTLM authentication (more reliable for our use case)
         if not conn:
-            if hashes:
-                # NTLM hash authentication
-                if ':' in hashes:
-                    lm_hash, nt_hash = hashes.split(':', 1)
-                else:
-                    lm_hash, nt_hash = '', hashes
-                debug("Using NTLM hash authentication for LDAP SID resolution")
-                try:
-                    # For NTLM hash authentication, we need to use a different approach
-                    # ldap3 doesn't directly support NTLM hash authentication in newer versions
-                    # We'll skip hash authentication for now and only use password-based auth
-                    warn("LDAP hash authentication not supported with current ldap3 version")
-                    warn("Please provide password instead of hashes for LDAP SID resolution")
-                    return None
-
-                except Exception as e:
-                    warn(f"NTLM hash authentication failed for LDAP: {e}")
-                    return None
-            else:
-                # Username/password authentication with NTLM
-                debug("Using NTLM username/password authentication for LDAP SID resolution")
-                try:
-                    # Try NTLM first
-                    conn = Connection(server,
-                                    user=f"{domain}\\{username}",
-                                    password=password,
-                                    authentication=NTLM,
-                                      auto_bind=False)
-
-                    # Handle StartTLS if needed
-                    if server_port == 389 and not server_ssl:
-                        try:
-                            conn.start_tls()
-                        except Exception:
-                            pass
-
-                    if not conn.bind():
-                        debug(f"NTLM bind failed, trying simple bind: {conn.last_error}")
-                        # Try simple bind as fallback
-                        conn = Connection(server,
-                                        user=f"{username}@{domain}",
-                                        password=password,
-                                        auto_bind=False)
-
-                        # Handle StartTLS for simple bind too
-                        if server_port == 389 and not server_ssl:
-                            try:
-                                conn.start_tls()
-                            except Exception:
-                                pass
-
-                        if not conn.bind():
-                            warn(f"All authentication methods failed: {conn.last_error}")
-                            return None
-                except Exception as e:
-                    warn(f"Authentication failed for LDAP: {e}")
-                    return None
-
-        if not conn or not conn.bound:
             warn(f"Failed to bind to LDAP server {dc_ip} for SID resolution")
             return None
-
-        debug(f"Successfully bound to LDAP server {dc_ip}")
 
         # Build search base DN from domain
         base_dn = ','.join([f"DC={part}" for part in domain.split('.')])
         debug(f"Using LDAP base DN: {base_dn}")
 
         # Create search filter using binary SID
-        # The binary SID needs to be properly escaped for LDAP
+        # Impacket expects hex-escaped binary format
         binary_sid_escaped = ''.join([f'\\{b:02x}' for b in binary_sid])
         search_filter = f"(objectSid={binary_sid_escaped})"
         debug(f"LDAP search filter: {search_filter}")
 
         # Perform the search
-        search_success = conn.search(
-            search_base=base_dn,
-            search_filter=search_filter,
-            attributes=['samAccountName', 'name', 'displayName', 'objectClass']
-        )
+        try:
+            search_results = conn.search(
+                searchBase=base_dn,
+                searchFilter=search_filter,
+                attributes=['sAMAccountName', 'name', 'displayName', 'objectClass'],
+                searchControls=None
+            )
 
-        if search_success and conn.entries:
-            entry = conn.entries[0]
-            debug(f"Found LDAP entry: {entry.entry_dn}")
+            if search_results:
+                for entry in search_results:
+                    if isinstance(entry, ldapasn1_impacket.SearchResultEntry):
+                        attributes = {}
+                        for attribute in entry['attributes']:
+                            attr_name = str(attribute['type'])
+                            attr_vals = [str(val) for val in attribute['vals']]
+                            attributes[attr_name] = attr_vals[0] if len(attr_vals) == 1 else attr_vals
 
-            # Try different name attributes in order of preference
-            sam_account_name = str(entry.samAccountName) if hasattr(entry, 'samAccountName') and entry.samAccountName else None
-            display_name = str(entry.displayName) if hasattr(entry, 'displayName') and entry.displayName else None
-            name = str(entry.name) if hasattr(entry, 'name') and entry.name else None
+                        # Try different name attributes in order of preference
+                        sam_account_name = attributes.get('sAMAccountName')
+                        display_name = attributes.get('displayName')
+                        name = attributes.get('name')
 
-            username_resolved = sam_account_name or display_name or name
+                        username_resolved = sam_account_name or display_name or name
 
-            if username_resolved:
-                info(f"Resolved SID {sid} to {username_resolved} via LDAP")
-                conn.unbind()
-                return username_resolved.strip()
+                        if username_resolved:
+                            info(f"Resolved SID {sid} to {username_resolved} via LDAP")
+                            return username_resolved.strip()
+                        else:
+                            debug(f"No usable name attribute found in LDAP entry for SID {sid}")
             else:
-                debug(f"No usable name attribute found in LDAP entry for SID {sid}")
-        else:
-            debug(f"No LDAP entries found for SID {sid}")
+                debug(f"No LDAP entries found for SID {sid}")
 
-        conn.unbind()
+        except Exception as e:
+            warn(f"LDAP search error during SID resolution: {e}")
+            return None
+
         return None
 
-    except LDAPBindError as e:
-        warn(f"LDAP bind error during SID resolution: {e}")
-        return None
-    except LDAPException as e:
-        warn(f"LDAP error during SID resolution: {e}")
-        return None
     except Exception as e:
         warn(f"Unexpected error during LDAP SID resolution: {e}")
         debug(f"Full traceback: {e}", exc_info=True)
@@ -335,6 +285,7 @@ def resolve_name_to_sid_via_ldap(name: str, domain: str, is_computer: bool = Fal
     """
     Resolve a computer name or username to its SID using LDAP.
     This is the reverse operation of resolve_sid_via_ldap.
+    NOW SUPPORTS NTLM HASH AUTHENTICATION via Impacket LDAP!
     
     Args:
         name: Computer name (without domain) or username (USER@DOMAIN.TLD format or just USER)
@@ -343,17 +294,13 @@ def resolve_name_to_sid_via_ldap(name: str, domain: str, is_computer: bool = Fal
         dc_ip: Domain controller IP address (optional, will try to resolve if not provided)
         username: LDAP authentication username (can be different from the name being resolved)
         password: LDAP authentication password
-        hashes: NTLM hashes for pass-the-hash (format: lm:nt)
+        hashes: NTLM hashes for pass-the-hash (format: lm:nt or just nt)
         kerberos: Use Kerberos authentication
         
     Returns:
         SID string (e.g., "S-1-5-21-..."), None if resolution fails
     """
     try:
-        from ldap3 import Server, Connection, Tls, NTLM, SIMPLE, AUTO_BIND_NO_TLS
-        from ldap3.core.exceptions import LDAPException, LDAPBindError
-        import ssl
-
         # Extract just the name part if it's in USER@DOMAIN format
         search_name = name
         if '@' in name and not is_computer:
@@ -372,99 +319,49 @@ def resolve_name_to_sid_via_ldap(name: str, domain: str, is_computer: bool = Fal
                 warn(f"Could not resolve domain {domain} to IP address")
                 return None
 
-        # Try LDAPS (636) first, then LDAP (389)
-        for server_port, server_ssl in [(636, True), (389, False)]:
+        # Parse NTLM hashes if provided
+        lmhash = ""
+        nthash = ""
+        if hashes:
+            if ':' in hashes:
+                lmhash, nthash = hashes.split(':', 1)
+            else:
+                nthash = hashes
+            debug(f"Using NTLM hash authentication for LDAP name resolution")
+
+        # Try connection with multiple ports/protocols: LDAPS (636) → LDAP (389)
+        conn = None
+        for use_ssl, target_port in [(True, 636), (False, 389)]:
             try:
-                debug(f"Attempting LDAP connection to {dc_ip}:{server_port} (SSL: {server_ssl})")
+                protocol = "ldaps" if use_ssl else "ldap"
+                ldap_url = f"{protocol}://{dc_ip}:{target_port}"
+                debug(f"Attempting LDAP connection to {ldap_url}")
 
-                if server_ssl:
-                    # For LDAPS, create TLS object with validation disabled
-                    tls_config = Tls(validate=ssl.CERT_NONE)
-                    server = Server(f"ldaps://{dc_ip}:{server_port}", use_ssl=True, tls=tls_config)
+                conn = ldap_impacket.LDAPConnection(ldap_url, dstIp=dc_ip)
+
+                # Authenticate based on available credentials
+                if hashes:
+                    # NTLM hash authentication (NEW CAPABILITY!)
+                    debug(f"Authenticating with NTLM hash as {domain}\\{username}")
+                    conn.login(user=username, password="", domain=domain, lmhash=lmhash, nthash=nthash)
+                elif kerberos:
+                    # Kerberos authentication
+                    debug(f"Authenticating with Kerberos as {username}@{domain}")
+                    conn.kerberosLogin(username, password, domain, lmhash, nthash)
                 else:
-                    server = Server(f"ldap://{dc_ip}:{server_port}", use_ssl=False)
+                    # Password authentication
+                    debug(f"Authenticating with password as {domain}\\{username}")
+                    conn.login(user=username, password=password, domain=domain)
 
-                conn = None
-
-                # Try Kerberos first if requested
-                if kerberos and username and not password and not hashes:
-                    debug(f"Attempting Kerberos authentication")
-                    try:
-                        conn = Connection(server,
-                                        user=f"{username}@{domain}",
-                                        auto_bind=False)
-
-                        if server_port == 389 and not server_ssl:
-                            try:
-                                conn.start_tls()
-                            except Exception:
-                                pass
-
-                        if not conn.bind():
-                            debug(f"Kerberos bind failed: {conn.last_error}")
-                            conn = None
-                    except Exception as e:
-                        debug(f"Kerberos authentication failed: {e}")
-                        conn = None
-
-                # Try NTLM with password or hashes
-                if not conn and username and (password or hashes):
-                    try:
-                        auth_user = f"{domain}\\{username}" if '\\' not in username and '@' not in username else username
-
-                        if hashes:
-                            # Pass-the-hash
-                            debug(f"Attempting NTLM authentication with hashes")
-                            lm_hash, nt_hash = hashes.split(':') if ':' in hashes else ('', hashes)
-                            conn = Connection(server,
-                                            user=auth_user,
-                                            password=f"{lm_hash}:{nt_hash}",
-                                            authentication=NTLM,
-                                            auto_bind=False)
-                        else:
-                            # Password authentication
-                            debug(f"Attempting NTLM authentication with password")
-                            conn = Connection(server,
-                                            user=auth_user,
-                                            password=password,
-                                            authentication=NTLM,
-                                            auto_bind=False)
-
-                        if server_port == 389 and not server_ssl:
-                            try:
-                                conn.start_tls()
-                            except Exception:
-                                pass
-
-                        if not conn.bind():
-                            debug(f"NTLM bind failed: {conn.last_error}")
-                            conn = Connection(server,
-                                            user=f"{username}@{domain}",
-                                            password=password,
-                                            auto_bind=False)
-
-                            if server_port == 389 and not server_ssl:
-                                try:
-                                    conn.start_tls()
-                                except Exception:
-                                    pass
-
-                            if not conn.bind():
-                                debug(f"Simple bind also failed: {conn.last_error}")
-                                conn = None
-                    except Exception as e:
-                        debug(f"NTLM authentication failed: {e}")
-                        conn = None
-
-                # If we got a connection, break the loop
-                if conn and conn.bound:
-                    break
+                debug(f"Successfully authenticated to LDAP server {dc_ip}")
+                break  # Success, exit loop
 
             except Exception as e:
-                debug(f"Failed to connect to {dc_ip}:{server_port}: {e}")
+                debug(f"Failed to connect/authenticate to {ldap_url}: {e}")
+                conn = None
                 continue
 
-        if not conn or not conn.bound:
+        if not conn:
             warn(f"Failed to bind to LDAP server {dc_ip} for name resolution")
             return None
 
@@ -480,78 +377,60 @@ def resolve_name_to_sid_via_ldap(name: str, domain: str, is_computer: bool = Fal
             search_filter = f"(&(objectClass=computer)(cn={search_name}))"
         else:
             # For users, try both samAccountName and userPrincipalName
-            # Use OR to handle cases where UPN might not be set (e.g., built-in accounts)
             if '@' in name:
-                # If in UPN format, try both UPN and samAccountName
                 search_filter = f"(&(objectClass=user)(|(userPrincipalName={name})(samAccountName={search_name})))"
             else:
-                # Otherwise search by samAccountName only
                 search_filter = f"(&(objectClass=user)(samAccountName={search_name}))"
 
         debug(f"LDAP search filter: {search_filter}")
 
         # Perform the search
-        search_success = conn.search(
-            search_base=base_dn,
-            search_filter=search_filter,
-            attributes=['objectSid', 'samAccountName', 'cn']
-        )
+        try:
+            search_results = conn.search(
+                searchBase=base_dn,
+                searchFilter=search_filter,
+                attributes=['objectSid', 'sAMAccountName', 'cn'],
+                searchControls=None
+            )
 
-        if search_success and conn.entries:
-            entry = conn.entries[0]
-            debug(f"Found LDAP entry: {entry.entry_dn}")
+            if search_results:
+                for entry in search_results:
+                    if isinstance(entry, ldapasn1_impacket.SearchResultEntry):
+                        attributes = {}
+                        for attribute in entry['attributes']:
+                            attr_name = str(attribute['type'])
+                            # objectSid is binary, keep as bytes
+                            if attr_name.lower() == 'objectsid':
+                                # Get raw bytes
+                                attr_vals = [bytes(val) for val in attribute['vals']]
+                            else:
+                                attr_vals = [str(val) for val in attribute['vals']]
+                            attributes[attr_name] = attr_vals[0] if len(attr_vals) == 1 else attr_vals
 
-            # Extract the binary objectSid
-            if hasattr(entry, 'objectSid') and entry.objectSid:
-                # Handle different ways ldap3 might return the objectSid
-                if hasattr(entry.objectSid, 'value'):
-                    binary_sid = entry.objectSid.value
-                elif hasattr(entry.objectSid, 'raw_values'):
-                    # Sometimes it's in raw_values as a list
-                    binary_sid = entry.objectSid.raw_values[0] if entry.objectSid.raw_values else None
-                else:
-                    binary_sid = entry.objectSid
-                
-                debug(f"objectSid type: {type(binary_sid)}, value: {binary_sid!r}")
-                
-                # Ensure we have bytes
-                if isinstance(binary_sid, str):
-                    # If it's already a string SID, return it
-                    if binary_sid.startswith('S-1-'):
-                        info(f"Resolved {name} to SID {binary_sid} via LDAP (already string)")
-                        conn.unbind()
-                        return binary_sid
-                    else:
-                        debug(f"objectSid is string but not SID format: {binary_sid}")
-                        binary_sid = None
-                
-                if isinstance(binary_sid, bytes):
-                    # Convert binary SID to string
-                    sid_string = binary_to_sid(binary_sid)
-                    
-                    if sid_string:
-                        account_name = str(entry.samAccountName) if hasattr(entry, 'samAccountName') else str(entry.cn) if hasattr(entry, 'cn') else name
-                        info(f"Resolved {account_name} to SID {sid_string} via LDAP")
-                        conn.unbind()
-                        return sid_string
-                    else:
-                        debug(f"Failed to convert binary SID to string for {name}")
-                else:
-                    debug(f"objectSid is not bytes or string SID: {type(binary_sid)}")
+                        # Extract the binary objectSid
+                        binary_sid = attributes.get('objectSid')
+                        
+                        if binary_sid and isinstance(binary_sid, bytes):
+                            # Convert binary SID to string
+                            sid_string = binary_to_sid(binary_sid)
+                            
+                            if sid_string:
+                                account_name = attributes.get('sAMAccountName') or attributes.get('cn') or name
+                                info(f"Resolved {account_name} to SID {sid_string} via LDAP")
+                                return sid_string
+                            else:
+                                debug(f"Failed to convert binary SID to string for {name}")
+                        else:
+                            debug(f"No objectSid attribute found in LDAP entry for {name}")
             else:
-                debug(f"No objectSid attribute found in LDAP entry for {name}")
-        else:
-            debug(f"No LDAP entries found for {name}")
+                debug(f"No LDAP entries found for {name}")
 
-        conn.unbind()
+        except Exception as e:
+            warn(f"LDAP search error during name→SID resolution: {e}")
+            return None
+
         return None
 
-    except LDAPBindError as e:
-        warn(f"LDAP bind error during name→SID resolution: {e}")
-        return None
-    except LDAPException as e:
-        warn(f"LDAP error during name→SID resolution: {e}")
-        return None
     except Exception as e:
         warn(f"Unexpected error during LDAP name→SID resolution: {e}")
         debug(f"Full traceback: {e}", exc_info=True)
@@ -563,7 +442,8 @@ def resolve_sid(sid: str, hv_loader: Optional[HighValueLoader] = None,
                dc_ip: Optional[str] = None, username: Optional[str] = None,
                password: Optional[str] = None, hashes: Optional[str] = None,
                kerberos: bool = False, ldap_domain: Optional[str] = None,
-               ldap_user: Optional[str] = None, ldap_password: Optional[str] = None) -> Tuple[str, Optional[str]]:
+               ldap_user: Optional[str] = None, ldap_password: Optional[str] = None,
+               ldap_hashes: Optional[str] = None) -> Tuple[str, Optional[str]]:
     """
     Comprehensive SID resolution with fallback chain.
     
@@ -577,6 +457,10 @@ def resolve_sid(sid: str, hv_loader: Optional[HighValueLoader] = None,
         password: Authentication password  
         hashes: NTLM hashes
         kerberos: Use Kerberos
+        ldap_domain: Separate LDAP domain (for local admin case)
+        ldap_user: Separate LDAP username (for local admin case)
+        ldap_password: Separate LDAP password (for local admin case - plaintext only)
+        ldap_hashes: Separate LDAP NTLM hashes (for local admin case - use instead of ldap_password)
         
     Returns:
         Tuple of (display_name, resolved_username)
@@ -600,9 +484,7 @@ def resolve_sid(sid: str, hv_loader: Optional[HighValueLoader] = None,
     ldap_auth_domain = ldap_domain if ldap_domain else domain
     ldap_auth_user = ldap_user if ldap_user else username
     ldap_auth_password = ldap_password if ldap_password else password
-
-    # Only use LDAP hash authentication if no dedicated LDAP password is provided
-    ldap_auth_hashes = None if ldap_password else hashes
+    ldap_auth_hashes = ldap_hashes if ldap_hashes else hashes
 
     if not no_ldap and ldap_auth_domain and ldap_auth_user:
         debug(f"Attempting LDAP resolution for SID {sid}")
@@ -628,7 +510,8 @@ def format_runas_with_sid_resolution(runas: str, hv_loader: Optional[HighValueLo
                                    dc_ip: Optional[str] = None, username: Optional[str] = None,
                                    password: Optional[str] = None, hashes: Optional[str] = None,
                                    kerberos: bool = False, ldap_domain: Optional[str] = None,
-                                   ldap_user: Optional[str] = None, ldap_password: Optional[str] = None) -> Tuple[str, Optional[str]]:
+                                   ldap_user: Optional[str] = None, ldap_password: Optional[str] = None,
+                                   ldap_hashes: Optional[str] = None) -> Tuple[str, Optional[str]]:
     """
     Format RunAs field with SID resolution if needed.
     
@@ -642,6 +525,10 @@ def format_runas_with_sid_resolution(runas: str, hv_loader: Optional[HighValueLo
         password: Authentication password  
         hashes: NTLM hashes
         kerberos: Use Kerberos
+        ldap_domain: Separate LDAP domain (for local admin case)
+        ldap_user: Separate LDAP username (for local admin case)
+        ldap_password: Separate LDAP password (for local admin case - plaintext only)
+        ldap_hashes: Separate LDAP NTLM hashes (for local admin case - use instead of ldap_password)
     
     Returns:
         Tuple of (display_runas, resolved_username)
@@ -653,7 +540,7 @@ def format_runas_with_sid_resolution(runas: str, hv_loader: Optional[HighValueLo
 
     # Check if it's a SID
     if is_sid(runas):
-        return resolve_sid(runas, hv_loader, no_ldap, domain, dc_ip, username, password, hashes, kerberos, ldap_domain, ldap_user, ldap_password)
+        return resolve_sid(runas, hv_loader, no_ldap, domain, dc_ip, username, password, hashes, kerberos, ldap_domain, ldap_user, ldap_password, ldap_hashes)
     else:
         # Regular username, return as-is
         return runas, None
