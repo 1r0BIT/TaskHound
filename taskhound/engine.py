@@ -21,6 +21,31 @@ from .utils.logging import good, info, warn
 from .utils.sid_resolver import format_runas_with_sid_resolution
 
 
+def _get_task_date_for_analysis(meta: Dict) -> tuple[Optional[str], bool]:
+    """
+    Get the best available date for password freshness analysis.
+    Prefers RegistrationInfo/Date, falls back to StartBoundary from trigger.
+    
+    Args:
+        meta: Task metadata dict containing date and start_boundary fields
+        
+    Returns:
+        Tuple of (date_string, is_fallback) where:
+        - date_string: ISO format date string or None if no date available
+        - is_fallback: True if using StartBoundary fallback, False if using explicit date
+    """
+    # Prefer explicit registration date
+    if meta.get("date"):
+        return meta.get("date"), False
+    
+    # Fall back to start boundary (trigger time) as proxy for task creation
+    # This is less accurate but better than no analysis at all
+    if meta.get("start_boundary"):
+        return meta.get("start_boundary"), True
+    
+    return None, False
+
+
 def process_offline_directory(offline_dir: str, hv: Optional[HighValueLoader],
                              show_unsaved_creds: bool, include_local: bool, all_rows: List[Dict], debug: bool,
                              no_ldap: bool = False, dpapi_key: Optional[str] = None) -> List[str]:
@@ -229,7 +254,10 @@ def _process_offline_host(hostname: str, host_dir: str, hv: Optional[HighValueLo
                     reason = f"{reason} (no saved credentials — DPAPI dump not applicable; manipulation requires an interactive session)"
                 else:
                     # Analyze password age for DPAPI dump viability
-                    risk_level, pwd_analysis = hv.analyze_password_age(runas, meta.get("date"))
+                    task_date, is_fallback = _get_task_date_for_analysis(meta)
+                    if is_fallback and task_date:
+                        warn(f"Task {rel_path} has no explicit creation date - using trigger StartBoundary for password analysis (may be inaccurate)")
+                    risk_level, pwd_analysis = hv.analyze_password_age(runas, task_date)
                     if risk_level != "UNKNOWN":
                         password_analysis = pwd_analysis
 
@@ -252,7 +280,10 @@ def _process_offline_host(hostname: str, host_dir: str, hv: Optional[HighValueLo
                     reason = f"{reason} (no saved credentials — DPAPI dump not applicable; manipulation requires an interactive session)"
                 else:
                     # Analyze password age for DPAPI dump viability
-                    risk_level, pwd_analysis = hv.analyze_password_age(runas, meta.get("date"))
+                    task_date, is_fallback = _get_task_date_for_analysis(meta)
+                    if is_fallback and task_date:
+                        warn(f"Task {rel_path} has no explicit creation date - using trigger StartBoundary for password analysis (may be inaccurate)")
+                    risk_level, pwd_analysis = hv.analyze_password_age(runas, task_date)
                     if risk_level != "UNKNOWN":
                         password_analysis = pwd_analysis
 
@@ -272,7 +303,10 @@ def _process_offline_host(hostname: str, host_dir: str, hv: Optional[HighValueLo
             password_analysis = None
             if hv and hv.loaded and row.get("credentials_hint") == "stored_credentials":
                 # Analyze password age even for non-privileged accounts
-                risk_level, pwd_analysis = hv.analyze_password_age(runas, meta.get("date"))
+                task_date, is_fallback = _get_task_date_for_analysis(meta)
+                if is_fallback and task_date:
+                    warn(f"Task {rel_path} has no explicit creation date - using trigger StartBoundary for password analysis (may be inaccurate)")
+                risk_level, pwd_analysis = hv.analyze_password_age(runas, task_date)
                 if risk_level != "UNKNOWN":
                     password_analysis = pwd_analysis
 
@@ -816,7 +850,10 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
                     reason = f"{reason} (no saved credentials — DPAPI dump not applicable; manipulation requires an interactive session)"
                 else:
                     # Analyze password age for DPAPI dump viability
-                    risk_level, pwd_analysis = hv.analyze_password_age(runas, meta.get("date"))
+                    task_date, is_fallback = _get_task_date_for_analysis(meta)
+                    if is_fallback and task_date:
+                        warn(f"Task {rel_path} has no explicit creation date - using trigger StartBoundary for password analysis (may be inaccurate)")
+                    risk_level, pwd_analysis = hv.analyze_password_age(runas, task_date)
                     if risk_level != "UNKNOWN":
                         password_analysis = pwd_analysis
 
@@ -840,7 +877,10 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
                     reason = f"{reason} (no saved credentials — DPAPI dump not applicable; manipulation requires an interactive session)"
                 else:
                     # Analyze password age for DPAPI dump viability
-                    risk_level, pwd_analysis = hv.analyze_password_age(runas, meta.get("date"))
+                    task_date, is_fallback = _get_task_date_for_analysis(meta)
+                    if is_fallback and task_date:
+                        warn(f"Task {rel_path} has no explicit creation date - using trigger StartBoundary for password analysis (may be inaccurate)")
+                    risk_level, pwd_analysis = hv.analyze_password_age(runas, task_date)
                     if risk_level != "UNKNOWN":
                         password_analysis = pwd_analysis
 
@@ -862,7 +902,10 @@ def process_target(target: str, domain: str, username: str, password: Optional[s
             password_analysis = None
             if hv and hv.loaded and row.get("credentials_hint") == "stored_credentials":
                 # Analyze password age even for non-privileged accounts
-                risk_level, pwd_analysis = hv.analyze_password_age(runas, meta.get("date"))
+                task_date, is_fallback = _get_task_date_for_analysis(meta)
+                if is_fallback and task_date:
+                    warn(f"Task {rel_path} has no explicit creation date - using trigger StartBoundary for password analysis (may be inaccurate)")
+                risk_level, pwd_analysis = hv.analyze_password_age(runas, task_date)
                 if risk_level != "UNKNOWN":
                     password_analysis = pwd_analysis
 
