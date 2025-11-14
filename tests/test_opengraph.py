@@ -143,6 +143,36 @@ class TestPrincipalIDCreation:
             sample_task_local_account
         )
         assert principal_id is None
+    
+    def test_fqdn_domain_prefix_lowercase(self):
+        """Test that FQDN domain prefix (lowercase) is correctly recognized as same domain."""
+        task = {
+            "host": "evergreen.thesimpsons.springfield.local",
+            "path": "\\Windows\\System32\\Tasks\\ntlm_bot"
+        }
+        # Domain prefix with FQDN in lowercase should match uppercase local domain
+        principal_id = _create_principal_id(
+            "thesimpsons.springfield.local\\homer.simpson",
+            "THESIMPSONS.SPRINGFIELD.LOCAL",
+            task
+        )
+        # Should NOT be None (not filtered as cross-domain)
+        assert principal_id == "HOMER.SIMPSON@THESIMPSONS.SPRINGFIELD.LOCAL"
+    
+    def test_fqdn_domain_prefix_uppercase(self):
+        """Test that FQDN domain prefix (uppercase) is correctly recognized as same domain."""
+        task = {
+            "host": "evergreen.thesimpsons.springfield.local",
+            "path": "\\Windows\\System32\\Tasks\\ntlm_bot"
+        }
+        # Domain prefix with FQDN in uppercase should match uppercase local domain
+        principal_id = _create_principal_id(
+            "THESIMPSONS.SPRINGFIELD.LOCAL\\homer.simpson",
+            "THESIMPSONS.SPRINGFIELD.LOCAL",
+            task
+        )
+        # Should NOT be None (not filtered as cross-domain)
+        assert principal_id == "HOMER.SIMPSON@THESIMPSONS.SPRINGFIELD.LOCAL"
 
 
 class TestRelationshipEdges:

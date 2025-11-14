@@ -584,21 +584,24 @@ def _create_principal_id(runas_user: str, local_domain: str, task: Dict) -> Opti
         # Extract first part of FQDN for comparison (e.g., DOMAIN.LAB -> DOMAIN)
         local_domain_short = local_domain.split(".")[0].upper() if "." in local_domain else local_domain.upper()
         
+        # Extract first part of domain_prefix for comparison (may be FQDN like THESIMPSONS.SPRINGFIELD.LOCAL)
+        domain_prefix_short = domain_prefix.split(".")[0] if "." in domain_prefix else domain_prefix
+        
         # Extract hostname from FQDN for local account detection (e.g., CLIENT01.DOMAIN.LAB -> CLIENT01)
         hostname_fqdn = task.get("host", "")
         hostname_short = hostname_fqdn.split(".")[0].upper() if "." in hostname_fqdn else hostname_fqdn.upper()
         
         # Check if it's a local account (NETBIOS domain matches hostname)
-        is_local_account = (domain_prefix == hostname_short)
+        is_local_account = (domain_prefix_short == hostname_short)
         
         # Check if cross-domain (domain doesn't match local domain AND not a local account)
-        if domain_prefix != local_domain_short and not is_local_account:
+        if domain_prefix_short != local_domain_short and not is_local_account:
             # Cross-domain task!
             task_path = task.get("path", "unknown")
             hostname = task.get("host", "unknown")
             warn(f"Cross-domain task detected on {hostname}: {task_path}")
             warn(f"  RunAs user: {runas_user} (local domain: {local_domain})")
-            warn(f"  Edge will not be created unless '{domain_prefix}' domain exists in BloodHound")
+            warn(f"  Edge will not be created unless '{domain_prefix_short}' domain exists in BloodHound")
             # TODO: Check if domain exists in BloodHound data
             # For now, skip cross-domain tasks to avoid broken edges
             return None
