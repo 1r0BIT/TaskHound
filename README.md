@@ -9,6 +9,8 @@
 
 TaskHound hunts for Windows scheduled tasks that run with privileged accounts and stored credentials. It enumerates tasks over SMB, parses XMLs, and identifies high-value attack opportunities through BloodHound support.
 
+For Backstory/Lore, and more explanations: see my associated: [Blog Post](https://r0bit.io/posts/taskhound.html)
+
 ## Key Features
 
 - **Tier 0 & High Value Detection**: Automatically identifies tasks running as classic Tier 0 and High Value users
@@ -364,7 +366,25 @@ TaskHound relies heavily on impacket for SMB/RPC/Kerberos operations. Standard i
 ## Roadmap
 
 When caffeine intake and free time align:
-- Dedicated NetExec module (PR in Review)  
+### definitely on the list
+- **Abuse Info Integration**: Add MITRE ATT&CK techniques and OPSEC notes to BloodHound nodes
+- **OpenGraph Optimization**: Switch from name-based to ID-based node matching for reliable BloodHound integration
+- **Node Caching System**: Multi-tier caching to reduce API calls by 80% and speed up repeated runs
+- **API Key Authentication**: Support for BloodHound API tokens instead of username/password
+- **Enhanced SID Resolution**: Improved fallback chain combining BloodHound, LDAP, and local SID databases
+- **Unreachable Hosts Tracking**: Show failed connections in summary with detailed error reasons
+
+### when i find time
+- **Asynchronous Processing**: Multi-threaded target processing for 10x speedup on large environments
+- **LAPS Support**: Automatic Local Administrator Password Solution integration like NetExec
+- **Cross Domain Authentication**: Support for multi-domain environments with trust relationships
+- **Custom Tier-0 Mappings**: Support for user-defined TIER-0 targets beyond standard groups
+
+### nice to have
+- **Colored Terminal Output**: Rich formatting with progress bars and status indicators
+- **WMI Password Validation**: Check if stored task passwords are still valid via WMI queries
+- **Automatic Script Grabbing**: Download task executables for offline analysis with restore functionality
+- **Blue Team Audit Mode**: HTML reports with remediation guidance, etc.  
 
 ## Disclaimer
 
