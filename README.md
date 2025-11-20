@@ -39,45 +39,6 @@ taskhound -u homer.simpson -p P@ssw0rd -d thesimpsons.local -t moe.thesimpsons.l
 
 TaskHound's BOF is included in the [Adaptix Extension-Kit](https://github.com/Adaptix-Framework/Extension-Kit) under `SAR-BOF/taskhound/`.
 
-### Quick Start with C2
-
-**Installation:**
-```bash
-git clone https://github.com/Adaptix-Framework/Extension-Kit
-cd Extension-Kit
-make
-```
-
-**Load in AdaptixC2:**
-1. Main menu → AxScript → Script manager
-2. Context menu → Load new → Select `sar.axs`
-
-**Usage:**
-```bash
-# Basic collection (current beacon user)
-taskhound 192.168.1.100
-
-# With explicit credentials
-taskhound DC01 domain\admin P@ssw0rd
-
-# Save XML files for offline analysis with Python tool
-taskhound 192.168.1.100 -save C:\TaskOutput
-
-# Full collection: tasks + DPAPI blobs and masterkeys
-taskhound 192.168.1.100 -save C:\TaskOutput -grab-blobs
-
-# Show all tasks (including those without stored credentials)
-taskhound 192.168.1.100 -unsaved-creds
-```
-
-**Offline Analysis:**
-After collecting with BOF, analyze with the Python tool:
-```bash
-taskhound --offline C:\TaskOutput
-```
-
-> 📖 **Full BOF documentation:** [Extension-Kit SAR-BOF](https://github.com/Adaptix-Framework/Extension-Kit/tree/main/SAR-BOF#taskhound)
-
 ## Demo Output
 
 ```
@@ -306,9 +267,6 @@ taskhound --offline dpapi_loot/moe.thesimpsons.local --dpapi-key 0x51e43225...
 ### Credential Guard Detection
 
 Checks remote registry for Credential Guard status to determine DPAPI dump feasibility. Results include `"credential_guard": true/false` in output.
-
-### BOF Implementation
-See [BOF/README.md](BOF/README.md) for a Beacon Object File implementation of the core collection functionality.
 
 ## Full Usage Reference
 
