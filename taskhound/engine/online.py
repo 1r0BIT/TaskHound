@@ -619,14 +619,16 @@ def process_target(
                     runas,
                     hv_loader=hv,
                     bh_connector=bh_connector,
-                    smb_connection=None if no_rpc else smb,  # Skip LSARPC if --no-rpc
+                    smb_connection=None if no_rpc else smb,  # Skip target LSARPC if --no-rpc
                     no_ldap=no_ldap,
+                    no_rpc=no_rpc,  # Also controls DC LSARPC for cross-trust resolution
                     domain=domain,
                     dc_ip=dc_ip,
                     username=username,
                     password=password,
                     hashes=hashes,
                     kerberos=kerberos,
+                    aes_key=aes_key,
                     ldap_domain=ldap_domain,
                     ldap_user=ldap_user,
                     ldap_password=ldap_password,

@@ -412,6 +412,139 @@ def resolve_sid_via_smb(sid: str, smb_connection) -> Optional[str]:
     return None
 
 
+def resolve_sid_via_dc_lsarpc(
+    sid: str,
+    dc_ip: str,
+    domain: str,
+    username: str,
+    password: Optional[str] = None,
+    hashes: Optional[str] = None,
+    kerberos: bool = False,
+    aes_key: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Resolve SID to username using LSARPC directly to the Domain Controller.
+
+    Unlike resolve_sid_via_smb() which queries the TARGET machine, this function
+    queries the DC directly. The DC can resolve SIDs from trusted domains by
+    following the trust path - making this ideal for cross-domain/cross-forest
+    SID resolution.
+
+    Args:
+        sid: Windows SID to resolve
+        dc_ip: Domain Controller IP address
+        domain: Domain name for authentication
+        username: Username for authentication
+        password: Password (plaintext or LM:NT hash format)
+        hashes: NTLM hashes in LM:NT format (alternative to password)
+        kerberos: Use Kerberos authentication
+        aes_key: AES key for Kerberos authentication
+
+    Returns:
+        Resolved username (DOMAIN\\User) or None
+    """
+    if not dc_ip or not username:
+        return None
+
+    try:
+        from impacket.dcerpc.v5 import lsad, lsat, transport
+        from impacket.dcerpc.v5.dtypes import MAXIMUM_ALLOWED
+        from impacket.dcerpc.v5.rpcrt import DCERPCException
+
+        debug(f"Attempting DC LSARPC resolution for SID: {sid} via {dc_ip}")
+
+        # Parse hashes if provided
+        lmhash = ""
+        nthash = ""
+        pwd = password or ""
+
+        if hashes:
+            if ":" in hashes:
+                lmhash, nthash = hashes.split(":", 1)
+            else:
+                nthash = hashes
+            pwd = ""  # Don't use password when hashes provided
+        elif password and ":" in password and len(password) == 65:
+            # Password might be in hash format
+            lmhash, nthash = password.split(":", 1)
+            pwd = ""
+
+        # Create RPC transport to DC's LSARPC pipe
+        # Use named pipe over SMB (ncacn_np)
+        string_binding = f"ncacn_np:{dc_ip}[\\pipe\\lsarpc]"
+        rpc_transport = transport.DCERPCTransportFactory(string_binding)
+
+        # Set credentials
+        rpc_transport.set_credentials(
+            username=username,
+            password=pwd,
+            domain=domain,
+            lmhash=lmhash,
+            nthash=nthash,
+            aesKey=aes_key or "",
+        )
+
+        if kerberos:
+            rpc_transport.set_kerberos(True, kdcHost=dc_ip)
+
+        # Connect and bind
+        dce = rpc_transport.get_dce_rpc()
+        dce.connect()
+        dce.bind(lsat.MSRPC_UUID_LSAT)
+
+        # Open policy handle
+        resp = lsad.hLsarOpenPolicy2(dce, MAXIMUM_ALLOWED | lsat.POLICY_LOOKUP_NAMES)
+        policy_handle = resp["PolicyHandle"]
+
+        # Lookup SID - use LsapLookupWksta level which follows trusts
+        try:
+            resp = lsat.hLsarLookupSids(dce, policy_handle, [sid], lsat.LSAP_LOOKUP_LEVEL.LsapLookupWksta)
+            names = resp["TranslatedNames"]["Names"]
+            domains = resp["ReferencedDomains"]["Domains"]
+
+            if names:
+                name_entry = names[0]
+                domain_idx = name_entry["DomainIndex"]
+                name = name_entry["Name"]
+
+                # Build full name with domain prefix
+                domain_name = ""
+                if domain_idx >= 0 and domain_idx < len(domains):
+                    domain_name = domains[domain_idx]["Name"]
+
+                full_name = f"{domain_name}\\{name}" if domain_name else name
+                info(f"Resolved SID {sid} to {full_name} via DC LSARPC ({dc_ip})")
+
+                # Clean up
+                try:
+                    lsad.hLsarClose(dce, policy_handle)
+                except Exception:
+                    pass
+                dce.disconnect()
+
+                return full_name
+
+        except DCERPCException as e:
+            # STATUS_NONE_MAPPED means DC couldn't resolve it either
+            # This is expected for truly external/unknown SIDs
+            if "STATUS_NONE_MAPPED" in str(e):
+                debug(f"DC LSARPC: SID {sid} not found (STATUS_NONE_MAPPED)")
+            else:
+                debug(f"DC LSARPC lookup failed for {sid}: {e}")
+
+        # Clean up
+        try:
+            lsad.hLsarClose(dce, policy_handle)
+        except Exception:
+            pass
+        dce.disconnect()
+
+    except Exception as e:
+        debug(f"DC LSARPC resolution failed for {sid}: {e}")
+
+    return None
+
+
 # Precompiled SID pattern for performance
 _SID_PATTERN = re.compile(r"^S-1-\d+(-\d+)+$")
 
@@ -473,82 +606,76 @@ def is_foreign_domain_sid(sid: str, local_domain_sid_prefix: Optional[str]) -> b
 
 
 # Well-known local account RIDs for resolving unknown domain SIDs
-# These are common RIDs found on Windows machines that we can map to names
-# even when we can't query the actual machine's SAM database
+# These are common RIDs that we can map to names even without SAM access
 WELL_KNOWN_LOCAL_RIDS = {
+    # User account RIDs
     500: "Administrator",
     501: "Guest",
-    502: "krbtgt",  # Only in AD, but included for completeness
-    503: "DefaultAccount",
-    504: "WDAGUtilityAccount",  # Windows Defender Application Guard
-    512: "Domain Admins",  # Only in AD
-    513: "Domain Users",  # Only in AD
-    514: "Domain Guests",  # Only in AD
-    515: "Domain Computers",  # Only in AD
-    516: "Domain Controllers",  # Only in AD
+    502: "krbtgt",
+    # Group RIDs - common privileged groups
+    512: "Domain Admins",
+    513: "Domain Users",
+    518: "Schema Admins",
+    519: "Enterprise Admins",
     # Local user RIDs start at 1000+
 }
 
 # Well-known SIDs that can be resolved instantly without any network calls
 # Chain 0 in the Multi-Chain SID Resolution architecture
 # Reference: https://learn.microsoft.com/en-us/windows/win32/secauthz/well-known-sids
+# NOTE: Only includes SIDs commonly found in Scheduled Task RunAs fields
 WELL_KNOWN_SIDS = {
-    # NT AUTHORITY
+    # NT AUTHORITY - Service accounts (common in scheduled tasks)
     "S-1-5-18": "NT AUTHORITY\\SYSTEM",
     "S-1-5-19": "NT AUTHORITY\\LOCAL SERVICE",
     "S-1-5-20": "NT AUTHORITY\\NETWORK SERVICE",
-    # BUILTIN domain (S-1-5-32-*)
+    # NT AUTHORITY - Other (occasionally seen)
+    "S-1-5-7": "NT AUTHORITY\\ANONYMOUS LOGON",
+    "S-1-5-11": "NT AUTHORITY\\Authenticated Users",
+    # BUILTIN domain (S-1-5-32-*) - Groups that might run tasks
     "S-1-5-32-544": "BUILTIN\\Administrators",
     "S-1-5-32-545": "BUILTIN\\Users",
     "S-1-5-32-546": "BUILTIN\\Guests",
     "S-1-5-32-547": "BUILTIN\\Power Users",
-    "S-1-5-32-548": "BUILTIN\\Account Operators",
-    "S-1-5-32-549": "BUILTIN\\Server Operators",
-    "S-1-5-32-550": "BUILTIN\\Print Operators",
     "S-1-5-32-551": "BUILTIN\\Backup Operators",
-    "S-1-5-32-552": "BUILTIN\\Replicators",
-    "S-1-5-32-554": "BUILTIN\\Pre-Windows 2000 Compatible Access",
     "S-1-5-32-555": "BUILTIN\\Remote Desktop Users",
-    "S-1-5-32-556": "BUILTIN\\Network Configuration Operators",
-    "S-1-5-32-557": "BUILTIN\\Incoming Forest Trust Builders",
-    "S-1-5-32-558": "BUILTIN\\Performance Monitor Users",
-    "S-1-5-32-559": "BUILTIN\\Performance Log Users",
-    "S-1-5-32-560": "BUILTIN\\Windows Authorization Access Group",
-    "S-1-5-32-561": "BUILTIN\\Terminal Server License Servers",
-    "S-1-5-32-562": "BUILTIN\\Distributed COM Users",
-    "S-1-5-32-568": "BUILTIN\\IIS_IUSRS",
-    "S-1-5-32-569": "BUILTIN\\Cryptographic Operators",
-    "S-1-5-32-573": "BUILTIN\\Event Log Readers",
-    "S-1-5-32-574": "BUILTIN\\Certificate Service DCOM Access",
-    "S-1-5-32-575": "BUILTIN\\RDS Remote Access Servers",
-    "S-1-5-32-576": "BUILTIN\\RDS Endpoint Servers",
-    "S-1-5-32-577": "BUILTIN\\RDS Management Servers",
     "S-1-5-32-578": "BUILTIN\\Hyper-V Administrators",
-    "S-1-5-32-579": "BUILTIN\\Access Control Assistance Operators",
     "S-1-5-32-580": "BUILTIN\\Remote Management Users",
-    # Other well-known
-    "S-1-5-6": "NT AUTHORITY\\SERVICE",
-    "S-1-5-7": "NT AUTHORITY\\ANONYMOUS LOGON",
-    "S-1-5-9": "NT AUTHORITY\\ENTERPRISE DOMAIN CONTROLLERS",
-    "S-1-5-10": "NT AUTHORITY\\SELF",
-    "S-1-5-11": "NT AUTHORITY\\Authenticated Users",
-    "S-1-5-12": "NT AUTHORITY\\RESTRICTED",
-    "S-1-5-13": "NT AUTHORITY\\TERMINAL SERVER USER",
-    "S-1-5-14": "NT AUTHORITY\\REMOTE INTERACTIVE LOGON",
-    "S-1-5-15": "NT AUTHORITY\\This Organization",
-    "S-1-5-17": "NT AUTHORITY\\IUSR",
-    # NULL SID and Everyone
-    "S-1-0-0": "NULL SID",
+    # Universal SIDs
     "S-1-1-0": "Everyone",
-    "S-1-2-0": "LOCAL",
-    "S-1-2-1": "CONSOLE LOGON",
-    "S-1-3-0": "CREATOR OWNER",
-    "S-1-3-1": "CREATOR GROUP",
-    "S-1-3-4": "OWNER RIGHTS",
-    # Service SIDs (common services)
     "S-1-5-80-0": "NT SERVICE\\ALL SERVICES",
-    "S-1-5-83-0": "NT VIRTUAL MACHINE\\Virtual Machines",
 }
+
+
+def resolve_special_sid_pattern(sid: str) -> Optional[str]:
+    """
+    Resolve special SID patterns that can't be enumerated statically.
+
+    Handles dynamically-generated SIDs like:
+    - Service SIDs (S-1-5-80-*) - NT SERVICE\\<ServiceName>
+    - IIS AppPool SIDs (S-1-5-82-*)
+
+    Args:
+        sid: SID to check for special patterns
+
+    Returns:
+        Descriptive name if special pattern matched, None otherwise
+    """
+    if not sid:
+        return None
+
+    # Service SIDs: S-1-5-80-{hash of service name}
+    # These are per-service virtual accounts - common in scheduled tasks
+    if sid.startswith("S-1-5-80-"):
+        if sid == "S-1-5-80-0":
+            return None  # Let WELL_KNOWN_SIDS handle it
+        return f"NT SERVICE\\<service> ({sid})"
+
+    # IIS AppPool virtual accounts: S-1-5-82-*
+    if sid.startswith("S-1-5-82-"):
+        return f"IIS APPPOOL\\<AppPool> ({sid})"
+
+    return None
 
 
 def is_unknown_domain_sid(sid: str, known_domain_prefixes: Dict[str, TrustData]) -> bool:
@@ -1709,12 +1836,14 @@ def resolve_sid(
     bh_connector=None,
     smb_connection=None,
     no_ldap: bool = False,
+    no_rpc: bool = False,
     domain: Optional[str] = None,
     dc_ip: Optional[str] = None,
     username: Optional[str] = None,
     password: Optional[str] = None,
     hashes: Optional[str] = None,
     kerberos: bool = False,
+    aes_key: Optional[str] = None,
     ldap_domain: Optional[str] = None,
     ldap_user: Optional[str] = None,
     ldap_password: Optional[str] = None,
@@ -1724,34 +1853,43 @@ def resolve_sid(
     gc_server: Optional[str] = None,
 ) -> Tuple[str, Optional[str]]:
     """
-    Comprehensive SID resolution with 4-tier fallback chain.
+    Comprehensive SID resolution with multi-tier fallback chain.
 
     Fallback order:
-    1. BloodHound offline data (JSON file from --bloodhound flag)
-    2. BloodHound live API (if bh_connector provided and has active connection)
-    3. SMB/LSARPC via existing connection (uses target's LSA to resolve SIDs)
+    0. Well-known SIDs (static lookup - instant, no network)
+    1. Cache (SQLite)
+    2. BloodHound offline data (JSON file from --bloodhound flag)
+    3. BloodHound live API (if bh_connector provided and has active connection)
+    4. SMB/LSARPC via existing connection (uses target's LSA to resolve SIDs)
        - SKIPPED for foreign domain SIDs (different domain prefix)
-    4. LDAP queries to domain controller (if credentials provided and not disabled)
+       - SKIPPED if no_rpc=True
+    5. DC LSARPC (queries DC directly - can resolve trusted domain SIDs)
+       - Only for foreign domain SIDs
+       - SKIPPED if no_rpc=True
+    6. LDAP queries to domain controller (if credentials provided and not disabled)
+    7. Global Catalog for foreign/cross-domain SIDs
 
     For unknown domain SIDs (not matching any known domain prefix), falls back to
     UNKNOWN\\<name> based on well-known RIDs (e.g., 500 -> UNKNOWN\\Administrator).
 
     For foreign domain SIDs from known trusts:
-    - Intra-forest trusts: Try GC lookup (GC contains all forest objects)
-    - External trusts: Use trust FQDN directly (GC won't have these)
+    - Intra-forest trusts: Try DC LSARPC, then GC lookup
+    - External trusts: Try DC LSARPC (follows trust path), then trust FQDN fallback
 
     Args:
         sid: Windows SID to resolve
         hv_loader: BloodHound data loader (optional)
         bh_connector: BloodHound API connector (optional, for live queries)
         smb_connection: Active SMB connection to target (optional, for LSARPC)
-        no_ldap: Disable LDAP resolution
+        no_ldap: Disable LDAP/GC resolution
+        no_rpc: Disable RPC operations (target LSARPC and DC LSARPC)
         domain: Domain name for LDAP
         dc_ip: Domain controller IP
         username: Authentication username
         password: Authentication password
         hashes: NTLM hashes
         kerberos: Use Kerberos
+        aes_key: AES key for Kerberos
         ldap_domain: Separate LDAP domain (for local admin case)
         ldap_user: Separate LDAP username (for local admin case)
         ldap_password: Separate LDAP password (for local admin case - plaintext only)
@@ -1775,6 +1913,13 @@ def resolve_sid(
         resolved = WELL_KNOWN_SIDS[sid]
         debug(f"SID {sid} resolved via well-known SID table: {resolved}")
         return f"{resolved} ({sid})", resolved
+
+    # Chain 0.5: Special SID patterns (service SIDs, capability SIDs, etc.)
+    # These are dynamically-generated SIDs that can be identified by pattern
+    special = resolve_special_sid_pattern(sid)
+    if special:
+        debug(f"SID {sid} resolved via special pattern detection: {special}")
+        return special, None  # No clean username for display purposes
 
     # Check cache first
     cache = get_cache()
@@ -1830,24 +1975,37 @@ def resolve_sid(
             is_external = is_external_trust(trust_data)
 
             if is_external:
-                # EXTERNAL TRUST: GC won't have these objects - use trust FQDN directly
+                # EXTERNAL TRUST: GC won't have these objects
+                # Strategy: Try well-known RIDs first, then DC LSARPC (DC can follow trust path)
                 debug(f"SID {sid} is from EXTERNAL trust {trust_fqdn} - skipping GC (different forest)")
+                
+                # First try well-known RID resolution using trust FQDN
                 trust_name = resolve_trust_sid_to_name(sid, trust_fqdn)
                 if trust_name:
                     debug(f"SID {sid} resolved via external trust to {trust_fqdn}: {trust_name}")
                     _cache_success(trust_name)
                     info(f"[CROSS-TRUST] SID from {trust_fqdn} - for full resolution, collect BloodHound data from trusted domain")
                     return f"[CROSS-TRUST] {trust_name} ({sid})", trust_name
-                else:
-                    # Trust FQDN known but couldn't resolve name - show domain context
-                    debug(f"SID {sid} from external trust {trust_fqdn} - RID not well-known, showing domain context")
-                    display_name = f"{trust_fqdn}\\SID-{sid.split('-')[-1]}"
-                    _cache_success(display_name)
-                    info(f"[CROSS-TRUST] Unknown account from {trust_fqdn} - collect BloodHound data from trusted domain for full resolution")
-                    return f"[CROSS-TRUST] {display_name} ({sid})", display_name
+                
+                # Not a well-known RID - try DC LSARPC (DC can resolve cross-trust SIDs)
+                if not no_rpc and dc_ip and username:
+                    resolved = resolve_sid_via_dc_lsarpc(
+                        sid, dc_ip, domain, username, password, hashes, kerberos, aes_key
+                    )
+                    if resolved:
+                        debug(f"SID {sid} resolved via DC LSARPC: {resolved}")
+                        _cache_success(resolved)
+                        return f"[CROSS-TRUST] {resolved} ({sid})", resolved
+                
+                # DC couldn't resolve - show domain context with the trust FQDN we know
+                debug(f"SID {sid} from external trust {trust_fqdn} - RID not well-known, DC couldn't resolve")
+                display_name = f"{trust_fqdn}\\SID-{sid.split('-')[-1]}"
+                _cache_success(display_name)
+                info(f"[CROSS-TRUST] Unknown account from {trust_fqdn} - collect BloodHound data from trusted domain for full resolution")
+                return f"[CROSS-TRUST] {display_name} ({sid})", display_name
             else:
                 # INTRA-FOREST TRUST: GC should have these - continue to GC lookup below
-                debug(f"SID {sid} is from INTRA-FOREST trust {trust_fqdn} - will try GC lookup")
+                debug(f"SID {sid} is from INTRA-FOREST trust {trust_fqdn} - will try DC LSARPC then GC lookup")
 
         # Check if this domain prefix is cached as external trust (failed GC lookup previously)
         elif sid_prefix and sid_prefix in _external_trust_prefixes:
@@ -1855,10 +2013,22 @@ def resolve_sid(
             return f"{sid} (SID - external trust, unknown domain)", None
 
         # UNKNOWN foreign domain - not in BloodHound trust data
-        # If there was a real trust, BloodHound would have it. This is likely a local machine SID.
-        # Skip GC entirely to avoid timeouts - resolve to UNKNOWN\<name> or just the SID
+        # Try DC LSARPC first (DC can follow trust paths), then fall back to well-known RIDs
         elif sid_prefix and known_domain_prefixes:
-            debug(f"SID {sid} is from UNKNOWN domain (prefix {sid_prefix} not in BloodHound) - likely local machine SID, skipping GC")
+            debug(f"SID {sid} is from UNKNOWN domain (prefix {sid_prefix} not in BloodHound)")
+            
+            # Try DC LSARPC for unknown foreign domains (DC might still resolve via trust)
+            if not no_rpc and dc_ip and username:
+                resolved = resolve_sid_via_dc_lsarpc(
+                    sid, dc_ip, domain, username, password, hashes, kerberos, aes_key
+                )
+                if resolved:
+                    debug(f"SID {sid} resolved via DC LSARPC: {resolved}")
+                    _cache_success(resolved)
+                    return f"{resolved} ({sid})", resolved
+            
+            # DC couldn't resolve - likely local machine SID
+            debug(f"SID {sid} from unknown domain - trying well-known RID fallback")
             local_name = resolve_unknown_sid_to_local_name(sid)
             if local_name:
                 debug(f"SID {sid} resolved to {local_name} (unknown domain, likely local machine account)")
@@ -1871,12 +2041,31 @@ def resolve_sid(
 
     # Tier 3: Try SMB/LSARPC if connection available (skip for foreign domain SIDs)
     # This is very useful when using Kerberos CIFS tickets where LDAP auth might fail
-    if smb_connection and not is_foreign:
+    if smb_connection and not is_foreign and not no_rpc:
         resolved = resolve_sid_via_smb(sid, smb_connection)
         if resolved:
             debug(f"SID {sid} resolved via SMB/LSARPC: {resolved}")
             _cache_success(resolved)
             return f"{resolved} ({sid})", resolved
+
+    # Tier 3.5: If target LSARPC failed/skipped and we have DC credentials, try DC LSARPC
+    # This catches cases where:
+    # - is_foreign is False because we don't have local_domain_sid_prefix (can't detect foreign)
+    # - Target LSARPC returned STATUS_NONE_MAPPED (SID is from another domain)
+    # - We're operating without BloodHound trust data
+    # DC LSARPC can resolve SIDs from ANY trusted domain by following trust paths
+    if not no_rpc and dc_ip and username and not is_foreign:
+        # Only try this for domain-style SIDs (S-1-5-21-*) that weren't resolved above
+        sid_prefix = get_domain_sid_prefix(sid)
+        if sid_prefix:
+            debug(f"Target LSARPC failed/skipped - trying DC LSARPC as fallback for {sid}")
+            resolved = resolve_sid_via_dc_lsarpc(
+                sid, dc_ip, domain, username, password, hashes, kerberos, aes_key
+            )
+            if resolved:
+                debug(f"SID {sid} resolved via DC LSARPC (fallback): {resolved}")
+                _cache_success(resolved)
+                return f"{resolved} ({sid})", resolved
 
     # Tier 4: Try LDAP if enabled and we have sufficient authentication info
     # Prioritize dedicated LDAP credentials over main auth credentials
@@ -1925,22 +2114,48 @@ def resolve_sid(
                 _cache_success(resolved)
                 return f"{resolved} ({sid})", resolved
             else:
-                # GC lookup failed
-                # If this was a known intra-forest trust, something is wrong (GC should have it)
-                # If unknown foreign domain, cache as external trust
+                # GC lookup failed - this could be:
+                # 1. Intra-forest trust but object not replicated to GC (unusual)
+                # 2. External trust (different forest, not in GC)
+                # 3. Unknown domain we don't have trust data for
+                # Try DC LSARPC as fallback - DC can follow trust paths
+                
                 if trust_data and not is_external_trust(trust_data):
-                    # Intra-forest trust but GC failed - unusual, maybe connectivity issue
+                    # Known intra-forest trust but GC failed - try DC LSARPC
                     trust_fqdn = get_trust_fqdn(trust_data)
-                    debug(f"GC lookup failed for INTRA-FOREST trust SID {sid} from {trust_fqdn} - unexpected")
+                    debug(f"GC lookup failed for INTRA-FOREST trust SID {sid} from {trust_fqdn} - trying DC LSARPC")
+                    
+                    if not no_rpc and dc_ip and username:
+                        resolved = resolve_sid_via_dc_lsarpc(
+                            sid, dc_ip, domain, username, password, hashes, kerberos, aes_key
+                        )
+                        if resolved:
+                            debug(f"SID {sid} resolved via DC LSARPC: {resolved}")
+                            _cache_success(resolved)
+                            return f"{resolved} ({sid})", resolved
+                    
                     # Fall back to trust FQDN display
                     trust_name = resolve_trust_sid_to_name(sid, trust_fqdn)
                     if trust_name:
                         _cache_success(trust_name)
                         return f"{trust_name} ({sid})", trust_name
+                        
                 elif sid_prefix:
-                    # Unknown foreign domain - cache as external trust for future lookups
+                    # Unknown foreign domain (no BloodHound trust data)
+                    # Try DC LSARPC - might be a trust we just don't know about
+                    if not no_rpc and dc_ip and username:
+                        debug(f"GC failed for unknown foreign SID {sid} - trying DC LSARPC")
+                        resolved = resolve_sid_via_dc_lsarpc(
+                            sid, dc_ip, domain, username, password, hashes, kerberos, aes_key
+                        )
+                        if resolved:
+                            debug(f"SID {sid} resolved via DC LSARPC: {resolved}")
+                            _cache_success(resolved)
+                            return f"{resolved} ({sid})", resolved
+                    
+                    # DC couldn't resolve either - cache as external trust for future lookups
                     _external_trust_prefixes.add(sid_prefix)
-                    debug(f"GC lookup failed for foreign SID {sid} - caching domain prefix {sid_prefix} as external trust")
+                    debug(f"GC and DC LSARPC failed for foreign SID {sid} - caching domain prefix {sid_prefix} as unreachable trust")
                 else:
                     debug(f"GC lookup failed for foreign SID {sid} - may be external trust (different forest)")
 
@@ -2240,12 +2455,14 @@ def format_runas_with_sid_resolution(
     bh_connector=None,
     smb_connection=None,
     no_ldap: bool = False,
+    no_rpc: bool = False,
     domain: Optional[str] = None,
     dc_ip: Optional[str] = None,
     username: Optional[str] = None,
     password: Optional[str] = None,
     hashes: Optional[str] = None,
     kerberos: bool = False,
+    aes_key: Optional[str] = None,
     ldap_domain: Optional[str] = None,
     ldap_user: Optional[str] = None,
     ldap_password: Optional[str] = None,
@@ -2263,12 +2480,14 @@ def format_runas_with_sid_resolution(
         bh_connector: BloodHound API connector (optional, for live queries)
         smb_connection: Active SMB connection (optional)
         no_ldap: Disable LDAP resolution
+        no_rpc: Disable all RPC operations (both target LSARPC and DC LSARPC)
         domain: Domain name for LDAP
         dc_ip: Domain controller IP
         username: Authentication username
         password: Authentication password
         hashes: NTLM hashes
         kerberos: Use Kerberos
+        aes_key: AES key for Kerberos (optional)
         ldap_domain: Separate LDAP domain (for local admin case)
         ldap_user: Separate LDAP username (for local admin case)
         ldap_password: Separate LDAP password (for local admin case - plaintext only)
@@ -2293,12 +2512,14 @@ def format_runas_with_sid_resolution(
             bh_connector,
             smb_connection,
             no_ldap,
+            no_rpc,
             domain,
             dc_ip,
             username,
             password,
             hashes,
             kerberos,
+            aes_key,
             ldap_domain,
             ldap_user,
             ldap_password,

@@ -1015,3 +1015,136 @@ class TestCrossTrustResolution:
         # So no [CROSS-TRUST] prefix
         assert "[CROSS-TRUST]" not in display
 
+
+class TestDcLsarpcResolution:
+    """Tests for DC LSARPC resolution of cross-trust SIDs"""
+
+    def test_resolve_sid_via_dc_lsarpc_function_exists(self):
+        """Verify resolve_sid_via_dc_lsarpc function exists and is importable"""
+        from taskhound.utils.sid_resolver import resolve_sid_via_dc_lsarpc
+        assert callable(resolve_sid_via_dc_lsarpc)
+
+    def test_resolve_sid_via_dc_lsarpc_returns_none_without_credentials(self):
+        """DC LSARPC should return None when no credentials provided"""
+        from taskhound.utils.sid_resolver import resolve_sid_via_dc_lsarpc
+        
+        result = resolve_sid_via_dc_lsarpc(
+            "S-1-5-21-444444444-555555555-666666666-1500",
+            dc_ip="192.168.1.1",
+            domain="CORP.LOCAL",
+            username=None,  # No credentials
+            password=None,
+            hashes=None,
+            kerberos=False,
+            aes_key=None,
+        )
+        assert result is None
+
+    def test_resolve_sid_accepts_no_rpc_parameter(self):
+        """resolve_sid should accept no_rpc parameter"""
+        from taskhound.utils.sid_resolver import resolve_sid
+        import inspect
+        
+        sig = inspect.signature(resolve_sid)
+        params = list(sig.parameters.keys())
+        assert "no_rpc" in params
+
+    def test_resolve_sid_accepts_aes_key_parameter(self):
+        """resolve_sid should accept aes_key parameter"""
+        from taskhound.utils.sid_resolver import resolve_sid
+        import inspect
+        
+        sig = inspect.signature(resolve_sid)
+        params = list(sig.parameters.keys())
+        assert "aes_key" in params
+
+    def test_format_runas_accepts_no_rpc_parameter(self):
+        """format_runas_with_sid_resolution should accept no_rpc parameter"""
+        from taskhound.utils.sid_resolver import format_runas_with_sid_resolution
+        import inspect
+        
+        sig = inspect.signature(format_runas_with_sid_resolution)
+        params = list(sig.parameters.keys())
+        assert "no_rpc" in params
+
+    def test_format_runas_accepts_aes_key_parameter(self):
+        """format_runas_with_sid_resolution should accept aes_key parameter"""
+        from taskhound.utils.sid_resolver import format_runas_with_sid_resolution
+        import inspect
+        
+        sig = inspect.signature(format_runas_with_sid_resolution)
+        params = list(sig.parameters.keys())
+        assert "aes_key" in params
+
+    def test_no_rpc_disables_target_lsarpc(self):
+        """no_rpc=True should prevent target LSARPC resolution"""
+        from taskhound.utils.sid_resolver import resolve_sid
+        from unittest.mock import MagicMock, patch
+        
+        mock_smb = MagicMock()
+        
+        # With no_rpc=True, smb_connection should not be used
+        # Even if provided, the function should not call resolve_sid_via_smb
+        with patch('taskhound.utils.sid_resolver.resolve_sid_via_smb') as mock_lsarpc:
+            mock_lsarpc.return_value = None  # Would return something if called
+            
+            display, resolved = resolve_sid(
+                "S-1-5-21-111111111-222222222-333333333-1500",
+                smb_connection=mock_smb,
+                no_rpc=True,  # Disable RPC
+                no_ldap=True,  # Skip LDAP for cleaner test
+            )
+            
+            # resolve_sid_via_smb should NOT be called when no_rpc=True
+            mock_lsarpc.assert_not_called()
+    def test_dc_lsarpc_fallback_without_local_domain_prefix(self):
+        """DC LSARPC should be tried as fallback when we can't detect foreign SIDs"""
+        from taskhound.utils.sid_resolver import resolve_sid
+        from unittest.mock import patch
+        
+        # Scenario: We have a domain SID but no local_domain_sid_prefix
+        # So is_foreign returns False, target LSARPC fails, DC LSARPC should be tried
+        with patch('taskhound.utils.sid_resolver.resolve_sid_via_smb') as mock_target:
+            with patch('taskhound.utils.sid_resolver.resolve_sid_via_dc_lsarpc') as mock_dc:
+                mock_target.return_value = None  # Target LSARPC fails
+                mock_dc.return_value = "TRUSTEDDOM\\SomeUser"  # DC resolves it
+                
+                display, resolved = resolve_sid(
+                    "S-1-5-21-999999999-888888888-777777777-1234",
+                    smb_connection=None,  # No target connection
+                    no_ldap=True,
+                    domain="CORP.LOCAL",
+                    dc_ip="192.168.1.1",
+                    username="admin",
+                    password="password",
+                    local_domain_sid_prefix=None,  # Don't know our local domain
+                )
+                
+                # DC LSARPC should have been called as fallback
+                mock_dc.assert_called_once()
+                assert resolved == "TRUSTEDDOM\\SomeUser"
+
+    def test_gc_failure_triggers_dc_lsarpc_for_unknown_trust(self):
+        """When GC fails for an unknown foreign SID, DC LSARPC should be tried"""
+        from taskhound.utils.sid_resolver import resolve_sid
+        from unittest.mock import patch
+        
+        # Scenario: Foreign SID, no BloodHound trust data, GC fails
+        with patch('taskhound.utils.sid_resolver.resolve_sid_via_global_catalog') as mock_gc:
+            with patch('taskhound.utils.sid_resolver.resolve_sid_via_dc_lsarpc') as mock_dc:
+                mock_gc.return_value = None  # GC lookup fails
+                mock_dc.return_value = "UNKNOWN\\ResolvedUser"
+                
+                display, resolved = resolve_sid(
+                    "S-1-5-21-444444444-555555555-666666666-1001",
+                    no_ldap=False,
+                    domain="CORP.LOCAL",
+                    dc_ip="192.168.1.1",
+                    username="admin",
+                    password="password",
+                    local_domain_sid_prefix="S-1-5-21-111111111-222222222-333333333",
+                    known_domain_prefixes=None,  # No BloodHound data
+                )
+                
+                # DC LSARPC should be called after GC fails
+                assert mock_dc.called
