@@ -19,6 +19,7 @@ def resolve_name_to_sid(
     name: str,
     domain: str,
     is_computer: bool = False,
+    hv_loader: Optional[Any] = None,
     dc_ip: Optional[str] = None,
     username: Optional[str] = None,
     password: Optional[str] = None,
@@ -26,12 +27,18 @@ def resolve_name_to_sid(
     kerberos: bool = False,
 ) -> Optional[str]:
     """
-    Resolve a username or computer name to its SID via LDAP.
+    Resolve a username or computer name to its SID.
+
+    Resolution order:
+        1. BloodHound data (if hv_loader provided)
+        2. Cache lookup
+        3. LDAP query
 
     Args:
         name: Computer name (without domain) or username
         domain: Domain name (e.g., "corp.local")
         is_computer: True if resolving a computer account, False for user
+        hv_loader: HighValueLoader with BloodHound data (optional)
         dc_ip: Domain controller IP address
         username: LDAP authentication username
         password: LDAP authentication password
@@ -41,10 +48,47 @@ def resolve_name_to_sid(
     Returns:
         SID string (e.g., "S-1-5-21-..."), None if resolution fails
     """
-    # Delegate to the backend
+    from ..utils.cache_manager import get_cache
+
+    if not name:
+        return None
+
+    # Normalize computer name (strip $ suffix and domain parts)
+    lookup_name = name.upper()
+    if is_computer:
+        lookup_name = lookup_name.rstrip("$")
+        if "." in lookup_name:
+            lookup_name = lookup_name.split(".")[0]
+
+    cache = get_cache()
+    cache_key = f"name:{lookup_name}:{domain.upper() if domain else 'LOCAL'}"
+
+    # Tier 1: Check cache
+    if cache:
+        cached = cache.get("name_to_sid", cache_key)
+        if cached:
+            debug(f"[Name→SID] Cache hit: {lookup_name} → {cached}")
+            return cached
+
+    # Tier 2: BloodHound data (for computers)
+    if hv_loader and is_computer:
+        if hasattr(hv_loader, "loaded") and hv_loader.loaded:
+            if hasattr(hv_loader, "hv_computers") and hv_loader.hv_computers:
+                # Try with $ suffix (how BH stores computer names)
+                sid = hv_loader.hv_computers.get(f"{lookup_name}$")
+                if not sid:
+                    # Try without $ suffix
+                    sid = hv_loader.hv_computers.get(lookup_name)
+                if sid:
+                    debug(f"[Name→SID] BloodHound hit: {lookup_name} → {sid}")
+                    if cache:
+                        cache.set("name_to_sid", cache_key, sid)
+                    return sid
+
+    # Tier 3: LDAP query
     from .backends.ldap import resolve_name_to_sid_via_ldap
 
-    return resolve_name_to_sid_via_ldap(
+    sid = resolve_name_to_sid_via_ldap(
         name=name,
         domain=domain,
         is_computer=is_computer,
@@ -54,6 +98,11 @@ def resolve_name_to_sid(
         hashes=hashes,
         kerberos=kerberos,
     )
+
+    if sid and cache:
+        cache.set("name_to_sid", cache_key, sid)
+
+    return sid
 
 
 def prefetch_computer_sids(
