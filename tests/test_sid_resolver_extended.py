@@ -5,7 +5,7 @@ Tests for BloodHound API resolution, SMB LSARPC resolution, and LDAP resolution 
 """
 from unittest.mock import MagicMock, patch
 
-from taskhound.utils.sid_resolver import (
+from taskhound.resolver import (
     format_runas_with_sid_resolution,
     looks_like_domain_user,
     resolve_sid,
@@ -186,8 +186,8 @@ class TestLooksLikeDomainUser:
 class TestResolveSid:
     """Tests for the main resolve_sid function."""
 
-    @patch("taskhound.utils.sid_resolver.get_cache")
-    @patch("taskhound.utils.sid_resolver.resolve_sid_from_bloodhound")
+    @patch("taskhound.resolver.sid_to_name.get_cache")
+    @patch("taskhound.resolver.sid_to_name.resolve_sid_from_bloodhound")
     def test_returns_cached_result(self, mock_bh, mock_cache):
         """Should return cached result if available."""
         mock_cache_instance = MagicMock()
@@ -204,7 +204,7 @@ class TestResolveSid:
         assert "S-1-5-21-123-456-789-1001" in result
         mock_bh.assert_not_called()
 
-    @patch("taskhound.utils.sid_resolver.get_cache")
+    @patch("taskhound.resolver.sid_to_name.get_cache")
     def test_skips_after_max_failures(self, mock_cache):
         """Should skip resolution after max failures."""
         mock_cache_instance = MagicMock()
@@ -218,8 +218,8 @@ class TestResolveSid:
 
         assert "Unresolvable" in result
 
-    @patch("taskhound.utils.sid_resolver.get_cache")
-    @patch("taskhound.utils.sid_resolver.resolve_sid_from_bloodhound")
+    @patch("taskhound.resolver.sid_to_name.get_cache")
+    @patch("taskhound.resolver.sid_to_name.resolve_sid_from_bloodhound")
     def test_tries_bloodhound_first(self, mock_bh, mock_cache):
         """Should try BloodHound data first."""
         mock_cache_instance = MagicMock()
@@ -257,7 +257,7 @@ class TestFormatRunasWithSidResolution:
         assert result == "DOMAIN\\admin"
         assert resolved is None
 
-    @patch("taskhound.utils.sid_resolver.resolve_sid")
+    @patch("taskhound.resolver.sid_to_name.resolve_sid")
     def test_resolves_sid(self, mock_resolve):
         """Should resolve SID to username."""
         mock_resolve.return_value = ("resolveduser (S-1-5-21-xxx)", "resolveduser")
@@ -282,11 +282,11 @@ class TestResolveSidEdgeCases:
         # Should return original since it fails is_sid check
         assert result == "S-1-invalid"
 
-    @patch("taskhound.utils.sid_resolver.get_cache")
-    @patch("taskhound.utils.sid_resolver.resolve_sid_from_bloodhound")
-    @patch("taskhound.utils.sid_resolver.resolve_sid_via_bloodhound_api")
-    @patch("taskhound.utils.sid_resolver.resolve_sid_via_smb")
-    @patch("taskhound.utils.sid_resolver.resolve_sid_via_ldap")
+    @patch("taskhound.resolver.sid_to_name.get_cache")
+    @patch("taskhound.resolver.sid_to_name.resolve_sid_from_bloodhound")
+    @patch("taskhound.resolver.sid_to_name.resolve_sid_via_bloodhound_api")
+    @patch("taskhound.resolver.sid_to_name.resolve_sid_via_smb")
+    @patch("taskhound.resolver.sid_to_name.resolve_sid_via_ldap")
     def test_increments_failure_on_all_failures(
         self, mock_ldap, mock_smb, mock_api, mock_bh, mock_cache
     ):
@@ -316,8 +316,8 @@ class TestResolveSidEdgeCases:
         assert call_args[0][0] == "sid_failures"  # category
         assert "S-1-5-21-123-456-789-1004" in call_args[0][1]  # key contains SID
 
-    @patch("taskhound.utils.sid_resolver.get_cache")
-    @patch("taskhound.utils.sid_resolver.resolve_sid_from_bloodhound")
+    @patch("taskhound.resolver.sid_to_name.get_cache")
+    @patch("taskhound.resolver.sid_to_name.resolve_sid_from_bloodhound")
     def test_caches_successful_resolution(self, mock_bh, mock_cache):
         """Should cache successful resolution."""
         mock_cache_instance = MagicMock()

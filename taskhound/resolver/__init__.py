@@ -36,7 +36,14 @@ from .trusts import (
 )
 
 # Tier-0 detection
-from .tier0 import fetch_tier0_members, check_tier0_membership
+from .tier0 import (
+    fetch_tier0_members,
+    check_tier0_membership,
+    TIER0_GROUP_RIDS,
+    TIER0_ACCOUNT_RIDS,
+    TIER0_BUILTIN_SIDS,
+    Tier0Cache,
+)
 
 # Utilities and constants
 from .constants import (
@@ -47,6 +54,7 @@ from .constants import (
     resolve_special_sid_pattern,
     sid_to_binary,
     binary_to_sid,
+    extract_domain_sid_from_hv,
     WELL_KNOWN_SIDS,
     WELL_KNOWN_LOCAL_RIDS,
 )
@@ -93,6 +101,10 @@ __all__ = [
     # Tier-0
     "fetch_tier0_members",
     "check_tier0_membership",
+    "TIER0_GROUP_RIDS",
+    "TIER0_ACCOUNT_RIDS",
+    "TIER0_BUILTIN_SIDS",
+    "Tier0Cache",
     # Utilities
     "is_sid",
     "get_domain_sid_prefix",
@@ -101,6 +113,7 @@ __all__ = [
     "resolve_special_sid_pattern",
     "sid_to_binary",
     "binary_to_sid",
+    "extract_domain_sid_from_hv",
     "WELL_KNOWN_SIDS",
     "WELL_KNOWN_LOCAL_RIDS",
     # Backends

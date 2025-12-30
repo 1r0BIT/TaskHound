@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from taskhound.utils.cache_manager import get_cache, init_cache
-from taskhound.utils.sid_resolver import resolve_sid
+from taskhound.resolver import resolve_sid
 
 
 class TestSidCaching(unittest.TestCase):
@@ -24,10 +24,10 @@ class TestSidCaching(unittest.TestCase):
             self.cache.close()
         shutil.rmtree(self.test_dir)
 
-    @patch("taskhound.utils.sid_resolver.resolve_sid_from_bloodhound")
-    @patch("taskhound.utils.sid_resolver.resolve_sid_via_bloodhound_api")
-    @patch("taskhound.utils.sid_resolver.resolve_sid_via_smb")
-    @patch("taskhound.utils.sid_resolver.resolve_sid_via_ldap")
+    @patch("taskhound.resolver.sid_to_name.resolve_sid_from_bloodhound")
+    @patch("taskhound.resolver.sid_to_name.resolve_sid_via_bloodhound_api")
+    @patch("taskhound.resolver.sid_to_name.resolve_sid_via_smb")
+    @patch("taskhound.resolver.sid_to_name.resolve_sid_via_ldap")
     def test_sid_fail_count_increment(self, mock_ldap, mock_smb, mock_bh_api, mock_bh_offline):
         # Mock all resolution methods to fail (return None)
         mock_bh_offline.return_value = None
@@ -49,7 +49,7 @@ class TestSidCaching(unittest.TestCase):
         resolve_sid(sid, no_ldap=False, domain="test", username="user", password="pw")
         self.assertEqual(self.cache.get("sid_failures", sid), 3)
 
-    @patch("taskhound.utils.sid_resolver.resolve_sid_from_bloodhound")
+    @patch("taskhound.resolver.sid_to_name.resolve_sid_from_bloodhound")
     def test_sid_skip_after_failures(self, mock_bh_offline):
         sid = "S-1-5-21-1111111111-2222222222-3333333333-1002"
 
@@ -63,7 +63,7 @@ class TestSidCaching(unittest.TestCase):
         self.assertIn("Unresolvable", result)
         mock_bh_offline.assert_not_called()
 
-    @patch("taskhound.utils.sid_resolver.resolve_sid_from_bloodhound")
+    @patch("taskhound.resolver.sid_to_name.resolve_sid_from_bloodhound")
     def test_sid_success_clears_failures(self, mock_bh_offline):
         sid = "S-1-5-21-1111111111-2222222222-3333333333-1003"
 

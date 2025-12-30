@@ -5,7 +5,7 @@ Tests the pre-flight LDAP query approach for detecting Tier-0 users.
 """
 from unittest.mock import MagicMock, patch
 
-from taskhound.utils.sid_resolver import (
+from taskhound.resolver import (
     TIER0_ACCOUNT_RIDS,
     TIER0_BUILTIN_SIDS,
     TIER0_GROUP_RIDS,
@@ -172,7 +172,7 @@ class TestFetchTier0Members:
 
         assert result == {}
 
-    @patch("taskhound.utils.sid_resolver.get_cache")
+    @patch("taskhound.resolver.tier0.get_cache")
     def test_uses_cached_data_if_available(self, mock_get_cache):
         """Should return cached data if available."""
         mock_cache = MagicMock()
@@ -184,33 +184,29 @@ class TestFetchTier0Members:
         assert result == {"cacheduser": (True, ["Domain Admins"])}
         mock_cache.get.assert_called_once()
 
-    @patch("taskhound.utils.sid_resolver.get_cache")
-    @patch("taskhound.utils.sid_resolver.socket.gethostbyname")
-    def test_returns_empty_on_dns_failure(self, mock_gethostbyname, mock_get_cache):
-        """Should return empty cache on DNS failure."""
-        mock_get_cache.return_value = MagicMock(get=MagicMock(return_value=None))
-        mock_gethostbyname.side_effect = OSError("DNS error")
+    @patch("taskhound.resolver.tier0.get_cache")
+    @patch("taskhound.resolver.tier0.get_ldap_connection")
+    def test_returns_empty_on_connection_failure(self, mock_ldap, mock_get_cache):
+        """Should return empty cache on connection failure (e.g., DNS or network error)."""
+        from taskhound.utils.ldap import LDAPConnectionError
 
-        # Import socket.gaierror which is what the actual code catches
-        import socket
-        mock_gethostbyname.side_effect = socket.gaierror("DNS error")
+        mock_get_cache.return_value = MagicMock(get=MagicMock(return_value=None))
+        mock_ldap.side_effect = LDAPConnectionError("Connection failed")
 
         result = fetch_tier0_members(domain="test.local", dc_ip=None)
 
-        # Should try to resolve
-        mock_gethostbyname.assert_called_with("test.local")
-        # Should return empty on DNS failure
+        # Should try to connect
+        mock_ldap.assert_called_once()
+        # Should return empty on connection failure
         assert result == {}
 
-    @patch("taskhound.utils.sid_resolver.get_cache")
-    @patch("taskhound.utils.sid_resolver.socket.gethostbyname")
-    @patch("taskhound.utils.sid_resolver.get_ldap_connection")
-    def test_handles_ldap_connection_failure(self, mock_ldap, mock_dns, mock_cache):
+    @patch("taskhound.resolver.tier0.get_cache")
+    @patch("taskhound.resolver.tier0.get_ldap_connection")
+    def test_handles_ldap_connection_failure(self, mock_ldap, mock_cache):
         """Should return empty cache on LDAP connection failure."""
         from taskhound.utils.ldap import LDAPConnectionError
 
         mock_cache.return_value = MagicMock(get=MagicMock(return_value=None))
-        mock_dns.return_value = "192.168.1.1"
         mock_ldap.side_effect = LDAPConnectionError("Connection refused")
 
         result = fetch_tier0_members(
@@ -221,13 +217,11 @@ class TestFetchTier0Members:
 
         assert result == {}
 
-    @patch("taskhound.utils.sid_resolver.get_cache")
-    @patch("taskhound.utils.sid_resolver.socket.gethostbyname")
-    @patch("taskhound.utils.sid_resolver.get_ldap_connection")
-    def test_queries_domain_controllers_for_domain_sid(self, mock_ldap, mock_dns, mock_cache):
+    @patch("taskhound.resolver.tier0.get_cache")
+    @patch("taskhound.resolver.tier0.get_ldap_connection")
+    def test_queries_domain_controllers_for_domain_sid(self, mock_ldap, mock_cache):
         """Should query domain controllers to find domain SID."""
         mock_cache.return_value = MagicMock(get=MagicMock(return_value=None))
-        mock_dns.return_value = "192.168.1.1"
 
         # Mock LDAP connection that returns empty results
         mock_conn = MagicMock()
@@ -275,10 +269,9 @@ class TestFetchTier0MembersIntegration:
         mock_entry.__getitem__ = MagicMock(side_effect=lambda k: mock_attrs if k == "attributes" else None)
         return mock_entry
 
-    @patch("taskhound.utils.sid_resolver.get_cache")
-    @patch("taskhound.utils.sid_resolver.socket.gethostbyname")
-    @patch("taskhound.utils.sid_resolver.get_ldap_connection")
-    def test_uses_provided_dc_ip(self, mock_ldap, mock_dns, mock_cache):
+    @patch("taskhound.resolver.tier0.get_cache")
+    @patch("taskhound.resolver.tier0.get_ldap_connection")
+    def test_uses_provided_dc_ip(self, mock_ldap, mock_cache):
         """Should use provided DC IP instead of resolving."""
         mock_cache.return_value = MagicMock(get=MagicMock(return_value=None))
         mock_conn = MagicMock()
@@ -292,8 +285,6 @@ class TestFetchTier0MembersIntegration:
             auth_password="pass",
         )
 
-        # Should NOT try to resolve domain
-        mock_dns.assert_not_called()
         # Should use provided IP
         mock_ldap.assert_called_once()
         call_kwargs = mock_ldap.call_args.kwargs

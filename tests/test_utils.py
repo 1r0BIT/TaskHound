@@ -5,7 +5,7 @@ Test utility functions in taskhound.utils.
 from unittest.mock import MagicMock
 
 from taskhound.utils.helpers import normalize_targets, sanitize_json_string
-from taskhound.utils.sid_resolver import extract_domain_sid_from_hv, looks_like_domain_user
+from taskhound.resolver import extract_domain_sid_from_hv, looks_like_domain_user
 
 
 class TestHelpers:
