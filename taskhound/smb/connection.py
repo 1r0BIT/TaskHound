@@ -267,7 +267,7 @@ def get_server_sid(
         S-1-5-21-XXXXXXXXX-XXXXXXXX-XXXXXXXX-1002
     """
     try:
-        from ..utils.sid_resolver import resolve_name_to_sid
+        from ..resolver import resolve_name_to_sid
 
         # Get computer name and domain from SMB
         computer_name = smb.getServerName()

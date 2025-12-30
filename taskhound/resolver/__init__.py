@@ -7,7 +7,7 @@
 # - Tier-0 detection (identify privileged accounts)
 
 # Primary resolution functions
-from .sid_to_name import resolve_sid
+from .sid_to_name import resolve_sid, format_runas_with_sid_resolution
 from .name_to_sid import resolve_name_to_sid, prefetch_computer_sids
 
 # NETBIOS resolution
@@ -68,6 +68,7 @@ from .backends import (
 __all__ = [
     # Primary functions
     "resolve_sid",
+    "format_runas_with_sid_resolution",
     "resolve_name_to_sid",
     "prefetch_computer_sids",
     # NETBIOS

@@ -72,7 +72,7 @@ def _handle_opengraph(
         debug("LDAP fallback enabled for objectId resolution")
 
     # Query NetBIOS domain name for accurate cross-domain detection
-    from .utils.sid_resolver import get_netbios_cache
+    from .resolver import get_netbios_cache
 
     netbios_name = None
     netbios_cache = get_netbios_cache()
@@ -660,7 +660,7 @@ This operation involves:
     # LDAP is the fallback when no BloodHound connection is available
     has_bh_domain_sids = hv is not None and hv.hv_domain_sids
     if not has_bh_domain_sids and not args.no_ldap and args.domain and args.username:
-        from .utils.sid_resolver import fetch_known_domain_sids_via_ldap
+        from .resolver import fetch_known_domain_sids_via_ldap
 
         ldap_domain = args.ldap_domain if args.ldap_domain else args.domain
         ldap_user = args.ldap_user if args.ldap_user else args.username
@@ -689,7 +689,7 @@ This operation involves:
     # Store LDAP credentials for lazy NETBIOS resolution (used when NETBIOS\user format encountered)
     # This enables resolving trusted domain NETBIOS names (e.g., TRUSTEDDOM\user → TRUSTEDDOM.LOCAL\user)
     if not args.no_ldap and args.domain and args.username:
-        from .utils.sid_resolver import set_netbios_ldap_credentials
+        from .resolver import set_netbios_ldap_credentials
 
         ldap_domain = args.ldap_domain if args.ldap_domain else args.domain
         ldap_user = args.ldap_user if args.ldap_user else args.username
@@ -835,7 +835,7 @@ This operation involves:
         # Pre-fetch computer SIDs from BloodHound data (if available) before scan starts
         # This populates the cache so workers don't each need to make LDAP calls
         if targets and (hv or args.domain):
-            from .utils.sid_resolver import prefetch_computer_sids
+            from .resolver import prefetch_computer_sids
 
             prefetch_computer_sids(
                 targets=targets,

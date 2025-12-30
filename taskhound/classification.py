@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from .utils.logging import warn
-from .utils.sid_resolver import looks_like_domain_user
+from .resolver import looks_like_domain_user
 
 if TYPE_CHECKING:
     from .models.task import TaskRow
@@ -226,7 +226,7 @@ def classify_task(
     elif tier0_cache:
         # Normalize username for lookup
         # If runas is a SID and we have a resolved username, use that instead
-        from .utils.sid_resolver import is_sid
+        from .resolver import is_sid
         lookup_user = runas
         if is_sid(runas) and resolved_runas:
             lookup_user = resolved_runas

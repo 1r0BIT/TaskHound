@@ -422,3 +422,78 @@ def _resolve_foreign_sid(
             return f"{trust_name} ({sid})", trust_name
 
     return f"{sid} (SID - foreign domain)", None
+
+
+def format_runas_with_sid_resolution(
+    runas: str,
+    hv_loader: Optional[Any] = None,
+    bh_connector: Optional[Any] = None,
+    smb_connection: Optional[Any] = None,
+    no_ldap: bool = False,
+    no_rpc: bool = False,
+    domain: Optional[str] = None,
+    dc_ip: Optional[str] = None,
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+    hashes: Optional[str] = None,
+    aes_key: Optional[str] = None,
+    kerberos: bool = False,
+    ldap_connection: Optional[Any] = None,
+    no_bloodhound: bool = False,
+    bh_url: Optional[str] = None,
+    bh_token_id: Optional[str] = None,
+    bh_token_key: Optional[str] = None,
+    use_gc: bool = True,
+    gc_server: Optional[str] = None,
+    machine_name: Optional[str] = None,
+    trust_data: Optional[TrustData] = None,
+    check_foreign: bool = True,
+) -> Tuple[str, Optional[str]]:
+    """
+    Format a RunAs value with SID resolution if applicable.
+
+    This is a compatibility wrapper that delegates to resolve_sid().
+    If the input is a SID, resolve it. Otherwise return unchanged.
+
+    Args:
+        runas: The RunAs value (may be a SID or already a name)
+        ... (same args as resolve_sid)
+
+    Returns:
+        Tuple of (display_runas, resolved_username)
+        - display_runas: Formatted string for display
+        - resolved_username: Just the resolved username (for internal use), or None
+    """
+    if not runas:
+        return runas, None
+
+    # If it's not a SID, return as-is (runas, None)
+    if not is_sid(runas):
+        return runas, None
+
+    # Resolve the SID - returns (display_name, resolved_name)
+    return resolve_sid(
+        sid=runas,
+        hv_loader=hv_loader,
+        bh_connector=bh_connector,
+        smb_connection=smb_connection,
+        no_ldap=no_ldap,
+        no_rpc=no_rpc,
+        domain=domain,
+        dc_ip=dc_ip,
+        username=username,
+        password=password,
+        hashes=hashes,
+        aes_key=aes_key,
+        kerberos=kerberos,
+        ldap_connection=ldap_connection,
+        no_bloodhound=no_bloodhound,
+        bh_url=bh_url,
+        bh_token_id=bh_token_id,
+        bh_token_key=bh_token_key,
+        use_gc=use_gc,
+        gc_server=gc_server,
+        machine_name=machine_name,
+        trust_data=trust_data,
+        check_foreign=check_foreign,
+    )

@@ -39,7 +39,7 @@ from ..utils.credentials import find_password_for_user
 from ..utils.helpers import is_ipv4
 from ..utils.logging import debug as log_debug
 from ..utils.logging import good, info, status, warn
-from ..utils.sid_resolver import (
+from ..resolver import (
     format_runas_with_sid_resolution,
     is_sid,
 )
@@ -601,14 +601,14 @@ def process_target(
         if is_sid(runas) and not opsec:
             # Skip SID resolution for well-known local SIDs that will be filtered out
             # This avoids unnecessary cache lookups for SYSTEM (S-1-5-18), etc.
-            from ..utils.sid_resolver import looks_like_domain_user
+            from ..resolver import looks_like_domain_user
             if not looks_like_domain_user(runas) and not include_local:
                 # This SID is a local/system account and we're not including locals
                 # Skip resolution - the task will be filtered out in classify_task()
                 pass
             else:
                 # Derive local domain SID prefix from computer SID for foreign domain detection
-                from ..utils.sid_resolver import get_domain_sid_prefix
+                from ..resolver import get_domain_sid_prefix
                 local_domain_prefix = get_domain_sid_prefix(server_sid) if server_sid else None
 
                 # Get known domain SID prefixes for unknown domain detection

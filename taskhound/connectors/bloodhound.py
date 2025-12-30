@@ -21,7 +21,7 @@ except ImportError:
 from ..utils.bh_auth import BloodHoundAuthenticator
 from ..utils.helpers import sanitize_json_string
 from ..utils.logging import debug, good, status, warn
-from ..utils.sid_resolver import TrustInfo
+from ..resolver import TrustInfo
 
 
 def _safe_get_sam(data: dict, key: str) -> str:

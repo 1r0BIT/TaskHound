@@ -315,7 +315,7 @@ def prefetch_pwd_last_set(
         Dict mapping normalized username to pwdLastSet datetime
     """
     from ..parsers.task_xml import parse_task_xml
-    from ..utils.sid_resolver import is_sid
+    from ..resolver import is_sid
 
     pwd_cache: Dict[str, Any] = {}
 
@@ -340,7 +340,7 @@ def prefetch_pwd_last_set(
     info(f"{target}: Querying LDAP for password age data ({len(unique_users)} users)...")
 
     try:
-        from ..utils.sid_resolver import batch_get_user_attributes
+        from ..resolver import batch_get_user_attributes
 
         ldap_auth_domain = ldap_domain or domain
         ldap_auth_user = ldap_user or username
@@ -429,7 +429,7 @@ def prefetch_tier0_members(
     info(f"{target}: Fetching Tier-0 group members via LDAP (pre-flight)...")
 
     try:
-        from ..utils.sid_resolver import fetch_tier0_members
+        from ..resolver import fetch_tier0_members
 
         ldap_auth_domain = ldap_domain or domain
         ldap_auth_user = ldap_user or username

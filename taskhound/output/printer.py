@@ -7,7 +7,7 @@ from ..utils import logging as log_utils
 from ..utils.console import console
 from ..utils.credentials import find_password_for_user
 from ..utils.date_parser import parse_iso_date
-from ..utils.sid_resolver import format_runas_with_sid_resolution
+from ..resolver import format_runas_with_sid_resolution
 from . import COLORS
 
 
@@ -474,7 +474,7 @@ def format_block(
     # Use pre-resolved username if available, otherwise resolve now
     if resolved_runas:
         # Already resolved - format display string
-        from ..utils.sid_resolver import is_sid
+        from ..resolver import is_sid
         display_runas = f"{resolved_runas} ({runas})" if is_sid(runas) else runas
         resolved_username = resolved_runas
     else:
