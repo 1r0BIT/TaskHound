@@ -147,8 +147,8 @@ TTTTT  AAA   SSS  K   K H   H  OOO  U   U N   N DDDD
 │ Date             │ 2025-06-15T02:30:00                                       │
 │ Trigger          │ Calendar (starts 2025-06-15 02:30, daily)                 │
 │ Reason           │ Tier 0 - Domain Admins membership                         │
-│ Cred Validation  │ VALID                                                     │
-│ Pwd Analysis     │ Password changed BEFORE task creation - credentials valid │
+│ Cred Validation  │ CONFIRMED_VALID                                           │
+│ Pwd Analysis     │ Password unchanged AND ran within schedule - confirmed    │
 └──────────────────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -161,8 +161,8 @@ TTTTT  AAA   SSS  K   K H   H  OOO  U   U N   N DDDD
 │ Date             │ 2025-03-10T08:00:00                                       │
 │ Trigger          │ Calendar (starts 2025-03-10 08:00, every 4 hours)         │
 │ Reason           │ High Value match found in BloodHound                      │
-│ Cred Validation  │ LIKELY INVALID (password older than pwdLastSet)          │
-│ Pwd Analysis     │ Password changed AFTER task - credentials may be stale    │
+│ Cred Validation  │ DEFINITELY_STALE                                          │
+│ Pwd Analysis     │ Password changed AFTER last run - credentials are stale   │
 └──────────────────────────────────────────────────────────────────────────────┘
 
 ╭─────────────────────────── SCAN COMPLETE ────────────────────────────────────╮
@@ -320,7 +320,7 @@ taskhound -t moe.thesimpsons.local -u homer.simpson -p 'Doh!123' -d thesimpsons.
 
 ## Credential Validation
 
-TaskHound verifies if stored task passwords are still valid by querying task execution history via RPC. This is **enabled by default**.
+TaskHound assesses if stored task passwords are likely still valid by querying task execution history via RPC and applying heuristics. This is **enabled by default**.
 
 ```bash
 # Credential validation is on by default, no flag needed
@@ -330,13 +330,27 @@ taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.
 taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.local --no-validate-creds
 ```
 
-Output includes validation status:
-- `VALID` - Credentials confirmed working, task can execute
-- `VALID (restricted)` - Password correct but account restricted (e.g., no batch or interactive logon right)
-- `INVALID (wrong password)` - Logon failure (0x8007052E)
-- `BLOCKED (account disabled/expired)` - Account disabled, locked, or password expired
-- `UNKNOWN` - Task never ran, cannot determine
-- `LIKELY VALID/INVALID` - Heuristic based on password freshness when task never ran
+### How It Works
+
+Windows Task Scheduler only records **successful** task executions. Authentication failures (wrong password, account locked, etc.) are silently ignored. The task just doesn't run. This means:
+
+- If a task has **never run**: We can't tell if credentials are wrong or the task is just disabled
+- If a task ran **in the past**: Credentials were valid *at that time*, but may have become stale since
+
+TaskHound uses heuristics to estimate credential validity:
+
+| Status | Meaning |
+|--------|---------|
+| `CONFIRMED_VALID` | Password unchanged since task creation AND task ran within expected schedule - credentials confirmed working |
+| `HIGH_CONFIDENCE_VALID` | Password unchanged since task creation, but trigger timing unknown (e.g., boot trigger) - credentials likely valid |
+| `LIKELY_VALID` | Password changed but task ran within schedule (creds updated), OR task ran successfully (RPC-only mode) |
+| `POSSIBLY_STALE` | Task should have run but hasn't - may indicate stale credentials |
+| `DEFINITELY_STALE` | Password changed after last successful run - credentials are definitely wrong |
+| `UNKNOWN` | Task has never run - cannot determine |
+
+The key insight: comparing `pwdLastSet` from AD against `LastRunTime` from Task Scheduler tells us if the password changed after the last successful run. 
+
+**Without AD data** (e.g., `--no-ldap` and no BloodHound): TaskHound falls back to RPC-only mode, using just the return code and last run time. A successful execution returns `LIKELY_VALID`; schedule-based staleness detection still applies if trigger interval is known from the task XML.
 
 > **Note**: Disabled when using `--opsec` or `--no-rpc`.
 

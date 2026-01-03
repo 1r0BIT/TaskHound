@@ -32,16 +32,18 @@ we use multiple data sources to ESTIMATE credential validity:
    - Password was changed AFTER the last successful run
    - The stored credentials are guaranteed to be wrong
 
-2. HIGH_CONFIDENCE_VALID: pwdLastSet < task_creation_date
+2. CONFIRMED_VALID: pwdLastSet < task_creation_date AND LastRunTime within trigger boundary
    - Password has not changed since the task was created
-   - If task ever ran successfully, credentials are still valid
+   - Task executed within expected schedule - credentials are confirmed working
 
-3. CONFIRMED_VALID: pwdLastSet > task_creation_date AND LastRunTime is recent
+3. HIGH_CONFIDENCE_VALID: pwdLastSet < task_creation_date BUT trigger boundary unknown
+   - Password has not changed since the task was created
+   - Can't verify execution timing (e.g., boot trigger with no recent reboot)
+   - Credentials likely valid but can't confirm task is actively running
+
+4. LIKELY_VALID: pwdLastSet > task_creation_date AND LastRunTime within trigger boundary
    - Password was changed after task creation, BUT task ran successfully
-     within its expected schedule - someone updated the task credentials
-
-4. LIKELY_VALID: Valid return code + recent LastRunTime (within 2x trigger interval)
-   - Task ran successfully recently, probably still valid
+   - Someone updated the task credentials and they appear to work
 
 5. POSSIBLY_STALE: Valid return code + old LastRunTime (outside expected schedule)
    - Task shows success but hasn't run when it should have
@@ -99,8 +101,8 @@ class CredentialConfidence(Enum):
 
     # Definitive states (high certainty)
     DEFINITELY_STALE = "definitely_stale"      # pwdLastSet > LastRunTime - password changed after last run
-    HIGH_CONFIDENCE_VALID = "high_confidence"  # pwdLastSet < task_creation_date - password unchanged
-    CONFIRMED_VALID = "confirmed_valid"        # pwdLastSet > task_creation but task ran recently
+    CONFIRMED_VALID = "confirmed_valid"        # pwdLastSet < task_creation + ran within trigger boundary
+    HIGH_CONFIDENCE_VALID = "high_confidence"  # pwdLastSet < task_creation but trigger boundary unknown
 
     # Probable states (medium certainty)
     LIKELY_VALID = "likely_valid"              # Task ran recently within schedule
@@ -169,9 +171,9 @@ def calculate_confidence(
     Heuristics applied in order:
     1. If task never ran or is blocked -> UNKNOWN
     2. If pwdLastSet > LastRunTime -> DEFINITELY_STALE
-    3. If pwdLastSet < task_creation_date -> HIGH_CONFIDENCE_VALID
-    4. If pwdLastSet > task_creation_date AND LastRunTime is recent -> CONFIRMED_VALID
-    5. If LastRunTime is within expected schedule -> LIKELY_VALID
+    3. If pwdLastSet < task_creation_date AND within trigger boundary -> CONFIRMED_VALID
+    4. If pwdLastSet < task_creation_date BUT no trigger boundary -> HIGH_CONFIDENCE_VALID
+    5. If pwdLastSet > task_creation_date AND within trigger boundary -> LIKELY_VALID
     6. If LastRunTime is older than expected -> POSSIBLY_STALE
     """
     # No run info or task never ran - can't determine
@@ -204,16 +206,37 @@ def calculate_confidence(
             f"Password changed {days_since_pwd_change}d ago (after last successful run on {run_info.last_run.strftime('%Y-%m-%d')})"
         )
 
-    # HEURISTIC 2: pwdLastSet < task_creation_date -> HIGH_CONFIDENCE_VALID
-    # Password has not changed since the task was created
+    # HEURISTIC 2 & 3: Password unchanged since task creation
     if context.pwd_last_set and context.task_creation_date:
         if context.pwd_last_set < context.task_creation_date:
-            return (
-                CredentialConfidence.HIGH_CONFIDENCE_VALID,
-                f"Password unchanged since task creation (pwdLastSet: {context.pwd_last_set.strftime('%Y-%m-%d')}, task created: {context.task_creation_date.strftime('%Y-%m-%d')})"
-            )
+            # Password hasn't changed since task was created
+            if context.trigger_interval_days:
+                # We can verify execution timing
+                expected_interval = timedelta(days=context.trigger_interval_days)
+                grace_period = expected_interval * 2
+                time_since_last_run = now - run_info.last_run
 
-    # HEURISTIC 3: pwdLastSet > task_creation_date BUT task ran successfully within schedule
+                if time_since_last_run <= grace_period:
+                    # HEURISTIC 2: Password unchanged + ran within schedule -> CONFIRMED_VALID
+                    return (
+                        CredentialConfidence.CONFIRMED_VALID,
+                        f"Password unchanged since task creation AND ran within schedule ({run_info.last_run.strftime('%Y-%m-%d %H:%M')})"
+                    )
+                else:
+                    # Password unchanged but hasn't run in a while -> POSSIBLY_STALE
+                    missed_runs = int(time_since_last_run / expected_interval)
+                    return (
+                        CredentialConfidence.POSSIBLY_STALE,
+                        f"Password unchanged but task should run every {context.trigger_interval_days}d, last ran {time_since_last_run.days}d ago (~{missed_runs} missed runs)"
+                    )
+            else:
+                # HEURISTIC 3: Password unchanged but can't verify execution timing -> HIGH_CONFIDENCE_VALID
+                return (
+                    CredentialConfidence.HIGH_CONFIDENCE_VALID,
+                    f"Password unchanged since task creation (pwdLastSet: {context.pwd_last_set.strftime('%Y-%m-%d')}) - trigger timing unknown"
+                )
+
+    # HEURISTIC 4: pwdLastSet > task_creation_date BUT task ran successfully within schedule
     # This means someone updated the task credentials after the password change!
     if context.pwd_last_set and context.task_creation_date and context.trigger_interval_days:
         if context.pwd_last_set > context.task_creation_date:
@@ -225,20 +248,21 @@ def calculate_confidence(
 
             if time_since_last_run <= grace_period:
                 return (
-                    CredentialConfidence.CONFIRMED_VALID,
+                    CredentialConfidence.LIKELY_VALID,
                     f"Password changed after task creation, but task ran successfully within schedule ({run_info.last_run.strftime('%Y-%m-%d %H:%M')})"
                 )
 
-    # HEURISTIC 4 & 5: Schedule-based staleness detection
+    # HEURISTIC 5 & 6: Schedule-based staleness detection (no pwdLastSet or task_creation_date available)
     if context.trigger_interval_days:
         expected_interval = timedelta(days=context.trigger_interval_days)
         grace_period = expected_interval * 2  # Allow 2x interval before flagging
         time_since_last_run = now - run_info.last_run
 
         if time_since_last_run <= grace_period:
+            # Ran within schedule but we don't have password context
             return (
                 CredentialConfidence.LIKELY_VALID,
-                f"Task ran {time_since_last_run.days}d ago (within {context.trigger_interval_days}d schedule)"
+                f"Task ran {time_since_last_run.days}d ago (within {context.trigger_interval_days}d schedule, no AD context)"
             )
         else:
             missed_runs = int(time_since_last_run / expected_interval)
@@ -247,16 +271,22 @@ def calculate_confidence(
                 f"Task should run every {context.trigger_interval_days}d but last ran {time_since_last_run.days}d ago (~{missed_runs} missed runs)"
             )
 
-    # Fallback: We have pwdLastSet but no schedule info
-    if context.pwd_last_set:
-        # pwdLastSet <= LastRunTime means password hasn't changed since last run
-        if context.pwd_last_set <= run_info.last_run:
+    # Fallback: Password unchanged but no schedule info -> HIGH_CONFIDENCE_VALID
+    if context.pwd_last_set and context.task_creation_date:
+        if context.pwd_last_set < context.task_creation_date:
             return (
-                CredentialConfidence.LIKELY_VALID,
-                f"Password unchanged since last successful run ({run_info.last_run.strftime('%Y-%m-%d')})"
+                CredentialConfidence.HIGH_CONFIDENCE_VALID,
+                f"Password unchanged since task creation (pwdLastSet: {context.pwd_last_set.strftime('%Y-%m-%d')}) - no schedule available"
             )
 
-    # No useful context available
+    # Fallback: pwdLastSet <= LastRunTime means password hasn't changed since last run
+    if context.pwd_last_set and context.pwd_last_set <= run_info.last_run:
+        return (
+            CredentialConfidence.HIGH_CONFIDENCE_VALID,
+            f"Password unchanged since last successful run ({run_info.last_run.strftime('%Y-%m-%d')})"
+        )
+
+    # No useful context available - best guess based on recency
     days_since_run = (now - run_info.last_run).days
     return (
         CredentialConfidence.LIKELY_VALID if days_since_run < 30 else CredentialConfidence.POSSIBLY_STALE,

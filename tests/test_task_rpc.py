@@ -866,13 +866,14 @@ class TestCalculateConfidence:
         assert "changed" in reason.lower()
         assert "2026-01-01" in reason
 
-    def test_high_confidence_pwd_unchanged_since_task_creation(self):
-        """Test HIGH_CONFIDENCE_VALID when password unchanged since task creation."""
+    def test_high_confidence_pwd_unchanged_but_no_trigger(self):
+        """Test HIGH_CONFIDENCE_VALID when password unchanged but trigger timing unknown."""
         now = datetime(2026, 1, 3, 12, 0, 0)
         run_info = self._make_run_info(datetime(2026, 1, 2, 12, 0))
         context = CredentialContext(
             pwd_last_set=datetime(2025, 6, 15),  # Password set long ago
             task_creation_date=datetime(2025, 12, 1),  # Task created after pwd
+            # No trigger_interval_days - can't verify execution timing
             current_time=now,
         )
 
@@ -880,9 +881,27 @@ class TestCalculateConfidence:
 
         assert confidence == CredentialConfidence.HIGH_CONFIDENCE_VALID
         assert "unchanged" in reason.lower()
+        assert "trigger timing unknown" in reason.lower()
 
-    def test_confirmed_valid_pwd_changed_but_task_ran_recently(self):
-        """Test CONFIRMED_VALID when password changed but task still runs."""
+    def test_confirmed_valid_pwd_unchanged_and_ran_within_schedule(self):
+        """Test CONFIRMED_VALID when password unchanged AND task ran within schedule."""
+        now = datetime(2026, 1, 3, 12, 0, 0)
+        run_info = self._make_run_info(datetime(2026, 1, 3, 8, 0))  # Ran today
+        context = CredentialContext(
+            pwd_last_set=datetime(2025, 6, 15),  # Password set long ago
+            task_creation_date=datetime(2025, 11, 1),  # Task created after pwd change
+            trigger_interval_days=1,  # Daily task
+            current_time=now,
+        )
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.CONFIRMED_VALID
+        assert "unchanged since task creation" in reason.lower()
+        assert "within schedule" in reason.lower()
+
+    def test_likely_valid_pwd_changed_but_task_still_runs(self):
+        """Test LIKELY_VALID when password changed but task still runs within schedule."""
         now = datetime(2026, 1, 3, 12, 0, 0)
         run_info = self._make_run_info(datetime(2026, 1, 3, 8, 0))  # Ran today
         context = CredentialContext(
@@ -894,8 +913,9 @@ class TestCalculateConfidence:
 
         confidence, reason = calculate_confidence(run_info, context)
 
-        assert confidence == CredentialConfidence.CONFIRMED_VALID
+        assert confidence == CredentialConfidence.LIKELY_VALID
         assert "changed after task creation" in reason.lower()
+        assert "within schedule" in reason.lower()
 
     def test_likely_valid_within_schedule(self):
         """Test LIKELY_VALID when task ran within expected schedule."""
@@ -925,8 +945,25 @@ class TestCalculateConfidence:
         assert confidence == CredentialConfidence.POSSIBLY_STALE
         assert "missed" in reason.lower()
 
-    def test_likely_valid_pwd_unchanged_since_run(self):
-        """Test LIKELY_VALID when password unchanged since last run (no schedule)."""
+    def test_possibly_stale_pwd_unchanged_but_missed_schedule(self):
+        """Test POSSIBLY_STALE when password unchanged but task missed its schedule."""
+        now = datetime(2026, 1, 3, 12, 0, 0)
+        run_info = self._make_run_info(datetime(2025, 12, 20, 12, 0))  # Ran 14 days ago
+        context = CredentialContext(
+            pwd_last_set=datetime(2025, 6, 15),  # Password unchanged
+            task_creation_date=datetime(2025, 11, 1),  # Task created after pwd
+            trigger_interval_days=1,  # Daily task - should have run 14 times!
+            current_time=now,
+        )
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.POSSIBLY_STALE
+        assert "password unchanged" in reason.lower()
+        assert "missed" in reason.lower()
+
+    def test_high_confidence_valid_pwd_unchanged_since_run(self):
+        """Test HIGH_CONFIDENCE_VALID when password unchanged since last run (no schedule)."""
         now = datetime(2026, 1, 3, 12, 0, 0)
         run_info = self._make_run_info(datetime(2026, 1, 2, 12, 0))
         context = CredentialContext(
@@ -936,7 +973,7 @@ class TestCalculateConfidence:
 
         confidence, reason = calculate_confidence(run_info, context)
 
-        assert confidence == CredentialConfidence.LIKELY_VALID
+        assert confidence == CredentialConfidence.HIGH_CONFIDENCE_VALID
         assert "unchanged since last successful run" in reason.lower()
 
     def test_fallback_recent_run(self):
