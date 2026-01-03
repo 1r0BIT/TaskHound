@@ -23,10 +23,14 @@ select = [
 
 # Ignore specific rules
 ignore = [
-    "E501",  # Line too long (handled by formatter)
-    "B008",  # Do not perform function call in argument defaults
-    "N802",  # Function name should be lowercase (impacket uses mixed case)
-    "N806",  # Variable should be lowercase (impacket uses mixed case)
+    "E501",   # Line too long (handled by formatter)
+    "B008",   # Do not perform function call in argument defaults
+    "N802",   # Function name should be lowercase (impacket uses mixed case)
+    "N806",   # Variable should be lowercase (impacket uses mixed case)
+    "SIM102", # Nested if statements - prefer explicit for readability
+    "SIM105", # try-except-pass vs contextlib.suppress - prefer explicit for cleanup
+    "SIM108", # Ternary operator - prefer explicit if/else for readability
+    "SIM117", # Nested with statements - prefer explicit for readability in tests
 ]
 
 # Exclude paths

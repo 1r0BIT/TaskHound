@@ -8,10 +8,10 @@ from typing import Dict, List, Optional
 
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
-from ..constants import binary_to_sid, sid_to_binary
 from ...utils.cache_manager import get_cache
 from ...utils.ldap import LDAPConnectionError, get_ldap_connection
 from ...utils.logging import debug, info, warn
+from ..constants import binary_to_sid, sid_to_binary
 
 
 def resolve_sid_via_ldap(

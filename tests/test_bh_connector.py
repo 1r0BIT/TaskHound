@@ -568,3 +568,144 @@ class TestGetAlternateProtocolUri:
         """Should return None for unknown schemes"""
         result = _get_alternate_protocol_uri("ftp://localhost:21")
         assert result is None
+
+
+class TestBloodHoundConnectorGetUserProperties:
+    """Tests for get_user_properties method - SID-first lookups."""
+
+    @patch.object(BloodHoundConnector, '__init__', lambda x, **kwargs: None)
+    @patch.object(BloodHoundConnector, 'run_cypher_query')
+    def test_query_by_sid_preferred(self, mock_query):
+        """Should query by SID (objectid) when provided."""
+        connector = BloodHoundConnector.__new__(BloodHoundConnector)
+        connector.bh_type = "bhce"
+
+        mock_query.return_value = {
+            "data": {
+                "nodes": {
+                    "n1": {
+                        "objectId": "S-1-5-21-123-456-789-1001",
+                        "properties": {
+                            "samaccountname": "adminuser",
+                            "pwdlastset": 1735689600,
+                            "lastlogon": 1735776000,
+                            "admincount": True,
+                            "enabled": True,
+                            "domain": "CORP.LOCAL",
+                        }
+                    }
+                }
+            }
+        }
+
+        result = connector.get_user_properties("S-1-5-21-123-456-789-1001")
+
+        assert result is not None
+        assert result["sid"] == "S-1-5-21-123-456-789-1001"
+        assert result["samaccountname"] == "adminuser"
+        assert result["admincount"] is True
+        # Verify SID query was used
+        call_args = mock_query.call_args[0][0]
+        assert "objectid" in call_args.lower()
+        assert "S-1-5-21-123-456-789-1001" in call_args.upper()
+
+    @patch.object(BloodHoundConnector, '__init__', lambda x, **kwargs: None)
+    @patch.object(BloodHoundConnector, 'run_cypher_query')
+    def test_query_by_upn(self, mock_query):
+        """Should query by UPN when @ is present."""
+        connector = BloodHoundConnector.__new__(BloodHoundConnector)
+        connector.bh_type = "bhce"
+
+        mock_query.return_value = {
+            "data": {
+                "nodes": {
+                    "n1": {
+                        "objectId": "S-1-5-21-123-456-789-1001",
+                        "properties": {
+                            "samaccountname": "admin",
+                            "pwdlastset": 1735689600,
+                            "domain": "CORP.LOCAL",
+                        }
+                    }
+                }
+            }
+        }
+
+        result = connector.get_user_properties("admin@corp.local")
+
+        assert result is not None
+        # Verify UPN query was used (toLower(u.name))
+        call_args = mock_query.call_args[0][0]
+        assert "u.name" in call_args.lower()
+
+    @patch.object(BloodHoundConnector, '__init__', lambda x, **kwargs: None)
+    @patch.object(BloodHoundConnector, 'run_cypher_query')
+    def test_query_by_domain_user(self, mock_query):
+        """Should query by domain+sam when DOMAIN\\user format."""
+        connector = BloodHoundConnector.__new__(BloodHoundConnector)
+        connector.bh_type = "bhce"
+
+        mock_query.return_value = {
+            "data": {
+                "nodes": {
+                    "n1": {
+                        "objectId": "S-1-5-21-123-456-789-1001",
+                        "properties": {
+                            "samaccountname": "admin",
+                            "pwdlastset": 1735689600,
+                            "domain": "CORP.LOCAL",
+                        }
+                    }
+                }
+            }
+        }
+
+        result = connector.get_user_properties("CORP\\admin")
+
+        assert result is not None
+        # Verify both domain and sam are in query
+        call_args = mock_query.call_args[0][0]
+        assert "samaccountname" in call_args.lower()
+        assert "domain" in call_args.lower()
+        assert "CORP" in call_args.upper()
+
+    @patch.object(BloodHoundConnector, '__init__', lambda x, **kwargs: None)
+    @patch.object(BloodHoundConnector, 'run_cypher_query')
+    def test_plain_username_uses_limit(self, mock_query):
+        """Plain username query should use LIMIT 1 due to cross-domain risk."""
+        connector = BloodHoundConnector.__new__(BloodHoundConnector)
+        connector.bh_type = "bhce"
+
+        mock_query.return_value = {"data": {"nodes": {}}}
+
+        connector.get_user_properties("admin")
+
+        # Verify LIMIT 1 is used for plain username (ambiguous)
+        call_args = mock_query.call_args[0][0]
+        assert "LIMIT 1" in call_args
+
+    @patch.object(BloodHoundConnector, '__init__', lambda x, **kwargs: None)
+    @patch.object(BloodHoundConnector, 'run_cypher_query')
+    def test_returns_none_when_not_found(self, mock_query):
+        """Should return None when user not found."""
+        connector = BloodHoundConnector.__new__(BloodHoundConnector)
+        connector.bh_type = "bhce"
+
+        mock_query.return_value = {"data": {"nodes": {}}}
+
+        result = connector.get_user_properties("S-1-5-21-123-456-789-9999")
+
+        assert result is None
+
+    @patch.object(BloodHoundConnector, '__init__', lambda x, **kwargs: None)
+    @patch.object(BloodHoundConnector, 'run_cypher_query')
+    def test_handles_exception(self, mock_query):
+        """Should handle exceptions gracefully."""
+        connector = BloodHoundConnector.__new__(BloodHoundConnector)
+        connector.bh_type = "bhce"
+
+        mock_query.side_effect = Exception("Connection error")
+
+        result = connector.get_user_properties("S-1-5-21-123-456-789-1001")
+
+        assert result is None

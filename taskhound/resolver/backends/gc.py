@@ -6,9 +6,8 @@ from typing import Optional
 
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
-from ..constants import sid_to_binary
 from ...utils.logging import debug, info, warn
-
+from ..constants import sid_to_binary
 
 # Module-level cache for discovered GC server
 _discovered_gc_server: Optional[str] = None

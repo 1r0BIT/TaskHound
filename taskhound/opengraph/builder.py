@@ -9,9 +9,9 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from bhopengraph import Edge, Node, Properties
 
+from ..resolver import resolve_name_to_sid_via_ldap
 from ..utils.cache_manager import get_cache
 from ..utils.logging import debug, good, info, warn
-from ..resolver import resolve_name_to_sid_via_ldap
 
 
 def _create_task_object_id(hostname: str, task_path: str) -> str:

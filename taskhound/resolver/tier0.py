@@ -12,7 +12,6 @@ from ..utils.ldap import LDAPConnectionError, get_ldap_connection
 from ..utils.logging import debug
 from .constants import binary_to_sid
 
-
 # Well-known privileged group RIDs (relative to domain SID)
 # These are the primary Tier-0 groups that grant domain-wide administrative access
 TIER0_GROUP_RIDS = {

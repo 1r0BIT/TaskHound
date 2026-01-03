@@ -17,7 +17,15 @@ from typing import Any, Dict, Optional, Tuple
 
 from ..utils.cache_manager import get_cache
 from ..utils.logging import debug, info
-
+from .backends import (
+    get_discovered_gc_server,
+    resolve_sid_from_bloodhound,
+    resolve_sid_via_bloodhound_api,
+    resolve_sid_via_dc_lsarpc,
+    resolve_sid_via_global_catalog,
+    resolve_sid_via_ldap,
+    resolve_sid_via_smb,
+)
 from .constants import (
     WELL_KNOWN_SIDS,
     get_domain_sid_prefix,
@@ -34,15 +42,6 @@ from .trusts import (
     mark_as_external_trust,
     resolve_trust_sid_to_name,
     resolve_unknown_sid_to_local_name,
-)
-from .backends import (
-    get_discovered_gc_server,
-    resolve_sid_from_bloodhound,
-    resolve_sid_via_bloodhound_api,
-    resolve_sid_via_dc_lsarpc,
-    resolve_sid_via_global_catalog,
-    resolve_sid_via_ldap,
-    resolve_sid_via_smb,
 )
 
 

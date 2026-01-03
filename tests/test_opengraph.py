@@ -23,8 +23,8 @@ from taskhound.opengraph.builder import (
     _create_task_node,
     _create_task_object_id,
 )
-from taskhound.utils.bh_api import get_bloodhound_token as _get_bloodhound_token
 from taskhound.resolver import binary_to_sid, sid_to_binary
+from taskhound.utils.bh_api import get_bloodhound_token as _get_bloodhound_token
 
 # ============================================================================
 # Test Fixtures

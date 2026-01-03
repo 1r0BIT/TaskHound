@@ -178,8 +178,8 @@ def check_credential_guard(smb_conn, host) -> Optional[bool]:
         # Check LsaCfgFlags
         lsa_cfg_flags = None
         try:
-            val = rrp.hBaseRegQueryValue(dce, lsa_handle, "LsaCfgFlags")
-            lsa_cfg_flags = int.from_bytes(val["lpData"], "little")
+            # hBaseRegQueryValue returns tuple: (dataType, data)
+            _, lsa_cfg_flags = rrp.hBaseRegQueryValue(dce, lsa_handle, "LsaCfgFlags")
             log_debug(f"{host}: CredGuard check - LsaCfgFlags = {lsa_cfg_flags}")
             if lsa_cfg_flags == 1:
                 log_debug(f"{host}: CredGuard check - DETECTED via LsaCfgFlags=1")
@@ -190,8 +190,8 @@ def check_credential_guard(smb_conn, host) -> Optional[bool]:
         # Check IsolatedUserMode
         isolated_user_mode = None
         try:
-            val = rrp.hBaseRegQueryValue(dce, lsa_handle, "IsolatedUserMode")
-            isolated_user_mode = int.from_bytes(val["lpData"], "little")
+            # hBaseRegQueryValue returns tuple: (dataType, data)
+            _, isolated_user_mode = rrp.hBaseRegQueryValue(dce, lsa_handle, "IsolatedUserMode")
             log_debug(f"{host}: CredGuard check - IsolatedUserMode = {isolated_user_mode}")
             if isolated_user_mode == 1:
                 log_debug(f"{host}: CredGuard check - DETECTED via IsolatedUserMode=1")

@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from taskhound.utils.cache_manager import get_cache, init_cache
 from taskhound.resolver import resolve_sid
+from taskhound.utils.cache_manager import get_cache, init_cache
 
 
 class TestSidCaching(unittest.TestCase):

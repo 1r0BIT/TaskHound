@@ -180,4 +180,4 @@ class TestFormatBlockCredValidationDetails:
 
         text = "\n".join(lines)
         assert "Return Code        : 0x00041303" in text
-        assert "Task has not run" in text
+        assert "Task not yet run" in text  # Updated to match new TASK_SCHEDULER_CODES

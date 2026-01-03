@@ -1978,7 +1978,7 @@ def resolve_sid(
                 # EXTERNAL TRUST: GC won't have these objects
                 # Strategy: Try well-known RIDs first, then DC LSARPC (DC can follow trust path)
                 debug(f"SID {sid} is from EXTERNAL trust {trust_fqdn} - skipping GC (different forest)")
-                
+
                 # First try well-known RID resolution using trust FQDN
                 trust_name = resolve_trust_sid_to_name(sid, trust_fqdn)
                 if trust_name:
@@ -1986,7 +1986,7 @@ def resolve_sid(
                     _cache_success(trust_name)
                     info(f"[CROSS-TRUST] SID from {trust_fqdn} - for full resolution, collect BloodHound data from trusted domain")
                     return f"[CROSS-TRUST] {trust_name} ({sid})", trust_name
-                
+
                 # Not a well-known RID - try DC LSARPC (DC can resolve cross-trust SIDs)
                 if not no_rpc and dc_ip and username:
                     resolved = resolve_sid_via_dc_lsarpc(
@@ -1996,7 +1996,7 @@ def resolve_sid(
                         debug(f"SID {sid} resolved via DC LSARPC: {resolved}")
                         _cache_success(resolved)
                         return f"[CROSS-TRUST] {resolved} ({sid})", resolved
-                
+
                 # DC couldn't resolve - show domain context with the trust FQDN we know
                 debug(f"SID {sid} from external trust {trust_fqdn} - RID not well-known, DC couldn't resolve")
                 display_name = f"{trust_fqdn}\\SID-{sid.split('-')[-1]}"
@@ -2016,7 +2016,7 @@ def resolve_sid(
         # Try DC LSARPC first (DC can follow trust paths), then fall back to well-known RIDs
         elif sid_prefix and known_domain_prefixes:
             debug(f"SID {sid} is from UNKNOWN domain (prefix {sid_prefix} not in BloodHound)")
-            
+
             # Try DC LSARPC for unknown foreign domains (DC might still resolve via trust)
             if not no_rpc and dc_ip and username:
                 resolved = resolve_sid_via_dc_lsarpc(
@@ -2026,7 +2026,7 @@ def resolve_sid(
                     debug(f"SID {sid} resolved via DC LSARPC: {resolved}")
                     _cache_success(resolved)
                     return f"{resolved} ({sid})", resolved
-            
+
             # DC couldn't resolve - likely local machine SID
             debug(f"SID {sid} from unknown domain - trying well-known RID fallback")
             local_name = resolve_unknown_sid_to_local_name(sid)
@@ -2119,12 +2119,12 @@ def resolve_sid(
                 # 2. External trust (different forest, not in GC)
                 # 3. Unknown domain we don't have trust data for
                 # Try DC LSARPC as fallback - DC can follow trust paths
-                
+
                 if trust_data and not is_external_trust(trust_data):
                     # Known intra-forest trust but GC failed - try DC LSARPC
                     trust_fqdn = get_trust_fqdn(trust_data)
                     debug(f"GC lookup failed for INTRA-FOREST trust SID {sid} from {trust_fqdn} - trying DC LSARPC")
-                    
+
                     if not no_rpc and dc_ip and username:
                         resolved = resolve_sid_via_dc_lsarpc(
                             sid, dc_ip, domain, username, password, hashes, kerberos, aes_key
@@ -2133,13 +2133,13 @@ def resolve_sid(
                             debug(f"SID {sid} resolved via DC LSARPC: {resolved}")
                             _cache_success(resolved)
                             return f"{resolved} ({sid})", resolved
-                    
+
                     # Fall back to trust FQDN display
                     trust_name = resolve_trust_sid_to_name(sid, trust_fqdn)
                     if trust_name:
                         _cache_success(trust_name)
                         return f"{trust_name} ({sid})", trust_name
-                        
+
                 elif sid_prefix:
                     # Unknown foreign domain (no BloodHound trust data)
                     # Try DC LSARPC - might be a trust we just don't know about
@@ -2152,7 +2152,7 @@ def resolve_sid(
                             debug(f"SID {sid} resolved via DC LSARPC: {resolved}")
                             _cache_success(resolved)
                             return f"{resolved} ({sid})", resolved
-                    
+
                     # DC couldn't resolve either - cache as external trust for future lookups
                     _external_trust_prefixes.add(sid_prefix)
                     debug(f"GC and DC LSARPC failed for foreign SID {sid} - caching domain prefix {sid_prefix} as unreachable trust")

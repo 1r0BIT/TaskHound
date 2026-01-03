@@ -7,7 +7,6 @@ from typing import Any, Dict, Optional
 
 from ..utils.logging import debug
 
-
 # Module-level state
 _netbios_to_fqdn_cache: Dict[str, str] = {}
 _netbios_cache_loaded: bool = False
@@ -167,7 +166,7 @@ def _load_netbios_cache_from_ldap() -> None:
     try:
         from impacket.ldap.ldapasn1 import SearchResultEntry
 
-        from ..utils.ldap import LDAPConnectionError, get_ldap_connection
+        from ..utils.ldap import get_ldap_connection
 
         conn = get_ldap_connection(
             dc_ip=dc_ip,

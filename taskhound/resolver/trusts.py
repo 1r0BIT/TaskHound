@@ -11,7 +11,6 @@ from impacket.ldap import ldapasn1 as ldapasn1_impacket
 from ..utils.logging import debug, info
 from .constants import WELL_KNOWN_LOCAL_RIDS, binary_to_sid, get_domain_sid_prefix
 
-
 # Trust attribute flags from Active Directory
 # Reference: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/e9a2d23c-c31e-4a6f-88a0-6646c877eb42
 TRUST_ATTRIBUTE_NON_TRANSITIVE = 0x1
@@ -263,7 +262,7 @@ def fetch_known_domain_sids_via_ldap(
         return result
 
     try:
-        from ..utils.ldap import LDAPConnectionError, get_ldap_connection
+        from ..utils.ldap import get_ldap_connection
 
         conn = get_ldap_connection(
             dc_ip=dc_ip,

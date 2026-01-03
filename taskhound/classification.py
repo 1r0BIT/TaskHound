@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from .utils.logging import warn
 from .resolver import looks_like_domain_user
+from .utils.logging import warn
 
 if TYPE_CHECKING:
     from .models.task import TaskRow

@@ -24,6 +24,10 @@ from ..models.task import TaskRow
 from ..output.printer import format_block
 from ..parsers.highvalue import HighValueLoader
 from ..parsers.task_xml import parse_task_xml
+from ..resolver import (
+    format_runas_with_sid_resolution,
+    is_sid,
+)
 from ..smb.connection import (
     _dns_ptr_lookup,
     get_server_fqdn,
@@ -39,10 +43,6 @@ from ..utils.credentials import find_password_for_user
 from ..utils.helpers import is_ipv4
 from ..utils.logging import debug as log_debug
 from ..utils.logging import good, info, status, warn
-from ..resolver import (
-    format_runas_with_sid_resolution,
-    is_sid,
-)
 from .helpers import (
     perform_credential_validation,
     perform_dpapi_looting,

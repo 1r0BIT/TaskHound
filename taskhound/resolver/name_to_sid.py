@@ -141,7 +141,7 @@ def prefetch_computer_sids(
         Dict mapping normalized hostname -> SID for all resolved targets
     """
     from ..utils.cache_manager import get_cache
-
+    from ..utils.helpers import is_ipv4
     from .backends.ldap import resolve_name_to_sid_via_ldap
 
     if not targets:
@@ -154,6 +154,10 @@ def prefetch_computer_sids(
     # Normalize all target names
     normalized_targets = {}
     for target in targets:
+        # Skip IP addresses - they can't be resolved to SIDs
+        if is_ipv4(target):
+            continue
+
         # Strip domain suffix and normalize to uppercase
         hostname = target.upper()
         if "." in hostname:

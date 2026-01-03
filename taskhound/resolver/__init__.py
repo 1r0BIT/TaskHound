@@ -7,70 +7,69 @@
 # - Tier-0 detection (identify privileged accounts)
 
 # Primary resolution functions
-from .sid_to_name import resolve_sid, format_runas_with_sid_resolution
-from .name_to_sid import resolve_name_to_sid, prefetch_computer_sids
-
-# NETBIOS resolution
-from .netbios import (
-    set_netbios_ldap_credentials,
-    resolve_netbios_to_fqdn,
-    add_netbios_mapping,
-    get_netbios_cache,
-)
-
-# Trust handling
-from .trusts import (
-    TrustInfo,
-    TrustData,
-    fetch_known_domain_sids_via_ldap,
-    is_foreign_domain_sid,
-    is_unknown_domain_sid,
-    is_external_trust,
-    get_trust_fqdn,
-    mark_as_external_trust,
-    is_known_external_trust,
-    resolve_unknown_sid_to_local_name,
-    resolve_trust_sid_to_name,
-    TRUST_ATTRIBUTE_WITHIN_FOREST,
-    TRUST_ATTRIBUTE_FOREST_TRANSITIVE,
-)
-
-# Tier-0 detection
-from .tier0 import (
-    fetch_tier0_members,
-    check_tier0_membership,
-    TIER0_GROUP_RIDS,
-    TIER0_ACCOUNT_RIDS,
-    TIER0_BUILTIN_SIDS,
-    Tier0Cache,
+# Backend access (for advanced usage)
+from .backends import (
+    batch_get_user_attributes,
+    get_discovered_gc_server,
+    get_user_pwd_last_set,
+    resolve_name_to_sid_via_ldap,
+    resolve_sid_from_bloodhound,
+    resolve_sid_via_bloodhound_api,
+    resolve_sid_via_dc_lsarpc,
+    resolve_sid_via_global_catalog,
+    resolve_sid_via_ldap,
+    resolve_sid_via_smb,
 )
 
 # Utilities and constants
 from .constants import (
-    is_sid,
+    WELL_KNOWN_LOCAL_RIDS,
+    WELL_KNOWN_SIDS,
+    binary_to_sid,
+    extract_domain_sid_from_hv,
     get_domain_sid_prefix,
+    is_sid,
     looks_like_domain_user,
     resolve_rid_to_name,
     resolve_special_sid_pattern,
     sid_to_binary,
-    binary_to_sid,
-    extract_domain_sid_from_hv,
-    WELL_KNOWN_SIDS,
-    WELL_KNOWN_LOCAL_RIDS,
+)
+from .name_to_sid import prefetch_computer_sids, resolve_name_to_sid
+
+# NETBIOS resolution
+from .netbios import (
+    add_netbios_mapping,
+    get_netbios_cache,
+    resolve_netbios_to_fqdn,
+    set_netbios_ldap_credentials,
+)
+from .sid_to_name import format_runas_with_sid_resolution, resolve_sid
+
+# Tier-0 detection
+from .tier0 import (
+    TIER0_ACCOUNT_RIDS,
+    TIER0_BUILTIN_SIDS,
+    TIER0_GROUP_RIDS,
+    Tier0Cache,
+    check_tier0_membership,
+    fetch_tier0_members,
 )
 
-# Backend access (for advanced usage)
-from .backends import (
-    resolve_sid_via_smb,
-    resolve_sid_via_dc_lsarpc,
-    resolve_sid_via_ldap,
-    resolve_sid_via_global_catalog,
-    resolve_sid_from_bloodhound,
-    resolve_sid_via_bloodhound_api,
-    resolve_name_to_sid_via_ldap,
-    batch_get_user_attributes,
-    get_user_pwd_last_set,
-    get_discovered_gc_server,
+# Trust handling
+from .trusts import (
+    TRUST_ATTRIBUTE_FOREST_TRANSITIVE,
+    TRUST_ATTRIBUTE_WITHIN_FOREST,
+    TrustData,
+    TrustInfo,
+    fetch_known_domain_sids_via_ldap,
+    get_trust_fqdn,
+    is_external_trust,
+    is_foreign_domain_sid,
+    is_known_external_trust,
+    is_unknown_domain_sid,
+    mark_as_external_trust,
+    resolve_trust_sid_to_name,
+    resolve_unknown_sid_to_local_name,
 )
 
 __all__ = [

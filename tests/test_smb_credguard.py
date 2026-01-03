@@ -66,7 +66,8 @@ class TestCheckCredentialGuard:
         """Returns True when LsaCfgFlags is 1."""
         mock_smb = MagicMock()
         mock_rrp = mock_scm_and_rrp['rrp']
-        mock_rrp.hBaseRegQueryValue.return_value = {"lpData": b"\x01\x00\x00\x00"}
+        # hBaseRegQueryValue returns tuple (dataType, value)
+        mock_rrp.hBaseRegQueryValue.return_value = (4, 1)  # REG_DWORD=4, value=1
 
         result = check_credential_guard(mock_smb, "192.168.1.100")
         assert result is True
@@ -75,7 +76,8 @@ class TestCheckCredentialGuard:
         """Returns False when Credential Guard is not enabled."""
         mock_smb = MagicMock()
         mock_rrp = mock_scm_and_rrp['rrp']
-        mock_rrp.hBaseRegQueryValue.return_value = {"lpData": b"\x00\x00\x00\x00"}
+        # hBaseRegQueryValue returns tuple (dataType, value)
+        mock_rrp.hBaseRegQueryValue.return_value = (4, 0)  # REG_DWORD=4, value=0
 
         result = check_credential_guard(mock_smb, "192.168.1.100")
         assert result is False
