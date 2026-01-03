@@ -114,9 +114,10 @@ class TestReturnCodeSets:
         """Test FILE_NOT_FOUND code is in PASSWORD_VALID_CODES."""
         assert 0x00000002 in PASSWORD_VALID_CODES
 
-    def test_password_valid_codes_contains_logon_type_not_granted(self):
-        """Test ERROR_LOGON_TYPE_NOT_GRANTED is in PASSWORD_VALID_CODES."""
-        assert 0x80070569 in PASSWORD_VALID_CODES
+    def test_account_restricted_codes_contains_logon_type_not_granted(self):
+        """Test ERROR_LOGON_TYPE_NOT_GRANTED is in ACCOUNT_RESTRICTED_CODES (documentation only)."""
+        from taskhound.smb.task_rpc import ACCOUNT_RESTRICTED_CODES
+        assert 0x80070569 in ACCOUNT_RESTRICTED_CODES
 
     def test_task_runnable_codes_subset_of_valid(self):
         """Test TASK_RUNNABLE_CODES is subset of PASSWORD_VALID_CODES."""
@@ -409,7 +410,11 @@ class TestTaskSchedulerRPCInterpretReturnCode:
         assert hijackable is True
 
     def test_interpret_logon_type_not_granted(self):
-        """Test interpreting ERROR_LOGON_TYPE_NOT_GRANTED code."""
+        """Test interpreting ERROR_LOGON_TYPE_NOT_GRANTED code.
+
+        NOTE: This code should never appear via RPC in practice (Windows doesn't
+        record batch logon failures), but we handle it for robustness.
+        """
         last_run = datetime(2024, 1, 1)
         status, valid, hijackable, detail = self.rpc._interpret_return_code(
             0x80070569, last_run
@@ -417,9 +422,14 @@ class TestTaskSchedulerRPCInterpretReturnCode:
         assert status == CredentialStatus.VALID_RESTRICTED
         assert valid is True
         assert hijackable is False
+        assert "unexpected via RPC" in detail
 
     def test_interpret_logon_failure(self):
-        """Test interpreting ERROR_LOGON_FAILURE code."""
+        """Test interpreting ERROR_LOGON_FAILURE code.
+
+        NOTE: This code should never appear via RPC in practice (Windows doesn't
+        record auth failures), but we handle it for robustness.
+        """
         last_run = datetime(2024, 1, 1)
         status, valid, hijackable, detail = self.rpc._interpret_return_code(
             0x8007052E, last_run
@@ -427,9 +437,14 @@ class TestTaskSchedulerRPCInterpretReturnCode:
         assert status == CredentialStatus.INVALID
         assert valid is False
         assert hijackable is False
+        assert "unexpected via RPC" in detail
 
     def test_interpret_account_disabled(self):
-        """Test interpreting ERROR_ACCOUNT_DISABLED code."""
+        """Test interpreting ERROR_ACCOUNT_DISABLED code.
+
+        NOTE: This code should never appear via RPC in practice (Windows doesn't
+        record account status failures), but we handle it for robustness.
+        """
         last_run = datetime(2024, 1, 1)
         status, valid, hijackable, detail = self.rpc._interpret_return_code(
             0x80070533, last_run  # ERROR_ACCOUNT_DISABLED (Win32 0x0533)
@@ -437,6 +452,7 @@ class TestTaskSchedulerRPCInterpretReturnCode:
         assert status == CredentialStatus.BLOCKED
         assert valid is False
         assert hijackable is False
+        assert "unexpected via RPC" in detail
 
     def test_interpret_unknown_code(self):
         """Test interpreting unknown code."""

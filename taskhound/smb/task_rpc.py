@@ -2,14 +2,31 @@
 Task Scheduler RPC client for credential validation.
 
 Uses MS-TSCH protocol to query task execution history and determine
-if stored credentials are valid based on return codes.
+if stored credentials are valid based on return codes and heuristics.
 
 Requires RPC_C_AUTHN_LEVEL_PKT_PRIVACY authentication level.
 
+WINDOWS TASK SCHEDULER BEHAVIOR (empirically verified)
+======================================================
+Windows Task Scheduler has a critical limitation: LastRunInfo (queried via
+SchRpcGetLastRunInfo) is ONLY updated on SUCCESSFUL task execution.
+
+When authentication or authorization fails (wrong password, user lacks
+batch logon rights, account disabled, etc.), Windows does NOT record
+the failure. The task simply doesn't run and LastRunInfo remains unchanged.
+
+This means:
+- Task with no LastRunInfo: Could be new, disabled, OR invalid credentials
+- Task with old LastRunInfo showing success: Credentials may have become stale
+- Task with recent LastRunInfo showing success: Credentials likely still valid
+
+The only way to get auth failure info is via Event Log (IDs 101, 104),
+which requires SeSecurityPrivilege - not practical for pentesting.
+
 CREDENTIAL CONFIDENCE HEURISTICS
 ================================
-Since Windows Task Scheduler does NOT record authentication failures in
-LastRunInfo, we use multiple data sources to estimate credential validity:
+Since return codes can't distinguish stale credentials from working ones,
+we use multiple data sources to ESTIMATE credential validity:
 
 1. DEFINITELY_STALE: pwdLastSet > LastRunTime
    - Password was changed AFTER the last successful run
@@ -51,19 +68,23 @@ class CredentialStatus(Enum):
     """
     Credential validation status based on task return codes.
 
-    IMPORTANT: Due to Windows Task Scheduler behavior, authentication failures
-    (wrong password, user not found) are NOT recorded as task runs. This means
-    INVALID status may never appear in practice - failed auth attempts result
-    in UNKNOWN status (indistinguishable from "task never ran").
+    IMPORTANT: Due to Windows Task Scheduler behavior, authentication and
+    authorization failures are NOT recorded as task runs. LastRunInfo only
+    updates on successful execution.
 
-    Only VALID and VALID_RESTRICTED statuses reliably indicate password correctness.
+    In practice, you will only ever see:
+    - VALID: Task ran successfully, credentials were valid at LastRunTime
+    - UNKNOWN: Task has never run (could be new, disabled, or bad creds from start)
+
+    The INVALID, VALID_RESTRICTED, and BLOCKED statuses are kept for API
+    completeness but will not appear from RPC queries.
     """
 
-    VALID = "valid"  # Password correct, task ran successfully
-    VALID_RESTRICTED = "valid_restricted"  # Password correct, but account restricted
-    INVALID = "invalid"  # Wrong password or user not found (rarely seen in practice)
-    BLOCKED = "blocked"  # Account disabled/locked/expired (may appear if blocked after a run)
-    UNKNOWN = "unknown"  # Task never ran OR auth failed - cannot distinguish
+    VALID = "valid"  # Task ran successfully - credentials valid at LastRunTime
+    VALID_RESTRICTED = "valid_restricted"  # Theoretical: password valid but restricted (never seen)
+    INVALID = "invalid"  # Theoretical: wrong password (never seen via RPC)
+    BLOCKED = "blocked"  # Theoretical: account blocked (never seen via RPC)
+    UNKNOWN = "unknown"  # Task never ran - cannot determine credential status
 
 
 class CredentialConfidence(Enum):
@@ -268,55 +289,69 @@ def enrich_with_confidence(
 
 # fmt: off
 # =============================================================================
-# CREDENTIAL VALIDATION RETURN CODES
+# CREDENTIAL VALIDATION RETURN CODES - EMPIRICAL FINDINGS
 # =============================================================================
 #
-# IMPORTANT WINDOWS LIMITATION (verified by testing):
-# When Task Scheduler authentication fails (wrong password, user not found),
-# Windows does NOT spawn a process and does NOT update LastRunInfo at all.
+# CRITICAL WINDOWS LIMITATION (verified by lab testing, January 2026):
 #
-# The SchRpcGetLastRunInfo RPC call behavior:
-# - If task has NEVER run successfully: returns 0x00041303 (SCHED_S_TASK_HAS_NOT_RUN)
-# - If task HAS run successfully before: returns the LAST SUCCESSFUL run's info
-#   (even after multiple auth failures, it keeps showing the old success!)
+# Windows Task Scheduler does NOT update LastRunInfo when authentication or
+# authorization fails. The only way to get credential failure info is via
+# Event Log (IDs 101, 104), which requires SeSecurityPrivilege - not feasible
+# for most pentest scenarios.
 #
-# Auth failures ARE logged in the Event Log (Event IDs 101, 104) with error
-# 0x8007052E (ERROR_LOGON_FAILURE), but this is not accessible via MS-TSCH RPC.
+# SchRpcGetLastRunInfo behavior:
+# ┌─────────────────────────────────────┬──────────────────────────────────────┐
+# │ Scenario                            │ Result                               │
+# ├─────────────────────────────────────┼──────────────────────────────────────┤
+# │ Task created with wrong password    │ Rejected at creation (0x8007052E)    │
+# │ Task created, user lacks batch logon│ Created with warning (0x4131C)       │
+# │ Task never ran successfully         │ RPC returns 0x00041303 (HAS_NOT_RUN) │
+# │ Task ran, then password changed     │ Still shows old success (stale!)     │
+# │ Task ran, then batch logon revoked  │ Still shows old success (stale!)     │
+# │ Task ran, then account disabled     │ Still shows old success (stale!)     │
+# └─────────────────────────────────────┴──────────────────────────────────────┘
 #
-# This means:
-# - PASSWORD_VALID_CODES: Reliable - task ran, so credentials worked at that time
-# - PASSWORD_INVALID_CODES: Will NEVER appear via SchRpcGetLastRunInfo
-# - ACCOUNT_BLOCKED_CODES: May appear if account was blocked AFTER a successful run
-# - UNKNOWN status: Could mean "never ran" OR "creds became stale after creation"
+# KEY INSIGHT: LastRunInfo only updates on SUCCESSFUL execution. All failures
+# (auth, authz, account status) are silently ignored - the task just doesn't
+# run and LastRunInfo remains unchanged.
 #
-# Key insight: A task showing a successful LastRunInfo (e.g., 0x0) with an old
-# LastRunTime may have stale credentials - we can only confirm validity by
-# checking if the LastRunTime is recent enough.
+# PRACTICAL IMPLICATIONS:
+# 1. PASSWORD_VALID_CODES: Task actually ran - creds were valid AT THAT TIME
+# 2. PASSWORD_INVALID_CODES: Kept for documentation only - never seen via RPC
+# 3. ACCOUNT_BLOCKED_CODES: Kept for documentation only - never seen via RPC
+# 4. The heuristics (pwdLastSet comparison, schedule analysis) are the ONLY
+#    reliable way to detect stale credentials
+#
+# Error codes like ERROR_LOGON_TYPE_NOT_GRANTED (0x80070569) are theoretically
+# valid but were NEVER observed in testing - Windows doesn't record them.
 # =============================================================================
 
-# Return codes indicating PASSWORD IS CORRECT (DPAPI feasible)
+# Return codes indicating TASK RAN SUCCESSFULLY
+# If we see any of these, the credentials were valid at LastRunTime
+# (but may have become stale since - use heuristics to assess)
 PASSWORD_VALID_CODES: set[int] = {
-    # Task executed successfully - credentials definitely work
+    # Standard success/command-level errors (task ran, command had issues)
     0x00000000,  # SUCCESS
-    0x00000001,  # ERROR_INVALID_FUNCTION
-    0x00000002,  # ERROR_FILE_NOT_FOUND
-    0x00000005,  # ERROR_ACCESS_DENIED (command-level, NOT auth)
-    0x0000007B,  # ERROR_INVALID_NAME
-    0x000000C1,  # ERROR_BAD_EXE_FORMAT
-    0x800700C1,  # ERROR_BAD_EXE_FORMAT (HRESULT)
-    0x80070002,  # ERROR_FILE_NOT_FOUND (HRESULT)
+    0x00000001,  # ERROR_INVALID_FUNCTION - command ran but returned error
+    0x00000002,  # ERROR_FILE_NOT_FOUND - executable not found (auth succeeded)
+    0x00000005,  # ERROR_ACCESS_DENIED - command-level ACL, NOT auth failure
+    0x0000007B,  # ERROR_INVALID_NAME - bad path in command
+    0x000000C1,  # ERROR_BAD_EXE_FORMAT - not a valid executable
+    0x800700C1,  # ERROR_BAD_EXE_FORMAT (HRESULT form)
+    0x80070002,  # ERROR_FILE_NOT_FOUND (HRESULT form)
     0x80070005,  # E_ACCESSDENIED (HRESULT, command-level)
 
-    # Account restrictions - password IS correct, just can't batch logon
-    # These prove the password because Windows validates it before checking rights
-    0x80070569,  # ERROR_LOGON_TYPE_NOT_GRANTED (no "batch logon" right)
-    0xC000015B,  # STATUS_LOGON_TYPE_NOT_GRANTED (NTSTATUS)
-    0x800704C3,  # ERROR_LOGON_NOT_GRANTED
-    0xC000006E,  # STATUS_ACCOUNT_RESTRICTION
-    0x8007052F,  # ERROR_ACCOUNT_RESTRICTION (Win32 0x052F = 1327)
+    # NOTE: The following codes theoretically indicate "password correct but
+    # account restricted" - however, our testing shows these are NEVER returned
+    # via SchRpcGetLastRunInfo. Keeping for documentation and future reference.
+    # 0x80070569,  # ERROR_LOGON_TYPE_NOT_GRANTED - never seen in practice
+    # 0xC000015B,  # STATUS_LOGON_TYPE_NOT_GRANTED - never seen in practice
+    # 0x800704C3,  # ERROR_LOGON_NOT_GRANTED - never seen in practice
+    # 0xC000006E,  # STATUS_ACCOUNT_RESTRICTION - never seen in practice
+    # 0x8007052F,  # ERROR_ACCOUNT_RESTRICTION - never seen in practice
 }
 
-# Subset of PASSWORD_VALID_CODES: Task can actually run (hijackable)
+# Subset of PASSWORD_VALID_CODES: Task can actually run (hijackable for execution)
 TASK_RUNNABLE_CODES: set[int] = {
     0x00000000,  # SUCCESS
     0x00000001,  # ERROR_INVALID_FUNCTION
@@ -329,10 +364,14 @@ TASK_RUNNABLE_CODES: set[int] = {
     0x80070005,  # E_ACCESSDENIED (HRESULT)
 }
 
+# =============================================================================
+# CODES BELOW ARE KEPT FOR DOCUMENTATION ONLY
+# They will NEVER appear via SchRpcGetLastRunInfo - Windows doesn't record them
+# =============================================================================
+
 # Password is WRONG or user doesn't exist
-# NOTE: These codes are kept for completeness but may NEVER appear in practice.
-# When authentication fails, Windows Task Scheduler does not record the attempt
-# as a "run" - it simply returns 0x00041303 (task has not run).
+# These errors are returned at task CREATION time (SchRpcRegisterTask), not runtime.
+# If a task was created, the password was valid at creation - these won't appear later.
 PASSWORD_INVALID_CODES: set[int] = {
     0x8007052E,  # ERROR_LOGON_FAILURE - wrong password (Win32 0x052E = 1326)
     0xC000006D,  # STATUS_LOGON_FAILURE (NTSTATUS)
@@ -342,7 +381,9 @@ PASSWORD_INVALID_CODES: set[int] = {
     0x80041310,  # SCHED_E_ACCOUNT_NAME_NOT_FOUND
 }
 
-# Account blocked - password status unknown (may have been correct)
+# Account blocked - these theoretically could appear if account status changed
+# after a successful run, but testing shows they're also not recorded.
+# Windows just keeps showing the last successful run info.
 ACCOUNT_BLOCKED_CODES: set[int] = {
     # Password expired
     0x8007056A,  # ERROR_PASSWORD_EXPIRED (Win32 0x056A = 1386)
@@ -360,6 +401,16 @@ ACCOUNT_BLOCKED_CODES: set[int] = {
     0xC000006F,  # STATUS_INVALID_LOGON_HOURS (NTSTATUS)
     0x80070531,  # ERROR_INVALID_WORKSTATION (Win32 0x0531 = 1329)
     0xC0000070,  # STATUS_INVALID_WORKSTATION (NTSTATUS)
+}
+
+# Account restriction codes - theoretically "password valid but can't batch logon"
+# These are NEVER seen in practice via RPC - kept for reference only
+ACCOUNT_RESTRICTED_CODES: set[int] = {
+    0x80070569,  # ERROR_LOGON_TYPE_NOT_GRANTED (no "batch logon" right)
+    0xC000015B,  # STATUS_LOGON_TYPE_NOT_GRANTED (NTSTATUS)
+    0x800704C3,  # ERROR_LOGON_NOT_GRANTED
+    0xC000006E,  # STATUS_ACCOUNT_RESTRICTION
+    0x8007052F,  # ERROR_ACCOUNT_RESTRICTION (Win32 0x052F = 1327)
 }
 
 # Task Scheduler specific codes (SCHED_S_* and SCHED_E_*) not in impacket
@@ -624,6 +675,10 @@ class TaskSchedulerRPC:
         """
         Interpret return code for credential validation.
 
+        IMPORTANT: Due to Windows behavior, we can only determine credential
+        validity from SUCCESSFUL runs. If a task has never run, we cannot
+        distinguish "bad credentials" from "task disabled" or "new task".
+
         Args:
             code: Task return code
             last_run: Last run datetime (None if never ran)
@@ -633,29 +688,39 @@ class TaskSchedulerRPC:
         """
         detail = get_return_code_description(code)
 
+        # No last_run means task has never executed successfully
+        # This could be: new task, disabled task, or invalid credentials
+        # We cannot distinguish without Event Log access
         if last_run is None:
             return (CredentialStatus.UNKNOWN, False, False, "Task never executed")
 
+        # If task has a LastRunTime, it ran successfully at some point
+        # The return code tells us about the COMMAND execution, not auth
         if code in PASSWORD_VALID_CODES:
             hijackable = code in TASK_RUNNABLE_CODES
             if hijackable:
                 return (CredentialStatus.VALID, True, True, detail)
             else:
-                return (
-                    CredentialStatus.VALID_RESTRICTED,
-                    True,
-                    False,
-                    f"{detail} (password valid, account restricted)",
-                )
+                # Command had issues but task ran (auth succeeded)
+                return (CredentialStatus.VALID, True, True, f"{detail} (task ran)")
 
+        # These codes should theoretically never appear via RPC, but handle them
+        # for robustness. If we somehow see them, report accordingly.
         elif code in PASSWORD_INVALID_CODES:
-            return (CredentialStatus.INVALID, False, False, detail)
+            # Should never happen - kept for safety
+            return (CredentialStatus.INVALID, False, False, f"{detail} (unexpected via RPC)")
 
         elif code in ACCOUNT_BLOCKED_CODES:
-            return (CredentialStatus.BLOCKED, False, False, detail)
+            # Should never happen - kept for safety
+            return (CredentialStatus.BLOCKED, False, False, f"{detail} (unexpected via RPC)")
+
+        elif code in ACCOUNT_RESTRICTED_CODES:
+            # Should never happen - kept for safety
+            return (CredentialStatus.VALID_RESTRICTED, True, False, f"{detail} (unexpected via RPC)")
 
         else:
-            # Unknown code but task ran - likely valid
+            # Unknown code but task ran (has LastRunTime) - assume valid
+            # The return code is from the command, not authentication
             return (
                 CredentialStatus.VALID,
                 True,
