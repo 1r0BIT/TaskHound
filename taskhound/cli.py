@@ -894,13 +894,14 @@ This operation involves:
             "ldap_tier0": args.ldap_tier0,
         }
 
-        # Parallel mode (--threads > 1)
-        if args.threads > 1:
+        # Parallel mode (--threads > 1) or sequential with jitter
+        if args.threads > 1 or getattr(args, 'jitter', None):
             async_config = AsyncConfig(
                 workers=args.threads,
                 rate_limit=args.rate_limit,
                 timeout=args.timeout,
                 show_progress=True,
+                jitter=getattr(args, 'jitter', None),
             )
             async_engine = AsyncTaskHound(async_config)
 

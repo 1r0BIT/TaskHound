@@ -11,6 +11,7 @@
 # - LAPS cache is read-only during parallel phase (pre-populated in CLI)
 # - SID resolution is dynamic with benign race conditions (same value written)
 
+import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -55,6 +56,9 @@ class AsyncConfig:
 
     show_progress: bool = True
     """Show progress bar during processing."""
+
+    jitter: Optional[float] = None
+    """Random delay (0 to N seconds) between hosts. Only for sequential mode."""
 
 
 @dataclass
@@ -376,7 +380,8 @@ class AsyncTaskHound:
         results: List[TargetResult] = []
         start_time = time.perf_counter()
 
-        info(f"Sequential scan: {len(targets)} targets")
+        jitter_msg = f" (jitter: 0-{self.config.jitter}s)" if self.config.jitter else ""
+        info(f"Sequential scan: {len(targets)} targets{jitter_msg}")
 
         # Create Rich progress bar for sequential mode too
         progress = Progress(
@@ -397,6 +402,12 @@ class AsyncTaskHound:
             task_id = progress.add_task("Scanning", total=len(targets), status="")
 
             for target in targets:
+                # Apply jitter delay before scanning (skip first target)
+                if self.config.jitter and results:  # Skip delay for first target
+                    jitter_delay = random.uniform(0, self.config.jitter)
+                    progress.update(task_id, status=f"[dim]Waiting {jitter_delay:.1f}s...[/]")
+                    time.sleep(jitter_delay)
+
                 result = TargetResult(target=target, success=False)
                 target_rows: List[Dict[str, Any]] = []
                 target_start = time.perf_counter()

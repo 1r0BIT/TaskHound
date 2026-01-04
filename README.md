@@ -555,8 +555,11 @@ Speaking of Engagements: For red team/stealth operations, use `--opsec` to disab
 ### Usage Examples
 
 ```bash
-# Full OPSEC mode (disables: LDAP, RPC, looting, credguard, validation)
+# Full OPSEC mode (disables: LDAP, RPC, looting, credguard, validation; forces sequential scanning)
 taskhound -u user -p 'pass' -d corp.local -t target --opsec
+
+# OPSEC with jitter (random 0-5 second delays between hosts)
+taskhound -u user -p 'pass' -d corp.local --targets-file hosts.txt --opsec --jitter 5
 
 # Disable LDAP only (keep LSARPC for SID resolution)
 taskhound -u user -p 'pass' -d corp.local -t target --no-ldap
@@ -572,8 +575,9 @@ taskhound -u user -p 'pass' -d corp.local --laps --opsec --force-laps
 
 1. **Pre-populate BloodHound data** - Import domain data first with `--bh-live`
 2. **Use `--opsec` flag** - Disables all noisy operations at once
-3. **Collect XMLs via other means** - Analyze offline with `--offline`
-4. **Use the BOF implementation** - Available in AdaptixC2
+3. **Add `--jitter` for timing randomization** - Avoid predictable scan patterns
+4. **Collect XMLs via other means** - Analyze offline with `--offline`
+5. **Use the BOF implementation** - Available in AdaptixC2
 
 ---
 
@@ -605,8 +609,9 @@ TARGET OPTIONS
   --dc-ip               Domain controller IP
   --ns, --nameserver    DNS nameserver for lookups
   --timeout             Connection timeout in seconds (default: 5)
-  --threads             Parallel worker threads (default: 1)
+  --threads             Parallel worker threads (default: 10)
   --rate-limit          Max targets per second (default: unlimited)
+  --jitter SECONDS      Random delay (0-N seconds) between hosts (OPSEC, sequential only)
   --dns-tcp             Force DNS over TCP (for SOCKS proxies)
   --auto-targets        Auto-discover targets (BloodHound first, LDAP fallback)
   --ldap-filter         Filter for auto-targets: 'servers', 'workstations', or raw LDAP
@@ -619,7 +624,7 @@ SCANNING OPTIONS
   --offline-disk        Analyze mounted Windows filesystem
   --disk-hostname       Override hostname for offline-disk
   --bh-data             BloodHound export file for HV detection
-  --opsec               Stealth mode: --no-ldap --no-rpc --no-loot --no-credguard --no-validate-creds
+  --opsec               Stealth mode: --no-ldap --no-rpc --no-loot --no-credguard --no-validate-creds --threads 1
   --no-rpc              Disable RPC operations (LSARPC, CredGuard, validation)
   --include-ms          Include \Microsoft tasks
   --include-local       Include local system accounts
