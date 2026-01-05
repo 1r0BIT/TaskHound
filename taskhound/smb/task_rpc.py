@@ -49,8 +49,18 @@ we use multiple data sources to ESTIMATE credential validity:
    - Task shows success but hasn't run when it should have
    - May indicate silent auth failures (credentials became stale)
 
-6. UNKNOWN: Task has never run successfully
-   - Could be new task, disabled, or wrong credentials from the start
+6. NEVER_RAN_LIKELY_VALID: Task never ran BUT pwdLastSet < task_creation_date
+   - Windows validates credentials at task creation time (rejects wrong passwords)
+   - Password hasn't changed since task was created with valid credentials
+   - May not run due to missing batch logon rights, disabled state, or trigger not fired
+
+7. NEVER_RAN_POSSIBLY_STALE: Task never ran AND pwdLastSet > task_creation_date
+   - Credentials were valid at task creation, but password changed since
+   - Stored credentials are likely stale
+
+8. NEVER_RAN_UNKNOWN: Task never ran, no pwdLastSet/task_creation context
+   - Credentials were valid at task creation time (Windows validates)
+   - Cannot determine if still valid without AD metadata
 """
 
 import contextlib
@@ -96,6 +106,12 @@ class CredentialConfidence(Enum):
     Combines return code analysis with AD metadata (pwdLastSet) and
     schedule analysis to provide a more accurate assessment.
 
+    IMPORTANT: Windows validates credentials at task creation time when
+    LogonType=Password. If you try to create a task with wrong credentials,
+    you get ERROR_LOGON_FAILURE (0x8007052E) and the task is NOT created.
+    Therefore, if a task with stored credentials exists, the password was
+    valid at task creation time.
+
     Ordered from most certain to least certain.
     """
 
@@ -108,8 +124,15 @@ class CredentialConfidence(Enum):
     LIKELY_VALID = "likely_valid"              # Task ran recently within schedule
     POSSIBLY_STALE = "possibly_stale"          # Task should have run but LastRunTime is old
 
+    # Never-ran states (task exists but no execution history)
+    # Windows validates credentials at task creation - if task exists, creds were valid then
+    # May not run due to: missing SeBatchLogonRight, disabled task, or trigger not yet fired
+    NEVER_RAN_LIKELY_VALID = "never_ran_likely_valid"      # Never ran, pwdLastSet < task_creation (pwd unchanged)
+    NEVER_RAN_POSSIBLY_STALE = "never_ran_possibly_stale"  # Never ran, pwdLastSet > task_creation (pwd changed)
+    NEVER_RAN_UNKNOWN = "never_ran_unknown"                # Never ran, no context to assess staleness
+
     # Indeterminate states
-    UNKNOWN = "unknown"                        # Cannot determine (never ran, blocked, etc.)
+    UNKNOWN = "unknown"                        # Cannot determine (blocked, etc.)
 
 
 @dataclass
@@ -169,16 +192,41 @@ def calculate_confidence(
         Tuple of (confidence_level, human_readable_reason)
 
     Heuristics applied in order:
-    1. If task never ran or is blocked -> UNKNOWN
-    2. If pwdLastSet > LastRunTime -> DEFINITELY_STALE
-    3. If pwdLastSet < task_creation_date AND within trigger boundary -> CONFIRMED_VALID
-    4. If pwdLastSet < task_creation_date BUT no trigger boundary -> HIGH_CONFIDENCE_VALID
-    5. If pwdLastSet > task_creation_date AND within trigger boundary -> LIKELY_VALID
-    6. If LastRunTime is older than expected -> POSSIBLY_STALE
+    1. If task never ran -> check pwdLastSet vs task_creation_date for NEVER_RAN_* levels
+    2. If account is blocked -> UNKNOWN
+    3. If pwdLastSet > LastRunTime -> DEFINITELY_STALE
+    4. If pwdLastSet < task_creation_date AND within trigger boundary -> CONFIRMED_VALID
+    5. If pwdLastSet < task_creation_date BUT no trigger boundary -> HIGH_CONFIDENCE_VALID
+    6. If pwdLastSet > task_creation_date AND within trigger boundary -> LIKELY_VALID
+    7. If LastRunTime is older than expected -> POSSIBLY_STALE
     """
-    # No run info or task never ran - can't determine
+    # Task never ran - but we can still infer validity from Windows' creation-time validation
+    # Windows validates credentials when creating a task with stored password (LogonType=Password)
+    # If the task exists, the password was valid at creation time
     if run_info.last_run is None:
-        return (CredentialConfidence.UNKNOWN, "Task has never run successfully")
+        if context and context.pwd_last_set and context.task_creation_date:
+            if context.pwd_last_set < context.task_creation_date:
+                # Password hasn't changed since task was created with valid credentials
+                return (
+                    CredentialConfidence.NEVER_RAN_LIKELY_VALID,
+                    f"Never ran, but password unchanged since task creation "
+                    f"(pwdLastSet: {context.pwd_last_set.strftime('%Y-%m-%d')}, "
+                    f"task created: {context.task_creation_date.strftime('%Y-%m-%d')}) - "
+                    f"may lack batch logon rights or trigger hasn't fired"
+                )
+            else:
+                # Password was changed after task creation - likely stale
+                days_since_pwd_change = (context.current_time - context.pwd_last_set).days if context.current_time else 0
+                return (
+                    CredentialConfidence.NEVER_RAN_POSSIBLY_STALE,
+                    f"Never ran, and password changed {days_since_pwd_change}d ago "
+                    f"(after task creation on {context.task_creation_date.strftime('%Y-%m-%d')}) - likely stale"
+                )
+        # No context available - can only say it was valid at creation
+        return (
+            CredentialConfidence.NEVER_RAN_UNKNOWN,
+            "Task never ran - credentials were valid at creation, current status unknown"
+        )
 
     # Blocked accounts - password status unknown
     if run_info.credential_status == CredentialStatus.BLOCKED:

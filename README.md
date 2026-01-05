@@ -332,10 +332,9 @@ taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.
 
 ### How It Works
 
-Windows Task Scheduler only records **successful** task executions. Authentication failures (wrong password, account locked, etc.) are silently ignored. The task just doesn't run. This means:
+Windows Task Scheduler only records **successful** task executions. Authentication failures (wrong password, account locked, etc.) are silently ignored. The task just doesn't run.
 
-- If a task has **never run**: We can't tell if credentials are wrong or the task is just disabled
-- If a task ran **in the past**: Credentials were valid *at that time*, but may have become stale since
+**Key insight**: Windows validates credentials at task creation time. If you try to create a task with a wrong password, you get `ERROR_LOGON_FAILURE` and the task isn't created. This means: **if a task with stored credentials exists, the password was valid when the task was created.**
 
 TaskHound uses heuristics to estimate credential validity:
 
@@ -346,9 +345,12 @@ TaskHound uses heuristics to estimate credential validity:
 | `LIKELY_VALID` | Password changed but task ran within schedule (creds updated), OR task ran successfully (RPC-only mode) |
 | `POSSIBLY_STALE` | Task should have run but hasn't - may indicate stale credentials |
 | `DEFINITELY_STALE` | Password changed after last successful run - credentials are definitely wrong |
-| `UNKNOWN` | Task has never run - cannot determine |
+| `NEVER_RAN_LIKELY_VALID` | Task never ran, but password unchanged since creation - likely valid (may lack batch logon rights) |
+| `NEVER_RAN_POSSIBLY_STALE` | Task never ran, and password changed after creation - likely stale |
+| `NEVER_RAN_UNKNOWN` | Task never ran, no AD context - was valid at creation, current status unknown |
+| `UNKNOWN` | Cannot determine (account blocked, etc.) |
 
-The key insight: comparing `pwdLastSet` from AD against `LastRunTime` from Task Scheduler tells us if the password changed after the last successful run. 
+The key insight: comparing `pwdLastSet` from AD against `LastRunTime` from Task Scheduler tells us if the password changed after the last successful run. For never-run tasks, comparing `pwdLastSet` against `task_creation_date` tells us if the password changed after the task was created with valid credentials. 
 
 **Without AD data** (e.g., `--no-ldap` and no BloodHound): TaskHound falls back to RPC-only mode, using just the return code and last run time. A successful execution returns `LIKELY_VALID`; schedule-based staleness detection still applies if trigger interval is known from the task XML.
 

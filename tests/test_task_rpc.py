@@ -753,6 +753,18 @@ class TestCredentialConfidence:
         """Test POSSIBLY_STALE status value."""
         assert CredentialConfidence.POSSIBLY_STALE.value == "possibly_stale"
 
+    def test_never_ran_likely_valid_status(self):
+        """Test NEVER_RAN_LIKELY_VALID status value."""
+        assert CredentialConfidence.NEVER_RAN_LIKELY_VALID.value == "never_ran_likely_valid"
+
+    def test_never_ran_possibly_stale_status(self):
+        """Test NEVER_RAN_POSSIBLY_STALE status value."""
+        assert CredentialConfidence.NEVER_RAN_POSSIBLY_STALE.value == "never_ran_possibly_stale"
+
+    def test_never_ran_unknown_status(self):
+        """Test NEVER_RAN_UNKNOWN status value."""
+        assert CredentialConfidence.NEVER_RAN_UNKNOWN.value == "never_ran_unknown"
+
     def test_unknown_status(self):
         """Test UNKNOWN status value."""
         assert CredentialConfidence.UNKNOWN.value == "unknown"
@@ -765,6 +777,9 @@ class TestCredentialConfidence:
             "CONFIRMED_VALID",
             "LIKELY_VALID",
             "POSSIBLY_STALE",
+            "NEVER_RAN_LIKELY_VALID",
+            "NEVER_RAN_POSSIBLY_STALE",
+            "NEVER_RAN_UNKNOWN",
             "UNKNOWN",
         }
         actual = {c.name for c in CredentialConfidence}
@@ -812,15 +827,52 @@ class TestCalculateConfidence:
             task_hijackable=True,
         )
 
-    def test_unknown_when_never_ran(self):
-        """Test UNKNOWN confidence when task has never run."""
+    def test_never_ran_unknown_when_no_context(self):
+        """Test NEVER_RAN_UNKNOWN confidence when task never ran and no context available."""
         run_info = self._make_run_info(None)
         run_info.credential_status = CredentialStatus.UNKNOWN
 
         confidence, reason = calculate_confidence(run_info, None)
 
-        assert confidence == CredentialConfidence.UNKNOWN
-        assert "never run" in reason.lower()
+        assert confidence == CredentialConfidence.NEVER_RAN_UNKNOWN
+        assert "never ran" in reason.lower()
+        assert "valid at creation" in reason.lower()
+
+    def test_never_ran_likely_valid_when_pwd_unchanged(self):
+        """Test NEVER_RAN_LIKELY_VALID when task never ran but password unchanged since creation."""
+        now = datetime(2026, 1, 5, 12, 0, 0)
+        run_info = self._make_run_info(None)
+        run_info.credential_status = CredentialStatus.UNKNOWN
+        context = CredentialContext(
+            pwd_last_set=datetime(2025, 6, 15),  # Password set long ago
+            task_creation_date=datetime(2025, 12, 1),  # Task created after pwd change
+            current_time=now,
+        )
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.NEVER_RAN_LIKELY_VALID
+        assert "never ran" in reason.lower()
+        assert "unchanged" in reason.lower()
+        assert "batch logon" in reason.lower() or "trigger" in reason.lower()
+
+    def test_never_ran_possibly_stale_when_pwd_changed_after_creation(self):
+        """Test NEVER_RAN_POSSIBLY_STALE when task never ran and password changed after creation."""
+        now = datetime(2026, 1, 5, 12, 0, 0)
+        run_info = self._make_run_info(None)
+        run_info.credential_status = CredentialStatus.UNKNOWN
+        context = CredentialContext(
+            pwd_last_set=datetime(2026, 1, 1),  # Password changed recently
+            task_creation_date=datetime(2025, 6, 15),  # Task created before pwd change
+            current_time=now,
+        )
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.NEVER_RAN_POSSIBLY_STALE
+        assert "never ran" in reason.lower()
+        assert "changed" in reason.lower()
+        assert "stale" in reason.lower()
 
     def test_unknown_when_blocked(self):
         """Test UNKNOWN confidence when account is blocked."""
