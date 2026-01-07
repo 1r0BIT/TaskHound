@@ -46,6 +46,76 @@ def _get_row_value(row: Any, key: str, default: Any = "") -> Any:
     return getattr(row, key, default)
 
 
+def _normalize_username(username: str) -> str:
+    """
+    Normalize a username for deduplication.
+
+    Handles:
+    - Case insensitivity (DOMAIN\\User -> domain\\user)
+    - Domain prefix variations (DOMAIN\\user vs user)
+
+    Returns the normalized form: lowercase, with domain if present.
+    """
+    if not username:
+        return ""
+
+    username = username.strip().lower()
+
+    # Skip SIDs
+    if username.startswith("s-1-"):
+        return username
+
+    return username
+
+
+def _get_canonical_username(username: str, seen_usernames: dict[str, str]) -> str:
+    """
+    Get the canonical (display) form of a username, deduplicating variations.
+
+    Args:
+        username: The username to canonicalize
+        seen_usernames: Dict mapping normalized usernames to their canonical display form
+
+    Returns:
+        The canonical display form (preserves first-seen casing and domain prefix)
+    """
+    if not username:
+        return ""
+
+    normalized = _normalize_username(username)
+    if not normalized or normalized.startswith("s-1-"):
+        return username
+
+    # Extract just the username part (without domain) for matching
+    if "\\" in normalized:
+        _, name_part = normalized.rsplit("\\", 1)
+    else:
+        name_part = normalized
+
+    # Check if we've seen this username before (with or without domain)
+    # Prefer the version WITH domain prefix if available
+    for seen_norm, seen_canonical in seen_usernames.items():
+        if "\\" in seen_norm:
+            _, seen_name = seen_norm.rsplit("\\", 1)
+        else:
+            seen_name = seen_norm
+
+        if name_part == seen_name:
+            # If new one has domain and old one doesn't, update canonical
+            if "\\" in normalized and "\\" not in seen_norm:
+                seen_usernames[normalized] = username
+                # Remove the old entry without domain
+                if seen_norm in seen_usernames:
+                    del seen_usernames[seen_norm]
+                return username
+            # Otherwise use existing canonical form
+            return seen_canonical
+
+    # First time seeing this username
+    seen_usernames[normalized] = username
+    return username
+
+
 def calculate_severity(row: Any) -> SeverityScore:
     """
     Determine severity level for a scheduled task finding using categorical rules.
@@ -212,8 +282,8 @@ def calculate_statistics(rows: list[Any]) -> AuditStatistics:
     """
     hosts_seen = set()
     hosts_with_findings = set()
-    unique_accounts = set()
-    tier0_accounts = set()
+    unique_accounts_seen: dict[str, str] = {}  # normalized -> canonical display form
+    tier0_accounts_seen: dict[str, str] = {}   # normalized -> canonical display form
     failures = []
 
     # Counters
@@ -243,18 +313,18 @@ def calculate_statistics(rows: list[Any]) -> AuditStatistics:
         if host:
             hosts_seen.add(host)
 
-        # Track accounts - prefer resolved name over SID
+        # Track accounts - prefer resolved name over SID, deduplicate variations
         runas_raw = _get_row_value(row, "runas", "")
         resolved_runas = _get_row_value(row, "resolved_runas", "")
         runas = resolved_runas if resolved_runas else runas_raw
         if runas and not runas.startswith("S-1-"):
-            unique_accounts.add(runas)
+            _get_canonical_username(runas, unique_accounts_seen)
 
         # Task type counts
         if task_type == "TIER-0":
             tier0_count += 1
             if runas and not runas.startswith("S-1-"):
-                tier0_accounts.add(runas)
+                _get_canonical_username(runas, tier0_accounts_seen)
         elif task_type == "PRIV":
             priv_count += 1
         else:
@@ -307,8 +377,8 @@ def calculate_statistics(rows: list[Any]) -> AuditStatistics:
         stored_creds_count=stored_creds_count,
         decrypted_count=decrypted_count,
         valid_creds_count=valid_creds_count,
-        unique_accounts=len(unique_accounts),
-        tier0_accounts=list(tier0_accounts),
+        unique_accounts=len(unique_accounts_seen),
+        tier0_accounts=list(tier0_accounts_seen.values()),
         failures=failures,
     )
 

@@ -374,6 +374,88 @@ class TestStatisticsCalculation:
         assert stats.total_tasks == 0
         assert stats.overall_risk == "INFO"
 
+    def test_tier0_accounts_deduplication_case_insensitive(self):
+        """Should deduplicate tier0 accounts with different cases."""
+        rows = [
+            {
+                "host": "host1",
+                "type": "TIER-0",
+                "runas": "DOMAIN\\Administrator",
+                "credentials_hint": "stored",
+            },
+            {
+                "host": "host2",
+                "type": "TIER-0",
+                "runas": "domain\\administrator",
+                "credentials_hint": "stored",
+            },
+            {
+                "host": "host3",
+                "type": "TIER-0",
+                "runas": "Administrator",
+                "credentials_hint": "stored",
+            },
+        ]
+        stats = calculate_statistics(rows)
+
+        # Should deduplicate to 1 account (preferring the one with domain)
+        assert len(stats.tier0_accounts) == 1
+        # Should prefer the version with domain prefix
+        assert stats.tier0_accounts[0].lower() in ["domain\\administrator"]
+
+    def test_tier0_accounts_deduplication_domain_variations(self):
+        """Should deduplicate accounts with and without domain prefix."""
+        rows = [
+            {
+                "host": "host1",
+                "type": "TIER-0",
+                "runas": "highpriv",
+                "credentials_hint": "stored",
+            },
+            {
+                "host": "host2",
+                "type": "TIER-0",
+                "runas": "BADSUCCESSOR\\highpriv",
+                "credentials_hint": "stored",
+            },
+            {
+                "host": "host3",
+                "type": "TIER-0",
+                "runas": "badsuccessor\\highpriv",
+                "credentials_hint": "stored",
+            },
+        ]
+        stats = calculate_statistics(rows)
+
+        # Should deduplicate to 1 account
+        assert len(stats.tier0_accounts) == 1
+        # Should prefer the version with domain prefix
+        assert "\\" in stats.tier0_accounts[0]
+
+    def test_unique_accounts_deduplication(self):
+        """Should deduplicate unique accounts with different formats."""
+        rows = [
+            {
+                "host": "host1",
+                "type": "TASK",
+                "runas": "DOMAIN\\ServiceUser",
+            },
+            {
+                "host": "host2",
+                "type": "TASK",
+                "runas": "domain\\serviceuser",
+            },
+            {
+                "host": "host3",
+                "type": "TASK",
+                "runas": "ServiceUser",
+            },
+        ]
+        stats = calculate_statistics(rows)
+
+        # Should deduplicate to 1 unique account
+        assert stats.unique_accounts == 1
+
 
 # ============================================================================
 # HTML Generation Tests
