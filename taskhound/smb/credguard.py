@@ -148,8 +148,13 @@ def check_credential_guard(smb_conn, host) -> Optional[bool]:
     """
     Check if Credential Guard is enabled on a remote Windows host.
 
-    Checks HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\LsaCfgFlags == 1
+    Checks HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\LsaCfgFlags
     and/or HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\IsolatedUserMode == 1
+
+    LsaCfgFlags values:
+        0 = Credential Guard disabled
+        1 = Credential Guard enabled with UEFI lock
+        2 = Credential Guard enabled without lock
 
     Automatically starts the RemoteRegistry service if stopped/disabled,
     and restores it to the original state afterward.
@@ -175,14 +180,14 @@ def check_credential_guard(smb_conn, host) -> Optional[bool]:
         lsa_handle = ans["phkResult"]
         log_debug(f"{host}: CredGuard check - opened {lsa_path}")
 
-        # Check LsaCfgFlags
+        # Check LsaCfgFlags (values: 0=disabled, 1=UEFI lock, 2=without lock)
         lsa_cfg_flags = None
         try:
-            # hBaseRegQueryValue returns tuple: (dataType, data)
+            # hBaseRegQueryValue returns tuple (dataType, data)
             _, lsa_cfg_flags = rrp.hBaseRegQueryValue(dce, lsa_handle, "LsaCfgFlags")
             log_debug(f"{host}: CredGuard check - LsaCfgFlags = {lsa_cfg_flags}")
-            if lsa_cfg_flags == 1:
-                log_debug(f"{host}: CredGuard check - DETECTED via LsaCfgFlags=1")
+            if lsa_cfg_flags in (1, 2):
+                log_debug(f"{host}: CredGuard check - DETECTED via LsaCfgFlags={lsa_cfg_flags}")
                 return True
         except DCERPCException:
             log_debug(f"{host}: CredGuard check - LsaCfgFlags not present")
@@ -190,7 +195,7 @@ def check_credential_guard(smb_conn, host) -> Optional[bool]:
         # Check IsolatedUserMode
         isolated_user_mode = None
         try:
-            # hBaseRegQueryValue returns tuple: (dataType, data)
+            # hBaseRegQueryValue returns tuple (dataType, data)
             _, isolated_user_mode = rrp.hBaseRegQueryValue(dce, lsa_handle, "IsolatedUserMode")
             log_debug(f"{host}: CredGuard check - IsolatedUserMode = {isolated_user_mode}")
             if isolated_user_mode == 1:

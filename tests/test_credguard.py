@@ -168,19 +168,31 @@ class TestCheckCredentialGuard:
 
         assert result is None
 
-    def test_lsacfgflags_other_values(self, mock_smb_connection, mock_scm_and_rrp):
-        """Should handle LsaCfgFlags values other than 0 or 1"""
+    def test_lsacfgflags_enabled_without_lock(self, mock_smb_connection, mock_scm_and_rrp):
+        """Should return True when LsaCfgFlags is 2 (enabled without UEFI lock)"""
         mock_rrp = mock_scm_and_rrp['rrp']
 
-        # LsaCfgFlags = 2 (not exactly 1, but not 0) - hBaseRegQueryValue returns tuple (dataType, value)
+        # LsaCfgFlags = 2 (enabled without lock) - hBaseRegQueryValue returns tuple (dataType, value)
+        mock_rrp.hBaseRegQueryValue.return_value = (4, 2)  # REG_DWORD=4, value=2
+
+        result = check_credential_guard(mock_smb_connection, "DC01")
+
+        # Value 2 means Credential Guard enabled without UEFI lock
+        assert result is True
+
+    def test_lsacfgflags_other_values(self, mock_smb_connection, mock_scm_and_rrp):
+        """Should return False for LsaCfgFlags values other than 1 or 2"""
+        mock_rrp = mock_scm_and_rrp['rrp']
+
+        # LsaCfgFlags = 99 (unexpected value) - hBaseRegQueryValue returns tuple (dataType, value)
         mock_rrp.hBaseRegQueryValue.side_effect = [
-            (4, 2),  # LsaCfgFlags = 2 (REG_DWORD=4)
-            (4, 0)   # IsolatedUserMode = 0 (REG_DWORD=4)
+            (4, 99),  # LsaCfgFlags = 99 (REG_DWORD=4)
+            (4, 0)    # IsolatedUserMode = 0 (REG_DWORD=4)
         ]
 
         result = check_credential_guard(mock_smb_connection, "DC01")
 
-        # Should return False since value is not exactly 1
+        # Should return False since value is not 1 or 2
         assert result is False
 
 
