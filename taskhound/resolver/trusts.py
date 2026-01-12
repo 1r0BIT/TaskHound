@@ -253,7 +253,7 @@ def fetch_known_domain_sids_via_ldap(
     result: Dict[str, TrustInfo] = {}
 
     # Validate domain
-    if not domain or "." not in domain:
+    if not domain or len(domain) < 3 or "." not in domain:
         debug(f"Invalid domain '{domain}' for LDAP domain SID query")
         return result
 

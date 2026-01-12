@@ -157,7 +157,7 @@ def _load_netbios_cache_from_ldap() -> None:
     hashes = creds["hashes"]
     kerberos = creds["kerberos"]
 
-    if not domain or "." not in domain:
+    if not domain or len(domain) < 3 or "." not in domain:
         debug("NETBIOS cache: Invalid domain, skipping LDAP query")
         return
 

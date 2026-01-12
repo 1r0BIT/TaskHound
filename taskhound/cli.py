@@ -502,6 +502,8 @@ def _enumerate_from_ldap(
     """
     Enumerate computers from LDAP with filtering.
 
+    Uses LDAP-specific credentials if provided, otherwise falls back to main auth.
+
     Returns:
         Tuple of (list of hostnames, source string)
     """
@@ -511,12 +513,18 @@ def _enumerate_from_ldap(
 
     kerberos_enabled = args.kerberos or getattr(args, "aes_key", None) is not None
 
+    # Use LDAP-specific credentials if provided, otherwise fall back to main auth
+    effective_domain = args.ldap_domain if args.ldap_domain else args.domain
+    effective_user = args.ldap_user if args.ldap_user else args.username
+    effective_password = args.ldap_password if args.ldap_password else args.password
+    effective_hashes = args.ldap_hashes if args.ldap_hashes else args.hashes
+
     computers = enumerate_domain_computers_filtered(
         dc_ip=args.dc_ip,
-        domain=args.domain,
-        username=args.username,
-        password=args.password,
-        hashes=args.hashes,
+        domain=effective_domain,
+        username=effective_user,
+        password=effective_password,
+        hashes=effective_hashes,
         kerberos=kerberos_enabled,
         aes_key=getattr(args, "aes_key", None),
         ldap_filter=ldap_filter_raw,
@@ -713,12 +721,18 @@ This operation involves:
     if getattr(args, "laps", False) and not args.offline:
         info("LAPS mode enabled - querying Active Directory for LAPS passwords...")
         try:
+            # Use LDAP-specific credentials if provided, otherwise fall back to main auth
+            laps_domain = args.ldap_domain if args.ldap_domain else args.domain
+            laps_user = args.ldap_user if args.ldap_user else args.username
+            laps_password = args.ldap_password if args.ldap_password else args.password
+            laps_hashes = args.ldap_hashes if args.ldap_hashes else args.hashes
+
             laps_cache = get_laps_passwords(
                 dc_ip=args.dc_ip,
-                domain=args.domain,
-                username=args.username,
-                password=args.password,
-                hashes=args.hashes,
+                domain=laps_domain,
+                username=laps_user,
+                password=laps_password,
+                hashes=laps_hashes,
                 kerberos=args.kerberos,
                 laps_user_override=getattr(args, "laps_user", None),
                 use_cache=not args.no_cache,
@@ -846,6 +860,10 @@ This operation involves:
                 password=args.password,
                 hashes=args.hashes,
                 kerberos=args.kerberos,
+                ldap_domain=args.ldap_domain,
+                ldap_user=args.ldap_user,
+                ldap_password=args.ldap_password,
+                ldap_hashes=args.ldap_hashes,
             )
 
         # Build AuthContext from args

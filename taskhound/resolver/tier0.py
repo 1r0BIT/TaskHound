@@ -76,7 +76,7 @@ def fetch_tier0_members(
     tier0_cache: Tier0Cache = {}
 
     # Validate domain - must be non-empty and contain at least one dot for LDAP DN construction
-    if not domain or "." not in domain:
+    if not domain or len(domain) < 3 or "." not in domain:
         debug(f"Invalid domain '{domain}' for Tier-0 pre-flight - must be FQDN")
         return tier0_cache
 

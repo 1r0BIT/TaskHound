@@ -35,7 +35,7 @@ def get_discovered_gc_server(domain: str) -> Optional[str]:
 
     _gc_discovery_attempted = True
 
-    if not domain or "." not in domain:
+    if not domain or len(domain) < 3 or "." not in domain:
         debug(f"Invalid domain '{domain}' for GC discovery")
         return None
 
@@ -98,7 +98,7 @@ def resolve_sid_via_global_catalog(
             debug("No valid credentials provided for GC SID resolution")
             return None
 
-        if not domain or "." not in domain:
+        if not domain or len(domain) < 3 or "." not in domain:
             debug(f"Invalid domain '{domain}' for GC SID resolution")
             return None
 

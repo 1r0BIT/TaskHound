@@ -114,6 +114,10 @@ def prefetch_computer_sids(
     password: Optional[str] = None,
     hashes: Optional[str] = None,
     kerberos: bool = False,
+    ldap_domain: Optional[str] = None,
+    ldap_user: Optional[str] = None,
+    ldap_password: Optional[str] = None,
+    ldap_hashes: Optional[str] = None,
 ) -> Dict[str, str]:
     """
     Batch pre-fetch computer SIDs for known targets before scanning begins.
@@ -129,13 +133,17 @@ def prefetch_computer_sids(
 
     Args:
         targets: List of target hostnames (FQDN or short names)
-        domain: Domain name (e.g., "corp.local")
+        domain: Domain name (e.g., "corp.local") - main auth domain
         hv_loader: HighValueLoader with BloodHound data (optional)
         dc_ip: Domain controller IP address
-        username: LDAP authentication username
-        password: LDAP authentication password
-        hashes: NTLM hashes for pass-the-hash
+        username: Main authentication username
+        password: Main authentication password
+        hashes: Main authentication NTLM hashes
         kerberos: Use Kerberos authentication
+        ldap_domain: Override domain for LDAP queries (takes precedence)
+        ldap_user: Override username for LDAP queries (takes precedence)
+        ldap_password: Override password for LDAP queries (takes precedence)
+        ldap_hashes: Override NTLM hashes for LDAP queries (takes precedence)
 
     Returns:
         Dict mapping normalized hostname -> SID for all resolved targets
@@ -202,17 +210,26 @@ def prefetch_computer_sids(
         debug(f"Pre-fetch: {cache_hits} computer SIDs from cache")
 
     # Step 3: Batch LDAP query for remaining (if credentials available)
-    if remaining and domain and username and (password or hashes):
+    # Use LDAP-specific credentials if provided, otherwise fall back to main credentials
+    effective_domain = ldap_domain or domain
+    effective_user = ldap_user or username
+    effective_password = ldap_password or password
+    effective_hashes = ldap_hashes or hashes
+
+    # Only proceed with LDAP if we have valid credentials and a proper FQDN domain
+    # FQDN must have at least two non-empty parts (e.g., "domain.local", not just ".")
+    is_valid_fqdn = effective_domain and "." in effective_domain and len(effective_domain) > 2
+    if remaining and is_valid_fqdn and effective_user and (effective_password or effective_hashes):
         debug(f"Pre-fetch: Querying LDAP for {len(remaining)} remaining computers")
         for hostname in remaining:
             sid = resolve_name_to_sid_via_ldap(
                 name=hostname,
-                domain=domain,
+                domain=effective_domain,
                 is_computer=True,
                 dc_ip=dc_ip,
-                username=username,
-                password=password,
-                hashes=hashes,
+                username=effective_user,
+                password=effective_password,
+                hashes=effective_hashes,
                 kerberos=kerberos,
             )
             if sid:

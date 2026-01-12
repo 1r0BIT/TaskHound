@@ -197,7 +197,7 @@ def _load_netbios_cache_from_ldap() -> None:
     hashes = creds["hashes"]
     kerberos = creds["kerberos"]
 
-    if not domain or "." not in domain:
+    if not domain or len(domain) < 3 or "." not in domain:
         debug("NETBIOS cache: Invalid domain, skipping LDAP query")
         return
 
@@ -317,7 +317,7 @@ def get_discovered_gc_server(domain: str) -> Optional[str]:
 
     _gc_discovery_attempted = True
 
-    if not domain or "." not in domain:
+    if not domain or len(domain) < 3 or "." not in domain:
         debug(f"Invalid domain '{domain}' for GC discovery")
         return None
 
@@ -830,7 +830,7 @@ def fetch_known_domain_sids_via_ldap(
     result: Dict[str, TrustInfo] = {}
 
     # Validate domain
-    if not domain or "." not in domain:
+    if not domain or len(domain) < 3 or "." not in domain:
         debug(f"Invalid domain '{domain}' for LDAP domain SID query")
         return result
 
@@ -1125,7 +1125,7 @@ def resolve_sid_via_ldap(
             return None
 
         # Validate domain - must be non-empty and contain at least one dot for LDAP DN construction
-        if not domain or "." not in domain:
+        if not domain or len(domain) < 3 or "." not in domain:
             debug(f"Invalid domain '{domain}' for LDAP SID resolution - must be FQDN")
             return None
 
@@ -1252,7 +1252,7 @@ def resolve_sid_via_global_catalog(
             debug("No valid credentials provided for GC SID resolution")
             return None
 
-        if not domain or "." not in domain:
+        if not domain or len(domain) < 3 or "." not in domain:
             debug(f"Invalid domain '{domain}' for GC SID resolution")
             return None
 
@@ -1390,7 +1390,7 @@ def resolve_name_to_sid_via_ldap(
         cache_key = None  # Only cache computers for now
 
     # Validate domain - must be non-empty and contain at least one dot for LDAP DN construction
-    if not domain or "." not in domain:
+    if not domain or len(domain) < 3 or "." not in domain:
         debug(f"Invalid domain '{domain}' for LDAP resolution - must be FQDN (e.g., 'corp.local')")
         return None
 
@@ -1619,6 +1619,10 @@ def prefetch_computer_sids(
     password: Optional[str] = None,
     hashes: Optional[str] = None,
     kerberos: bool = False,
+    ldap_domain: Optional[str] = None,
+    ldap_user: Optional[str] = None,
+    ldap_password: Optional[str] = None,
+    ldap_hashes: Optional[str] = None,
 ) -> Dict[str, str]:
     """
     Batch pre-fetch computer SIDs for known targets before scanning begins.
@@ -1634,13 +1638,17 @@ def prefetch_computer_sids(
 
     Args:
         targets: List of target hostnames (FQDN or short names)
-        domain: Domain name (e.g., "corp.local")
+        domain: Domain name (e.g., "corp.local") - main auth domain
         hv_loader: HighValueLoader with BloodHound data (optional)
         dc_ip: Domain controller IP address
-        username: LDAP authentication username
-        password: LDAP authentication password
-        hashes: NTLM hashes for pass-the-hash
+        username: Main authentication username
+        password: Main authentication password
+        hashes: Main authentication NTLM hashes
         kerberos: Use Kerberos authentication
+        ldap_domain: Override domain for LDAP queries (takes precedence)
+        ldap_user: Override username for LDAP queries (takes precedence)
+        ldap_password: Override password for LDAP queries (takes precedence)
+        ldap_hashes: Override NTLM hashes for LDAP queries (takes precedence)
 
     Returns:
         Dict mapping normalized hostname -> SID for all resolved targets
@@ -1699,17 +1707,26 @@ def prefetch_computer_sids(
         debug(f"Pre-fetch: {cache_hits} computer SIDs from cache")
 
     # Step 3: Batch LDAP query for remaining (if credentials available)
-    if remaining and domain and username and (password or hashes):
+    # Use LDAP-specific credentials if provided, otherwise fall back to main credentials
+    effective_domain = ldap_domain or domain
+    effective_user = ldap_user or username
+    effective_password = ldap_password or password
+    effective_hashes = ldap_hashes or hashes
+
+    # Only proceed with LDAP if we have valid credentials and a proper FQDN domain
+    # FQDN must have at least two non-empty parts (e.g., "domain.local", not just ".")
+    is_valid_fqdn = effective_domain and "." in effective_domain and len(effective_domain) > 2
+    if remaining and is_valid_fqdn and effective_user and (effective_password or effective_hashes):
         debug(f"Pre-fetch: Querying LDAP for {len(remaining)} remaining computers")
         for hostname in remaining:
             sid = resolve_name_to_sid_via_ldap(
                 name=hostname,
-                domain=domain,
+                domain=effective_domain,
                 is_computer=True,
                 dc_ip=dc_ip,
-                username=username,
-                password=password,
-                hashes=hashes,
+                username=effective_user,
+                password=effective_password,
+                hashes=effective_hashes,
                 kerberos=kerberos,
             )
             if sid:
@@ -2260,7 +2277,7 @@ def batch_get_user_attributes(
         return {}
 
     # Validate domain - must be non-empty and contain at least one dot for LDAP DN construction
-    if not domain or "." not in domain:
+    if not domain or len(domain) < 3 or "." not in domain:
         debug(f"Invalid domain '{domain}' for batch user attribute lookup - must be FQDN")
         return {}
 
@@ -2598,7 +2615,7 @@ def fetch_tier0_members(
     tier0_cache: Tier0Cache = {}
 
     # Validate domain - must be non-empty and contain at least one dot for LDAP DN construction
-    if not domain or "." not in domain:
+    if not domain or len(domain) < 3 or "." not in domain:
         debug(f"Invalid domain '{domain}' for Tier-0 pre-flight - must be FQDN")
         return tier0_cache
 

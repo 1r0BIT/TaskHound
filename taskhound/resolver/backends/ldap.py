@@ -49,7 +49,7 @@ def resolve_sid_via_ldap(
             return None
 
         # Validate domain - must be non-empty and contain at least one dot for LDAP DN construction
-        if not domain or "." not in domain:
+        if not domain or len(domain) < 3 or "." not in domain:
             debug(f"Invalid domain '{domain}' for LDAP SID resolution - must be FQDN")
             return None
 
@@ -175,7 +175,7 @@ def resolve_name_to_sid_via_ldap(
         cache_key = None  # Only cache computers for now
 
     # Validate domain - must be non-empty and contain at least one dot for LDAP DN construction
-    if not domain or "." not in domain:
+    if not domain or len(domain) < 3 or "." not in domain:
         debug(f"Invalid domain '{domain}' for LDAP resolution - must be FQDN (e.g., 'corp.local')")
         return None
 
@@ -338,7 +338,7 @@ def batch_get_user_attributes(
         return {}
 
     # Validate domain
-    if not domain or "." not in domain:
+    if not domain or len(domain) < 3 or "." not in domain:
         debug(f"Invalid domain '{domain}' for batch user attribute lookup - must be FQDN")
         return {}
 
