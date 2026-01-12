@@ -375,7 +375,7 @@ def build_parser() -> argparse.ArgumentParser:
     # Target selection
     target = ap.add_argument_group("Target options")
     target.add_argument("-t", "--target", action=OnceOnly, help="Target(s) - single host or comma-separated list (e.g., 192.168.1.1,192.168.1.2)")
-    target.add_argument("--targets-file", help="File with targets, one per line")
+    target.add_argument("-T", "--targets-file", help="File with targets, one per line")
     target.add_argument("--dc-ip", help="Domain controller IP (required when using Kerberos without DNS)")
     target.add_argument(
         "--ns", "--nameserver",
@@ -425,7 +425,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Auto-discover targets by querying for domain computer objects. "
         "Uses BloodHound data if available (via --bloodhound-* options), otherwise falls back to LDAP. "
         "By default, filters out disabled accounts and stale computers (>60 days). "
-        "Can be combined with -t/--targets-file to add additional targets.",
+        "Can be combined with -t/--target or -T/--targets-file to add additional targets.",
     )
     target.add_argument(
         "--ldap-filter",
