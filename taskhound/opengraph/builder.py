@@ -50,8 +50,8 @@ def _create_task_node(task: Dict) -> Node:
     :return: Node instance
     :raises ValueError: If required fields are missing or invalid
     """
-    hostname = task.get("host", "").strip().upper()
-    task_path = task.get("path", "").strip()
+    hostname = (task.get("host") or "").strip().upper()
+    task_path = (task.get("path") or "").strip()
 
     # Validate required fields
     if not hostname:
@@ -361,9 +361,9 @@ def _create_relationship_edges(
     edges = []
     skipped = {"computers": 0, "users": 0}
 
-    hostname = task.get("host", "").strip().upper()
-    task_path = task.get("path", "").strip()
-    runas_user = task.get("runas", "").strip()
+    hostname = (task.get("host") or "").strip().upper()
+    task_path = (task.get("path") or "").strip()
+    runas_user = (task.get("runas") or "").strip()
 
     # Helper to extract domain from FQDN
     fqdn_domain = "WORKGROUP"

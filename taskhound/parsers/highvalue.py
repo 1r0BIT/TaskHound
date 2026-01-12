@@ -360,8 +360,8 @@ class HighValueLoader:
             node_kind = node_data.get("kind")
 
             # Extract core fields
-            object_id = node_data.get("objectId", "").strip()
-            label = node_data.get("label", "").strip()
+            object_id = (node_data.get("objectId") or "").strip()
+            label = (node_data.get("label") or "").strip()
             properties = node_data.get("properties", {})
 
             if not object_id or not label:

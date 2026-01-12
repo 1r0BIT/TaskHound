@@ -76,12 +76,12 @@ def generate_opengraph_files(
     info("Collecting unique principals for resolution...")
     for task in valid_tasks:
         # Add computer hostname (FQDN)
-        hostname = task.get("host", "").strip().upper()
+        hostname = (task.get("host") or "").strip().upper()
         if hostname and hostname != "UNKNOWN_HOST":
             computer_names.add(hostname)
 
         # Add RunAs user
-        runas = task.get("runas", "").strip()
+        runas = (task.get("runas") or "").strip()
         if runas and runas != "N/A":
             # Use helper to normalize principal ID
             fqdn_domain = _extract_domain(hostname)
