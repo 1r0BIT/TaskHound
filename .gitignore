@@ -16,6 +16,7 @@ targets_*.txt
 
 # Internal planning documents
 planning/
+.planning/
 
 # Real/production test data
 tests/live_test_config.json
