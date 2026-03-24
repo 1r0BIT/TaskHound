@@ -179,12 +179,14 @@ def query_laps_passwords(
         )
 
     try:
-        # Perform search
+        # Perform paged search to bypass server-side MaxPageSize limit (default 1000)
+        paged_controls = [ldapasn1_impacket.SimplePagedResultsControl(size=500)]
         search_result = ldap_conn.search(
             searchBase=base_dn,
             searchFilter=ldap_filter,
             attributes=attributes,
-            sizeLimit=0,  # No limit
+            sizeLimit=0,
+            searchControls=paged_controls,
         )
 
         # Process results
