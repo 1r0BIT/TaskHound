@@ -202,6 +202,17 @@ class TestCreateTaskNode:
         props = node.properties.to_dict() if hasattr(node.properties, 'to_dict') else dict(node.properties)
         assert props.get("enabled") is False
 
+    def test_objectid_not_in_properties(self):
+        """objectid is reserved in BH v8.9.0+ and must not appear in node properties"""
+        task = {
+            "host": "DC01.DOMAIN.LAB",
+            "path": "\\Tasks\\TestTask",
+            "command": "cmd.exe",
+        }
+        node = _create_task_node(task)
+        props = node.properties.to_dict() if hasattr(node.properties, 'to_dict') else dict(node.properties)
+        assert "objectid" not in props
+
     def test_credentials_stored_flag(self):
         """Should set credentialsstored based on credentials_hint"""
         task = {

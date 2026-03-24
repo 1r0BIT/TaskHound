@@ -124,12 +124,11 @@ def generate_opengraph_files(
 
         if sid:
             # We have a SID - use it as ID (matches builder.py logic)
-            # Note: We include minimal properties to avoid overwriting existing data if possible,
-            # but 'name' and 'objectid' are essential for identity.
+            # Note: 'objectid' is reserved in BH v8.9.0+; identity is carried by id=.
             node = Node(
                 id=sid,
                 kinds=["Computer", "Base"],
-                properties=Properties(name=resolved_name or name, objectid=sid)
+                properties=Properties(name=resolved_name or name)
             )
             graph.add_node(node)
             debug(f"Added placeholder node for Computer: {resolved_name or name} ({sid})")
@@ -156,7 +155,7 @@ def generate_opengraph_files(
             node = Node(
                 id=sid,
                 kinds=["User", "Base"],
-                properties=Properties(name=resolved_name or name, objectid=sid)
+                properties=Properties(name=resolved_name or name)
             )
             graph.add_node(node)
             debug(f"Added placeholder node for User: {resolved_name or name} ({sid})")

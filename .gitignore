@@ -27,6 +27,10 @@ tests/test_data/*_live.json
 # Copilot instructions (may contain sensitive context)
 .github/copilot-instructions.md
 
+# Claude Code
+CLAUDE.md
+.claude/
+
 # =============================================================================
 # TOOL OUTPUT & TEMPORARY FILES
 # =============================================================================

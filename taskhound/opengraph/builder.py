@@ -80,7 +80,6 @@ def _create_task_node(task: Dict) -> Node:
     properties_dict = {
         "name": task_path,
         "hostname": hostname,
-        "objectid": object_id,
         "runas": task.get("runas") or "N/A",
         "enabled": str(task.get("enabled", "false")).lower() == "true",
         "command": command,
