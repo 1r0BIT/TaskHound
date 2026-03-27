@@ -13,7 +13,7 @@ import struct
 from binascii import unhexlify
 from datetime import datetime
 from io import BytesIO
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from impacket.smbconnection import SMBConnection as ImpacketSMBConnection
 
@@ -99,7 +99,7 @@ class CredentialLooter:
                     if task_info.get("logon_type") == "Password":
                         self.tasks[filename] = {
                             "name": filename,
-                            "userid": task_info.get("userid", "").lower(),
+                            "userid": (task_info.get("userid") or "").lower(),
                             "xml": xml_content,
                             "task_info": task_info,
                         }
@@ -193,7 +193,7 @@ class OfflineDPAPICollector:
         self.masterkey_count = 0
         self.credential_count = 0
 
-    def collect_all_files(self) -> Dict[str, int]:
+    def collect_all_files(self) -> Dict[str, Any]:
         """
         Collect all DPAPI-related files for offline decryption
 
@@ -392,7 +392,7 @@ def loot_credentials(smb_conn: ImpacketSMBConnection, dpapi_userkey: str) -> Lis
     return looter.loot_all_credentials()
 
 
-def collect_dpapi_files(smb_conn: ImpacketSMBConnection, output_dir: str) -> Dict[str, int]:
+def collect_dpapi_files(smb_conn: ImpacketSMBConnection, output_dir: str) -> Dict[str, Any]:
     """
     Convenience function for offline DPAPI file collection
 
@@ -619,6 +619,8 @@ def _decrypt_dpapi_blob_data(dpapi_blob_bytes: bytes, mk_info: MasterkeyInfo) ->
         hash_algo = HASH_ALGOS.get(dpapi_blob["HashAlgo"], SHA1)
 
         # Derive session key using key hash and salt
+        if mk_info.sha1 is None:
+            return None
         key_hash = unhexlify(mk_info.sha1)
 
         # Compute session key (using HMAC)

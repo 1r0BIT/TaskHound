@@ -369,8 +369,8 @@ def _create_principal_id(runas_user: str, local_domain: str, task: Dict, bh_conn
 
 def _create_relationship_edges(
     task: Dict,
-    computer_map: Dict[str, Tuple[str, str]],
-    user_map: Dict[str, Tuple[str, str]],
+    computer_map: Dict[str, Optional[Tuple[str, str, str]]],
+    user_map: Dict[str, Optional[Tuple[str, str, str]]],
     bh_connector=None,
     allow_orphans: bool = False,
     netbios_name: Optional[str] = None,
@@ -554,7 +554,7 @@ def resolve_object_ids_chunked(
     ldap_config: Optional[Dict] = None,
     chunk_size: int = 10,
     computer_sids: Optional[Dict[str, str]] = None
-) -> Tuple[Dict[str, Tuple[str, str]], Dict[str, Tuple[str, str]]]:
+) -> Tuple[Dict[str, Optional[Tuple[str, str, str]]], Dict[str, Optional[Tuple[str, str, str]]]]:
     """
     Resolve computer and user names to their node IDs and objectIds (SIDs) using BloodHound API.
     Falls back to LDAP if API queries fail (LDAP only provides objectId, not node_id).
@@ -583,8 +583,8 @@ def resolve_object_ids_chunked(
         Note: If resolved via LDAP fallback, node_id will be empty string: ("", "S-1-5-21-...")
     """
 
-    computer_sid_map = {}
-    user_sid_map = {}
+    computer_sid_map: Dict[str, Optional[Tuple[str, str, str]]] = {}
+    user_sid_map: Dict[str, Optional[Tuple[str, str, str]]] = {}
 
     # Initialize cache
     cache = get_cache()
@@ -594,7 +594,7 @@ def resolve_object_ids_chunked(
         items_list = sorted(items)  # Sort for consistent ordering
         return [items_list[i:i + size] for i in range(0, len(items_list), size)]
 
-    def _query_bloodhound_with_sid_validation(names_with_sids: Dict[str, str], node_type: str) -> Dict[str, Tuple[str, str]]:
+    def _query_bloodhound_with_sid_validation(names_with_sids: Dict[str, str], node_type: str) -> Dict[str, Tuple[str, str, str]]:
         """
         Query BloodHound API by name but VALIDATE with SID for correctness.
 
@@ -630,7 +630,7 @@ def resolve_object_ids_chunked(
                 nodes = data.get("data", {}).get("nodes", {})
 
                 # Group nodes by name to detect duplicates
-                nodes_by_name = {}
+                nodes_by_name: Dict[str, List[Tuple[str, str, str]]] = {}
                 for node_id, node in nodes.items():
                     name = node.get("label")
                     object_id = node.get("objectId")
@@ -675,12 +675,12 @@ def resolve_object_ids_chunked(
                 return {}
         except Exception as e:
             warn(f"Error querying BloodHound with SID validation: {e}")
-            if debug:
+            if debug:  # type: ignore[truthy-function]  # intentional: guard debug-only traceback
                 import traceback
                 traceback.print_exc()
             return {}
 
-    def _query_bloodhound_chunk(names: List[str], node_type: str) -> Dict[str, Tuple[str, str]]:
+    def _query_bloodhound_chunk(names: List[str], node_type: str) -> Dict[str, Tuple[str, str, str]]:
         """
         Query BloodHound API for a chunk of names using the connector.
 
@@ -726,7 +726,7 @@ def resolve_object_ids_chunked(
             debug(traceback.format_exc())
             return {}
 
-    def _query_bloodhound_by_sid_chunk(sids: List[str], node_type: str) -> Dict[str, Tuple[str, str]]:
+    def _query_bloodhound_by_sid_chunk(sids: List[str], node_type: str) -> Dict[str, Tuple[str, str, str]]:
         """
         Query BloodHound API for a chunk of SIDs (objectIds).
 
@@ -769,7 +769,7 @@ def resolve_object_ids_chunked(
             debug(traceback.format_exc())
             return {}
 
-    def _ldap_fallback(names: List[str], is_computer: bool) -> Dict[str, Tuple[str, str]]:
+    def _ldap_fallback(names: List[str], is_computer: bool) -> Dict[str, Tuple[str, str, str]]:
         """
         Fallback to LDAP for resolving names to SIDs.
         Note: LDAP can only provide objectId (SID), not the BloodHound node_id.

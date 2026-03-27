@@ -44,11 +44,11 @@ def smb_connect(
     target: str,
     domain: str,
     username: str,
-    password: str = None,
+    password: Optional[str] = None,
     kerberos: bool = False,
-    dc_ip: str = None,
+    dc_ip: Optional[str] = None,
     timeout: int = 60,
-    aes_key: str = None,
+    aes_key: Optional[str] = None,
 ) -> SMBConnection:
     # Create and authenticate an SMBConnection to `target`.
     #
@@ -58,7 +58,7 @@ def smb_connect(
     # If an AES key is provided, Kerberos authentication is used automatically.
     smb = SMBConnection(remoteName=target, remoteHost=target, sess_port=445, timeout=timeout)
 
-    pwd, lmhash, nthash = _parse_hashes(password)
+    pwd, lmhash, nthash = _parse_hashes(password or "")
 
     # AES key implies Kerberos authentication
     if kerberos or aes_key:
@@ -108,10 +108,10 @@ def smb_login(
     smb: SMBConnection,
     domain: str,
     username: str,
-    password: str = None,
+    password: Optional[str] = None,
     kerberos: bool = False,
-    dc_ip: str = None,
-    aes_key: str = None,
+    dc_ip: Optional[str] = None,
+    aes_key: Optional[str] = None,
 ) -> None:
     """
     Authenticate an existing SMBConnection.
@@ -128,7 +128,7 @@ def smb_login(
         dc_ip: Domain controller IP (for Kerberos)
         aes_key: AES key for Kerberos authentication (128 or 256 bit)
     """
-    pwd, lmhash, nthash = _parse_hashes(password)
+    pwd, lmhash, nthash = _parse_hashes(password or "")
 
     # AES key implies Kerberos authentication
     if kerberos or aes_key:

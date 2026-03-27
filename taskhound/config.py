@@ -14,9 +14,9 @@ try:
 except ImportError:
     # Fallback for older Python versions if needed
     try:
-        import tomli as tomllib
+        import tomli as tomllib  # type: ignore[no-redef]  # conditional import fallback
     except ImportError:
-        tomllib = None
+        tomllib = None  # type: ignore[assignment]  # conditional import fallback
 
 from .utils.helpers import is_ipv4
 

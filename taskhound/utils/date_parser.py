@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Optional, Union
 
 
-def parse_timestamp(timestamp_value: Union[str, int, float]) -> Optional[datetime]:
+def parse_timestamp(timestamp_value: Union[str, int, float, None]) -> Optional[datetime]:
     """
     Convert various timestamp formats to datetime.
     Supports Windows FILETIME, Unix timestamps, and string representations.

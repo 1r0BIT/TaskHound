@@ -116,9 +116,9 @@ def _handle_opengraph(
     opengraph_output_dir = os.path.join(args.output_dir, "opengraph")
 
     # Generate OpenGraph files
-    opengraph_file = generate_opengraph_files(
+    generate_opengraph_files(
         output_dir=opengraph_output_dir,
-        tasks=all_rows,
+        tasks=list(all_rows),
         bh_connector=bh_connector,
         ldap_config=ldap_config,
         allow_orphans=getattr(args, "bh_allow_orphans", False),
@@ -127,7 +127,7 @@ def _handle_opengraph(
     )
 
     # Upload to BloodHound if not disabled and we have credentials
-    _upload_opengraph(bh_config, opengraph_file, opengraph_json_path)
+    _upload_opengraph(bh_config, None, opengraph_json_path)
 
 
 def _upload_opengraph(bh_config: Any, opengraph_file: Optional[str], json_data_path: Optional[str] = None) -> None:
@@ -344,7 +344,7 @@ def _auto_discover_targets(args: Any, bh_config: Any) -> List[str]:
     filter_msg = f" ({', '.join(filter_parts)})" if filter_parts else ""
 
     # Try BloodHound first
-    computers = []
+    computers: list[str] = []
     source = None
 
     if bh_config and bh_config.has_credentials():
@@ -436,7 +436,7 @@ def _enumerate_from_bloodhound(
         info(f"BloodHound data is {data_age_days} days old", verbose_only=True)
 
     # Apply filters
-    filtered = []
+    filtered: list[str] = []
     stats = {"total": len(all_computers), "disabled": 0, "stale": 0, "dc": 0, "os_filter": 0}
     now_ts = int(time.time())
 

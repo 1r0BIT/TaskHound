@@ -13,7 +13,7 @@
 #   Tier 4: LDAP (domain controller)
 #   Tier 5: Global Catalog (forest-wide, cross-domain)
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from ..utils.cache_manager import get_cache
 from ..utils.logging import debug, info
@@ -121,6 +121,7 @@ def resolve_sid(
     # =========================================================================
     # Tier 0: Well-known SIDs (instant, no network)
     # =========================================================================
+    resolved: Optional[str]
     if sid in WELL_KNOWN_SIDS:
         resolved = WELL_KNOWN_SIDS[sid]
         debug(f"[Tier 0] Well-known SID: {sid} → {resolved}")
@@ -223,7 +224,7 @@ def resolve_sid(
         if sid_prefix_local:
             debug(f"[Tier 3.5] Trying DC LSARPC for local domain SID: {sid}")
             resolved = resolve_sid_via_dc_lsarpc(
-                sid, dc_ip, domain, username, password, hashes, kerberos, aes_key
+                sid, dc_ip, domain or "", username, password, hashes, kerberos, aes_key
             )
             if resolved:
                 debug(f"[Tier 3.5] DC LSARPC: {sid} → {resolved}")
@@ -233,10 +234,10 @@ def resolve_sid(
     # =========================================================================
     # Tier 4: LDAP (domain controller)
     # =========================================================================
-    ldap_auth_domain = ldap_domain or domain
-    ldap_auth_user = ldap_user or username
-    ldap_auth_password = ldap_password or password
-    ldap_auth_hashes = ldap_hashes or hashes
+    ldap_auth_domain: Optional[str] = ldap_domain or domain
+    ldap_auth_user: Optional[str] = ldap_user or username
+    ldap_auth_password: Optional[str] = ldap_password or password
+    ldap_auth_hashes: Optional[str] = ldap_hashes or hashes
     use_kerberos_for_ldap = kerberos and not (ldap_password or ldap_hashes)
 
     if not no_ldap and ldap_auth_domain and ldap_auth_user:
@@ -294,7 +295,7 @@ def _resolve_foreign_sid(
     ldap_hashes: Optional[str],
     gc_server: Optional[str],
     cache: Any,
-    cache_success: callable,
+    cache_success: Callable[..., Any],
 ) -> Tuple[str, Optional[str]]:
     """
     Handle resolution for foreign domain SIDs (different domain than local).
@@ -305,6 +306,7 @@ def _resolve_foreign_sid(
     - Unknown domain: DC LSARPC → well-known RID fallback
     """
     debug(f"[Foreign] Handling foreign domain SID: {sid}")
+    trust_fqdn: Optional[str]
 
     # CASE 1: Known external trust (different forest - GC won't help)
     if trust_data and is_external_trust(trust_data):
@@ -322,7 +324,7 @@ def _resolve_foreign_sid(
         # Try DC LSARPC (DC can follow trust paths)
         if not no_rpc and dc_ip and username:
             resolved = resolve_sid_via_dc_lsarpc(
-                sid, dc_ip, domain, username, password, hashes, kerberos, aes_key
+                sid, dc_ip, domain or "", username, password, hashes, kerberos, aes_key
             )
             if resolved:
                 debug(f"[Foreign] DC LSARPC: {sid} → {resolved}")
@@ -347,7 +349,7 @@ def _resolve_foreign_sid(
         # Try DC LSARPC
         if not no_rpc and dc_ip and username:
             resolved = resolve_sid_via_dc_lsarpc(
-                sid, dc_ip, domain, username, password, hashes, kerberos, aes_key
+                sid, dc_ip, domain or "", username, password, hashes, kerberos, aes_key
             )
             if resolved:
                 debug(f"[Foreign] DC LSARPC: {sid} → {resolved}")
@@ -371,7 +373,7 @@ def _resolve_foreign_sid(
     # Try DC LSARPC first
     if not no_rpc and dc_ip and username:
         resolved = resolve_sid_via_dc_lsarpc(
-            sid, dc_ip, domain, username, password, hashes, kerberos, aes_key
+            sid, dc_ip, domain or "", username, password, hashes, kerberos, aes_key
         )
         if resolved:
             debug(f"[Foreign] DC LSARPC: {sid} → {resolved}")
@@ -379,10 +381,10 @@ def _resolve_foreign_sid(
             return f"{resolved} ({sid})", resolved
 
     # Try Global Catalog
-    ldap_auth_domain = ldap_domain or domain
-    ldap_auth_user = ldap_user or username
-    ldap_auth_password = ldap_password or password
-    ldap_auth_hashes = ldap_hashes or hashes
+    ldap_auth_domain: Optional[str] = ldap_domain or domain
+    ldap_auth_user: Optional[str] = ldap_user or username
+    ldap_auth_password: Optional[str] = ldap_password or password
+    ldap_auth_hashes: Optional[str] = ldap_hashes or hashes
     use_kerberos_for_ldap = kerberos and not (ldap_password or ldap_hashes)
 
     if not no_ldap and ldap_auth_domain and ldap_auth_user:
@@ -404,7 +406,7 @@ def _resolve_foreign_sid(
         # GC failed - handle based on trust type
         if trust_data and not is_external_trust(trust_data):
             # Intra-forest but GC failed - use trust FQDN
-            trust_name = resolve_trust_sid_to_name(sid, trust_fqdn)
+            trust_name = resolve_trust_sid_to_name(sid, trust_fqdn or "")
             if trust_name:
                 cache_success(trust_name)
                 return f"{trust_name} ({sid})", trust_name

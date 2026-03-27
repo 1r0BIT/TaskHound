@@ -23,7 +23,7 @@ def generate_opengraph_files(
     allow_orphans: bool = False,
     computer_sids: Optional[Dict[str, str]] = None,
     netbios_name: Optional[str] = None,
-) -> None:
+) -> Optional[str]:
     """
     Generates OpenGraph compatible JSON files for BloodHound.
 
@@ -92,8 +92,8 @@ def generate_opengraph_files(
     info(f"Found {len(computer_names)} unique computers and {len(user_names)} unique users")
 
     # 2. Resolve names to IDs if connector is available
-    computer_map = {}
-    user_map = {}
+    computer_map: Dict[str, Optional[tuple]] = {}
+    user_map: Dict[str, Optional[tuple]] = {}
 
     if bh_connector:
         info("Resolving Principals...")
@@ -117,8 +117,9 @@ def generate_opengraph_files(
     for name in computer_names:
         sid = None
         resolved_name = None
-        if name in computer_map and computer_map[name]:
-             _, sid, *rest = computer_map[name]
+        node_info = computer_map.get(name)
+        if node_info:
+             _, sid, *rest = node_info
              if rest:
                  resolved_name = rest[0]
 
@@ -146,8 +147,9 @@ def generate_opengraph_files(
     for name in user_names:
         sid = None
         resolved_name = None
-        if name in user_map and user_map[name]:
-             _, sid, *rest = user_map[name]
+        node_info = user_map.get(name)
+        if node_info:
+             _, sid, *rest = node_info
              if rest:
                  resolved_name = rest[0]
 
@@ -199,7 +201,7 @@ def generate_opengraph_files(
             continue
         except Exception as e:
             warn(f"Error processing task {task.get('path', 'unknown')}: {e}")
-            if debug:
+            if debug:  # type: ignore[truthy-function]  # intentional: guard debug-only traceback
                 import traceback
                 debug(traceback.format_exc())
             continue
@@ -241,7 +243,7 @@ def generate_opengraph_files(
 
     except Exception as e:
         error(f"Failed to write OpenGraph files: {e}")
-        if debug:
+        if debug:  # type: ignore[truthy-function]  # intentional: guard debug-only traceback
             import traceback
             debug(traceback.format_exc())
         return None

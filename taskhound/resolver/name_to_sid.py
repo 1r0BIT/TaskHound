@@ -8,7 +8,7 @@
 #   Tier 2: BloodHound data (for computers)
 #   Tier 3: LDAP query (objectSid attribute)
 #
-# TODO: This module will contain the clean implementation
+
 
 from typing import Any, Dict, List, Optional
 

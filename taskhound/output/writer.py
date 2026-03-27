@@ -2,7 +2,7 @@ import csv
 import json
 import os
 from io import StringIO
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from rich import box
 from rich.console import Console
@@ -18,7 +18,7 @@ def _rows_to_dicts(rows: List[Any]) -> List[Dict]:
     return [row.to_dict() if hasattr(row, "to_dict") else row for row in rows]
 
 
-def _format_task_table(row_dict: Dict[str, Any], hostname: str = None) -> Table:
+def _format_task_table(row_dict: Dict[str, Any], hostname: Optional[str] = None) -> Table:
     """
     Format a single task as a Rich table matching README demo format.
 

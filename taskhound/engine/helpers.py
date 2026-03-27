@@ -477,7 +477,7 @@ def sort_tasks_by_priority(lines: List[str]) -> List[str]:
 
     # Group lines into task blocks (each block starts with a header like [TIER-0])
     blocks = []
-    current_block = []
+    current_block: list[str] = []
 
     for line in lines:
         if line.startswith("\n[") and current_block:

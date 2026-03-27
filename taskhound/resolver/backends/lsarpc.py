@@ -71,8 +71,10 @@ def resolve_sid_via_smb(sid: str, smb_connection) -> Optional[str]:
         except DCERPCException as e:
             debug(f"LSARPC lookup failed for {sid}: {e}")
         finally:
-            # Always try to close the handle if we opened it
-            pass
+            try:
+                lsad.hLsarClose(dce, policyHandle)
+            except Exception:
+                pass
 
         dce.disconnect()
 

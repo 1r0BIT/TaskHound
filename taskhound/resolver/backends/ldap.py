@@ -4,7 +4,7 @@
 
 import socket
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
@@ -110,6 +110,8 @@ def resolve_sid_via_ldap(
 
                         if username_resolved:
                             info(f"Resolved SID {sid} to {username_resolved} via LDAP")
+                            if isinstance(username_resolved, list):
+                                username_resolved = username_resolved[0]
                             return username_resolved.strip()
                         else:
                             debug(f"No usable name attribute found in LDAP entry for SID {sid}")
@@ -203,6 +205,9 @@ def resolve_name_to_sid_via_ldap(
                 return None
 
         # Get LDAP connection using shared utility
+        if not username:
+            debug("No username provided for LDAP name resolution")
+            return None
         try:
             conn = get_ldap_connection(
                 dc_ip=dc_ip,
@@ -245,15 +250,15 @@ def resolve_name_to_sid_via_ldap(
             if search_results:
                 for entry in search_results:
                     if isinstance(entry, ldapasn1_impacket.SearchResultEntry):
-                        attributes = {}
+                        attributes: Dict[str, Any] = {}
                         for attribute in entry["attributes"]:
                             attr_name = str(attribute["type"])
                             # objectSid is binary, keep as bytes
                             if attr_name.lower() == "objectsid":
-                                attr_vals = [bytes(val) for val in attribute["vals"]]
+                                raw_vals: List[Union[bytes, str]] = [bytes(val) for val in attribute["vals"]]
                             else:
-                                attr_vals = [str(val) for val in attribute["vals"]]
-                            attributes[attr_name] = attr_vals[0] if len(attr_vals) == 1 else attr_vals
+                                raw_vals = [str(val) for val in attribute["vals"]]
+                            attributes[attr_name] = raw_vals[0] if len(raw_vals) == 1 else raw_vals
 
                         # Extract the binary objectSid
                         binary_sid_data = attributes.get("objectSid")
@@ -296,7 +301,7 @@ def batch_get_user_attributes(
     hashes: Optional[str] = None,
     kerberos: bool = False,
     aes_key: Optional[str] = None,
-    attributes: List[str] = None,
+    attributes: Optional[List[str]] = None,
 ) -> Dict[str, Dict]:
     """
     Batch query LDAP for user attributes (pwdLastSet, etc.).
@@ -361,6 +366,10 @@ def batch_get_user_attributes(
 
     debug(f"Querying LDAP for {len(users_needing_query)} users (cached: {len(results)})")
 
+    if not username:
+        debug("No username provided for batch user attribute lookup")
+        return results
+
     try:
         conn = get_ldap_connection(
             dc_ip=dc_ip,
@@ -403,8 +412,8 @@ def batch_get_user_attributes(
             if search_results:
                 for entry in search_results:
                     if isinstance(entry, ldapasn1_impacket.SearchResultEntry):
-                        entry_attrs = {}
-                        sam_name = None
+                        entry_attrs: Dict[str, Any] = {}
+                        sam_name: Optional[str] = None
 
                         for attribute in entry["attributes"]:
                             attr_name = str(attribute["type"])

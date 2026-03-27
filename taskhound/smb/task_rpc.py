@@ -648,6 +648,8 @@ class TaskSchedulerRPC:
                 log_debug(f"Using Kerberos authentication for RPC (KDC: {kdc_host})")
 
             self._dce = rpc_transport.get_dce_rpc()
+            if self._dce is None:
+                return False
             # PKT_PRIVACY is REQUIRED - lower auth levels get access denied
             self._dce.set_auth_level(RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
             # For Kerberos, must set GSS_NEGOTIATE auth type BEFORE connect()

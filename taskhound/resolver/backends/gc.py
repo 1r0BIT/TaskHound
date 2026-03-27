@@ -160,6 +160,8 @@ def resolve_sid_via_global_catalog(
 
                         if username_resolved:
                             # Sanity check: ensure we didn't get the SID back as the "name"
+                            if isinstance(username_resolved, list):
+                                username_resolved = username_resolved[0]
                             resolved_str = username_resolved.strip()
                             if resolved_str.startswith("S-1-") or resolved_str == sid:
                                 debug(f"GC returned SID as name attribute for {sid} - treating as not found")

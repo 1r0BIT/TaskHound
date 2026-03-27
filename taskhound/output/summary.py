@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, Dict, List, Optional
 
 from ..utils.console import console
 from ..utils.console import print_summary_table as rich_summary_table
@@ -78,7 +78,7 @@ def _clean_failure_reason(reason: str) -> str:
     return reason
 
 
-def print_summary_table(all_rows: List[Any], backup_dir: str = None, has_hv_data: bool = False, has_tier0_detection: bool = False):
+def print_summary_table(all_rows: List[Any], backup_dir: Optional[str] = None, has_hv_data: bool = False, has_tier0_detection: bool = False):
     """Print a nicely formatted summary table showing task counts per host."""
     if not all_rows:
         return
@@ -87,7 +87,7 @@ def print_summary_table(all_rows: List[Any], backup_dir: str = None, has_hv_data
     has_hv = has_hv_data or has_tier0_detection
 
     # Aggregate data by host
-    host_stats = {}
+    host_stats: Dict[str, Dict[str, Any]] = {}
     for row in all_rows:
         # Support both dict and TaskRow objects
         row_dict = row.to_dict() if hasattr(row, "to_dict") else row

@@ -95,7 +95,7 @@ def print_task_table(
     console.print(table)
 
 
-def format_trigger_info(meta: Dict[str, str]) -> Optional[str]:
+def format_trigger_info(meta: Dict[str, Optional[str]]) -> Optional[str]:
     """Format trigger information for display"""
     trigger_type = meta.get("trigger_type")
     if not trigger_type:
@@ -444,7 +444,7 @@ def format_block(
     ldap_user: Optional[str] = None,
     ldap_password: Optional[str] = None,
     ldap_hashes: Optional[str] = None,
-    meta: Optional[Dict[str, str]] = None,
+    meta: Optional[Dict[str, Optional[str]]] = None,
     decrypted_creds: Optional[List] = None,
     concise: bool = False,
     cred_validation: Optional[Dict[str, Any]] = None,
@@ -479,22 +479,22 @@ def format_block(
         resolved_username = resolved_runas
     else:
         # Resolve SID in RunAs field for better display (uses 4-tier fallback: offline BH → API → SMB → LDAP)
-        display_runas, resolved_username = format_runas_with_sid_resolution(
+        display_runas, resolved_username = format_runas_with_sid_resolution(  # type: ignore[assignment]  # resolved_username may be None
             runas,
-            hv,
-            bh_connector,
-            smb_connection,
-            no_ldap,
-            domain,
-            dc_ip,
-            username,
-            password,
-            hashes,
-            kerberos,
-            ldap_domain,
-            ldap_user,
-            ldap_password,
-            ldap_hashes,
+            hv_loader=hv,
+            bh_connector=bh_connector,
+            smb_connection=smb_connection,
+            no_ldap=no_ldap,
+            domain=domain,
+            dc_ip=dc_ip,
+            username=username,
+            password=password,
+            hashes=hashes,
+            kerberos=kerberos,
+            ldap_domain=ldap_domain,
+            ldap_user=ldap_user,
+            ldap_password=ldap_password,
+            ldap_hashes=ldap_hashes,
         )
 
     if concise:

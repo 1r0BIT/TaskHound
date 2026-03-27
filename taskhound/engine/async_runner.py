@@ -23,6 +23,7 @@ from rich.progress import (
     MofNCompleteColumn,
     Progress,
     SpinnerColumn,
+    TaskID,
     TaskProgressColumn,
     TextColumn,
     TimeElapsedColumn,
@@ -125,7 +126,7 @@ class AsyncTaskHound:
 
         # Rich progress bar
         self._progress: Optional[Progress] = None
-        self._task_id: Optional[int] = None
+        self._task_id: Optional[TaskID] = None
 
     def _start_rate_limiter(self) -> None:
         """Start background thread that releases rate limiter tokens."""
@@ -182,7 +183,7 @@ class AsyncTaskHound:
         result = TargetResult(target=target, success=False)
 
         # Each worker gets its own row collector
-        target_rows: List[Dict[str, Any]] = []
+        target_rows: List[TaskRow] = []
 
         try:
             # Call the actual processing function
@@ -409,7 +410,7 @@ class AsyncTaskHound:
                     time.sleep(jitter_delay)
 
                 result = TargetResult(target=target, success=False)
-                target_rows: List[Dict[str, Any]] = []
+                target_rows: List[TaskRow] = []
                 target_start = time.perf_counter()
 
                 try:
@@ -488,7 +489,7 @@ class AsyncTaskHound:
             print_fn(lines)
 
 
-def aggregate_results(results: List[TargetResult]) -> Tuple[List[Dict[str, Any]], List[LAPSFailure], int]:
+def aggregate_results(results: List[TargetResult]) -> Tuple[List[TaskRow], List[LAPSFailure], int]:
     """
     Aggregate results from parallel processing.
 
@@ -498,7 +499,7 @@ def aggregate_results(results: List[TargetResult]) -> Tuple[List[Dict[str, Any]]
     Returns:
         Tuple of (all_rows, laps_failures, laps_successes)
     """
-    all_rows: List[Dict[str, Any]] = []
+    all_rows: List[TaskRow] = []
     laps_failures: List[LAPSFailure] = []
     laps_successes = 0
 

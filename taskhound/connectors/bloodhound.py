@@ -17,7 +17,7 @@ import requests
 try:
     from neo4j import GraphDatabase
 except ImportError:
-    GraphDatabase = None
+    GraphDatabase = None  # type: ignore[assignment, misc]  # conditional import fallback
 from ..resolver import TrustInfo
 from ..utils.bh_auth import BloodHoundAuthenticator
 from ..utils.helpers import sanitize_json_string
@@ -74,7 +74,7 @@ class BloodHoundConnector:
         self.api_key = api_key
         self.api_key_id = api_key_id
         self.timeout = timeout
-        self.users_data = {}
+        self.users_data: Dict[str, Any] = {}
 
         # Initialize authenticator for BHCE
         # ip can be a full URI (http://host:port) or just hostname
@@ -140,7 +140,7 @@ class BloodHoundConnector:
 
         try:
             uri = f"bolt://{self.ip}:7687"
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))
+            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
 
             with driver.session() as session:
                 result = session.run(query)
@@ -226,7 +226,7 @@ class BloodHoundConnector:
             # Parse BHCE results - handle the actual BHCE response format
             if "data" in result:
                 response_data = result["data"]
-                users_found = set()  # Track unique users
+                users_found: set[str] = set()  # Track unique users
 
                 # BHCE returns nodes in a different format than expected
                 if "nodes" in response_data:
@@ -306,12 +306,15 @@ class BloodHoundConnector:
         uri = f"bolt://{self.ip}:7687"
 
         try:
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))
+            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
 
             # Test connection
             with driver.session() as session:
                 result = session.run("MATCH (n) RETURN count(n) LIMIT 1")
-                result.single()[0]  # This will raise an exception if connection fails
+                record = result.single()
+                if record is None:
+                    return False
+                record[0]  # This will raise an exception if connection fails
 
             status(f"[+] Connected to Legacy BloodHound at {self.ip}:7687")
             status("[*] Collecting high-value user data from BloodHound (be patient)")
@@ -352,7 +355,7 @@ class BloodHoundConnector:
 
         try:
             with driver.session() as session:
-                users_found = set()
+                users_found: set[str] = set()
 
                 # Single comprehensive query instead of multiple queries
                 try:
@@ -562,7 +565,7 @@ class BloodHoundConnector:
                     return computers
 
                 uri = f"bolt://{self.ip}:7687"
-                driver = GraphDatabase.driver(uri, auth=(self.username, self.password))
+                driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
 
                 with driver.session() as session:
                     result = session.run(query)
@@ -713,7 +716,7 @@ class BloodHoundConnector:
                         result[target_sid] = TrustInfo(
                             fqdn=target_name,
                             is_intra_forest=is_intra_forest,
-                            trust_attributes=None,  # BloodHound doesn't expose this
+                            trust_attributes=0,  # BloodHound doesn't expose this
                         )
                         trust_type = "intra-forest" if is_intra_forest else "external"
                         debug(f"Trust type for {target_name}: {trust_type}")
@@ -875,7 +878,7 @@ class BloodHoundConnector:
         uri = f"bolt://{self.ip}:7687"
 
         try:
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))
+            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
             identifier = identifier.strip()
 
             # Determine query type based on identifier format
@@ -1061,7 +1064,7 @@ class BloodHoundConnector:
             query = f"MATCH (u:User) WHERE toLower(u.samaccountname) = '{query_username.lower()}' RETURN u"
 
             uri = f"bolt://{self.ip}:7687"
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))
+            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
 
             with driver.session() as session:
                 result = session.run(query)
@@ -1110,7 +1113,7 @@ class BloodHoundConnector:
             debug(f"Error querying Legacy BH gMSA status for '{username}': {e}")
             return None
 
-    def validate_and_resolve_cross_domain_user(self, netbios_domain: str, username: str) -> Optional[Dict[str, str]]:
+    def validate_and_resolve_cross_domain_user(self, netbios_domain: str, username: str) -> Optional[Dict[str, Optional[str]]]:
         """
         Complete cross-domain user resolution workflow:
         1. Resolve NETBIOS domain to FQDN via BloodHound
