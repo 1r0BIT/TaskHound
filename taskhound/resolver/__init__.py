@@ -10,6 +10,7 @@
 # Backend access (for advanced usage)
 from .backends import (
     batch_get_user_attributes,
+    extract_domain_sid_from_hv,
     get_discovered_gc_server,
     get_user_pwd_last_set,
     resolve_name_to_sid_via_ldap,
@@ -26,7 +27,6 @@ from .constants import (
     WELL_KNOWN_LOCAL_RIDS,
     WELL_KNOWN_SIDS,
     binary_to_sid,
-    extract_domain_sid_from_hv,
     get_domain_sid_prefix,
     is_sid,
     looks_like_domain_user,

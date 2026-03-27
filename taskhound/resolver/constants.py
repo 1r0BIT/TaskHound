@@ -6,7 +6,7 @@
 import re
 import struct
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Optional
 
 from ..utils.logging import debug
 
@@ -335,47 +335,3 @@ def looks_like_domain_user(runas: str) -> bool:
 
     # If username contains @ (UPN format), it's likely a domain user
     return "@" in val
-
-
-def extract_domain_sid_from_hv(hv_loader: Optional[Any]) -> Optional[str]:
-    """
-    Extract domain SID from BloodHound data. Returns Admin SID (RID 500) for testing.
-
-    Searches through all available SID sources in the HighValueLoader and returns
-    the first valid domain SID with RID 500 appended (well-known Administrator).
-
-    Args:
-        hv_loader: HighValueLoader instance with BloodHound data
-
-    Returns:
-        Domain SID with RID 500 (e.g., "S-1-5-21-XXX-XXX-XXX-500") or None if not found
-    """
-    if not hv_loader or not getattr(hv_loader, "loaded", False):
-        return None
-
-    # Try hv_sids first (keys are SIDs, values are metadata)
-    hv_sids = getattr(hv_loader, "hv_sids", {})
-    for sid in hv_sids:
-        if sid and sid.startswith("S-1-5-21-"):
-            parts = sid.split("-")
-            if len(parts) >= 7:
-                domain_sid = "-".join(parts[:-1])
-                return f"{domain_sid}-500"
-
-    # Try other sources (values contain 'objectid' or 'sid' fields)
-    sid_sources = [
-        getattr(hv_loader, "hv_users", {}),
-        getattr(hv_loader, "tier_zero_users", {}),
-        getattr(hv_loader, "high_value_users", {}),
-    ]
-
-    for source in sid_sources:
-        for item in source.values():
-            sid = item.get("objectid") or item.get("sid")
-            if sid and sid.startswith("S-1-5-21-"):
-                parts = sid.split("-")
-                if len(parts) >= 7:
-                    domain_sid = "-".join(parts[:-1])
-                    return f"{domain_sid}-500"
-
-    return None

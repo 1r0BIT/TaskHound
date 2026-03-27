@@ -1,7 +1,8 @@
 from typing import Optional
 
+from ..resolver import extract_domain_sid_from_hv
+from ..resolver.backends import resolve_sid_via_ldap
 from .logging import good, info, warn
-from .sid_resolver import extract_domain_sid_from_hv, resolve_sid_via_ldap
 
 
 def verify_ldap_connection(
