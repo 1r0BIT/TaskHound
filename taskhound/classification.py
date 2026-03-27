@@ -230,8 +230,12 @@ def classify_task(
         lookup_user = runas
         if is_sid(runas) and resolved_runas:
             lookup_user = resolved_runas
+        # Only query the cache when there is an explicit domain qualifier or the original
+        # runas was a domain SID — bare names resolve to LOCAL accounts first per
+        # LookupAccountName() and must not be matched against domain tier-0 data.
+        has_domain_qualifier = "\\" in lookup_user or "@" in lookup_user or is_sid(runas)
         norm_user = lookup_user.split("\\")[-1].lower() if "\\" in lookup_user else lookup_user.lower()
-        tier0_result = tier0_cache.get(norm_user)
+        tier0_result = tier0_cache.get(norm_user) if has_domain_qualifier else None
 
         if tier0_result:
             is_tier0, groups = tier0_result

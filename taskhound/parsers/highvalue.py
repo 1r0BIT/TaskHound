@@ -556,8 +556,13 @@ class HighValueLoader:
         # SID form
         if val.upper().startswith("S-1-5-"):
             return val.upper() in self.hv_sids  # Convert to uppercase for consistent lookup
-        # NETBIOS\sam or just sam
-        sam = val.split("\\", 1)[1].lower() if "\\" in val else val.lower()
+        # Bare names (no domain prefix, no UPN @) resolve to LOCAL accounts first per
+        # LookupAccountName() order: built-in/local → primary domain → trusted domains.
+        # Never match a bare name against domain data — require an explicit qualifier.
+        if "\\" not in val and "@" not in val:
+            return False
+        # NETBIOS\sam
+        sam = val.split("\\", 1)[1].lower()
         return sam in self.hv_users
 
     def check_tier0(self, runas: str) -> tuple[bool, list[str]]:
@@ -576,9 +581,14 @@ class HighValueLoader:
         # Look up user data from BloodHound
         if val.upper().startswith("S-1-5-"):
             user_data = self.hv_sids.get(val.upper())  # Convert to uppercase for consistent lookup
+        elif "\\" not in val and "@" not in val:
+            # Bare names (no domain prefix, no UPN @) resolve to LOCAL accounts first per
+            # LookupAccountName() order: built-in/local → primary domain → trusted domains.
+            # Never match a bare name against domain data — require an explicit qualifier.
+            pass
         else:
-            # NETBIOS\sam or just sam
-            sam = val.split("\\", 1)[1].lower() if "\\" in val else val.lower()
+            # NETBIOS\sam
+            sam = val.split("\\", 1)[1].lower()
             user_data = self.hv_users.get(sam)
 
         if not user_data:

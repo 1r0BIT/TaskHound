@@ -262,6 +262,11 @@ def _create_principal_id(runas_user: str, local_domain: str, task: Dict, bh_conn
         domain_prefix = domain_prefix.strip().upper()
         user = user.strip().upper()
 
+        # Explicit local account per MS-TSCH spec format 3 (.\username)
+        if domain_prefix == ".":
+            debug(f"Skipping explicit local account '{runas_user}' on {task.get('host', 'unknown')}: {task.get('path', 'unknown')}")
+            return None
+
         # Use provided NetBIOS name, or derive from FQDN first part as fallback
         # The NetBIOS name can differ from FQDN first part (e.g., corp.example.com -> YOURCOMPANY)
         if local_netbios:
@@ -329,17 +334,37 @@ def _create_principal_id(runas_user: str, local_domain: str, task: Dict, bh_conn
         # Use full FQDN format
         return f"{user}@{local_domain}"
     else:
-        # No domain prefix and no @ - assume local domain
-        # This is ambiguous: could be local account or domain account
-        # MS-TSCH spec defines .\user for local, DOMAIN\user for domain
-        # Plain samaccountname is non-standard - warn user about assumption
-        user = runas_user.strip().upper()
+        # No domain prefix and no @ - potentially ambiguous
+        # Per LookupAccountName() order, local accounts are resolved BEFORE domain.
+        # Well-known local account names always resolve to local, never domain.
+        user = runas_user.strip()
         task_path = task.get("path", "unknown")
         hostname = task.get("host", "unknown")
+
+        KNOWN_LOCAL_ACCOUNTS = {
+            "administrator", "guest", "defaultaccount", "wdagutilityaccount",
+            "gast",  # German: guest
+        }
+        if user.lower() in KNOWN_LOCAL_ACCOUNTS:
+            debug(f"Skipping known local account '{user}' on {hostname}: {task_path}")
+            return None
+
+        # Check per-host dynamic local account cache (populated by SAMR during scan)
+        hostname_key = hostname.upper()
+        if hostname_key:
+            _cache = get_cache()
+            local_users = (_cache.get("local_users", hostname_key) if _cache else None) or {}
+            if user.lower() in local_users:
+                rid = local_users[user.lower()]
+                debug(f"Skipping per-host local account '{user}' (RID {rid}) on {hostname}: {task_path}")
+                return None
+
+        # Other bare names remain ambiguous - assume domain with a warning
+        # MS-TSCH spec uses .\user for local, DOMAIN\user for domain
         warn(f"Ambiguous principal on {hostname}: {task_path}")
-        warn(f"  RunAs: '{runas_user}' (no domain prefix) - assuming domain account {user}@{local_domain}")
+        warn(f"  RunAs: '{runas_user}' (no domain prefix) - assuming domain account {user.upper()}@{local_domain}")
         warn(f"  If this is a local account, it should be '.\\{runas_user}' per MS-TSCH spec")
-        return f"{user}@{local_domain}"
+        return f"{user.upper()}@{local_domain}"
 
 
 def _create_relationship_edges(

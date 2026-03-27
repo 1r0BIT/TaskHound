@@ -333,6 +333,12 @@ def process_target(
                 log_debug(f"{target}: Credential Guard status unknown (Remote Registry service likely disabled)")
         elif credguard_detect and no_rpc:
             log_debug(f"{target}: Skipping Credential Guard check (--no-rpc mode)")
+
+        # Enumerate local accounts for dynamic bare-name resolution in OpenGraph
+        # Non-fatal: silently returns {} if SAMR is blocked or fails
+        if not no_rpc:
+            from ..smb.local_users import enumerate_local_users
+            enumerate_local_users(smb, server_fqdn)
     except Exception as e:
         if debug:
             traceback.print_exc()
