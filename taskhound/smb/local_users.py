@@ -38,10 +38,12 @@ def enumerate_local_users(smb: "SMBConnection", hostname: str) -> Dict[str, int]
     cache_key = hostname.upper()
 
     # Return cached result immediately — zero extra RPC calls after first scan
-    cached = get_cache().get(_CACHE_CATEGORY, cache_key)
-    if cached is not None:
-        debug(f"{hostname}: Using cached local user list ({len(cached)} accounts)")
-        return cached
+    _cache = get_cache()
+    if _cache:
+        cached = _cache.get(_CACHE_CATEGORY, cache_key)
+        if cached is not None:
+            debug(f"{hostname}: Using cached local user list ({len(cached)} accounts)")
+            return cached
 
     try:
         # Reuse the existing SMB session for the SAMR named pipe
@@ -88,21 +90,24 @@ def enumerate_local_users(smb: "SMBConnection", hostname: str) -> Dict[str, int]
                     name = str(entry["Name"])
                     rid = entry["RelativeId"]
                     result[name.lower()] = rid
-                enum_context = resp["EnumerationContext"]
-                if enum_context == 0:
-                    break
+                # No STATUS_MORE_ENTRIES — this is the final page.
+                break
             except Exception as page_err:
                 # STATUS_MORE_ENTRIES is raised as an exception by impacket
                 if "STATUS_MORE_ENTRIES" in str(page_err):
-                    # More data available — update context and continue
+                    # More data available — extract entries and advance context
                     try:
-                        resp = page_err.get_packet()  # type: ignore[attr-defined]
-                        enum_context = resp["EnumerationContext"]
+                        resp = page_err.get_packet()  # type: ignore[attr-defined]  # impacket raises exception with packet data
+                        new_context = resp["EnumerationContext"]
                         entries = resp["Buffer"]["Buffer"]
                         for entry in entries:
                             name = str(entry["Name"])
                             rid = entry["RelativeId"]
                             result[name.lower()] = rid
+                        # Guard against server returning same context (infinite loop)
+                        if new_context == enum_context:
+                            break
+                        enum_context = new_context
                     except Exception:
                         break
                     continue
@@ -117,7 +122,9 @@ def enumerate_local_users(smb: "SMBConnection", hostname: str) -> Dict[str, int]
         dce.disconnect()
 
         # Cache and report
-        get_cache().set(_CACHE_CATEGORY, cache_key, result, ttl_hours=_CACHE_TTL_HOURS)
+        _cache = get_cache()
+        if _cache:
+            _cache.set(_CACHE_CATEGORY, cache_key, result, ttl_hours=_CACHE_TTL_HOURS)
         info(f"{hostname}: Discovered {len(result)} local user accounts via SAMR (RID 500 = '{_admin_name(result)}')")
         return result
 
