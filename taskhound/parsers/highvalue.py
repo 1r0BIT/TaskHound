@@ -561,8 +561,11 @@ class HighValueLoader:
         # Never match a bare name against domain data — require an explicit qualifier.
         if "\\" not in val and "@" not in val:
             return False
-        # NETBIOS\sam
-        sam = val.split("\\", 1)[1].lower()
+        # NETBIOS\sam or UPN user@domain
+        if "\\" in val:
+            sam = val.split("\\", 1)[1].lower()
+        else:
+            sam = val.split("@", 1)[0].lower()
         return sam in self.hv_users
 
     def check_tier0(self, runas: str) -> tuple[bool, list[str]]:
@@ -586,9 +589,13 @@ class HighValueLoader:
             # LookupAccountName() order: built-in/local → primary domain → trusted domains.
             # Never match a bare name against domain data — require an explicit qualifier.
             pass
-        else:
+        elif "\\" in val:
             # NETBIOS\sam
             sam = val.split("\\", 1)[1].lower()
+            user_data = self.hv_users.get(sam)
+        else:
+            # UPN format: user@domain
+            sam = val.split("@", 1)[0].lower()
             user_data = self.hv_users.get(sam)
 
         if not user_data:
