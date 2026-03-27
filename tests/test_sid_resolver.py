@@ -788,10 +788,10 @@ class TestExternalTrustPrefixCaching:
 
     def test_external_trust_prefixes_set_exists(self):
         """Module should have _external_trust_prefixes set"""
-        from taskhound.utils import sid_resolver
+        from taskhound.resolver import trusts
 
-        assert hasattr(sid_resolver, '_external_trust_prefixes')
-        assert isinstance(sid_resolver._external_trust_prefixes, set)
+        assert hasattr(trusts, '_external_trust_prefixes')
+        assert isinstance(trusts._external_trust_prefixes, set)
 
     def test_resolve_unknown_sid_distinguishes_well_known_from_fallback(self):
         """resolve_unknown_sid_to_local_name returns proper names for well-known vs custom RIDs"""
