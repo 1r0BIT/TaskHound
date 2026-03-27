@@ -1,6 +1,9 @@
 # =============================================================================
 # SENSITIVE FILES - DO NOT COMMIT!
 # =============================================================================
+# Local-only Claude Code skills (contain lab credentials)
+.claude/skills/
+
 # Configuration files with credentials
 config/*.bak
 .env
