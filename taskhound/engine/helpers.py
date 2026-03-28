@@ -670,6 +670,37 @@ def perform_lsa_service_looting(
     return out_lines
 
 
+def _map_lsa_creds_to_service_rows(
+    service_rows: List[Any],
+    credentials: List[Any],
+    target: str,
+) -> None:
+    """Map already-extracted LSA credentials to service rows (in-place).
+
+    Used when LSA extraction was already performed earlier in process_target
+    (for DPAPI key extraction). Avoids a second LSA extraction pass.
+    """
+    matched = 0
+    for cred in credentials:
+        for row in service_rows:
+            if row.is_gmsa:
+                continue
+            if cred.service_name and cred.service_name == row.service_name:
+                row.decrypted_password = cred.password
+                matched += 1
+                break
+            elif cred.account and row.start_name:
+                cred_user = cred.account.split("\\")[-1].lower() if "\\" in cred.account else cred.account.lower()
+                row_user = row.start_name.split("\\")[-1].lower() if "\\" in row.start_name else row.start_name.lower()
+                if cred_user == row_user:
+                    row.decrypted_password = cred.password
+                    matched += 1
+                    break
+
+    if matched:
+        good(f"{target}: Matched {matched} LSA credential(s) to service accounts")
+
+
 def sort_tasks_by_priority(lines: List[str]) -> List[str]:
     """
     Sort task blocks by priority: TIER-0 > PRIV > TASK.

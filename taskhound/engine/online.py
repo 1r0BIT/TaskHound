@@ -101,6 +101,7 @@ def process_target(
     laps_cache: Optional[LAPSCache] = None,
     validate_creds: bool = False,
     ldap_tier0: bool = False,
+    no_lsa: bool = False,
     services: bool = False,
     services_only: bool = False,
     all_service_rows: Optional[List] = None,
@@ -430,6 +431,9 @@ def process_target(
                 smb.close()
             return out_lines, laps_result
 
+    # Set hostname for all output paths (tasks + services)
+    hostname = server_fqdn if server_fqdn else target
+
     # Skip task enumeration if --services-only
     if services_only:
         items = []
@@ -516,13 +520,32 @@ def process_target(
     # Create backup directory structure if backup is requested
     backup_target_dir = setup_backup_directory(target, backup_dir, debug=debug)
 
+    # LSA extraction via registry-only approach (if --loot and not --no-lsa)
+    # This extracts DPAPI system keys AND service credentials in one pass
+    lsa_result = None
+    effective_dpapi_key = dpapi_key  # User-provided key takes priority
+    if loot and not no_lsa and not opsec:
+        from ..lsa.extractor import extract_lsa_secrets
+
+        lsa_result = extract_lsa_secrets(
+            smb,
+            server_fqdn or target,
+            kerberos=kerberos,
+            dc_host=dc_ip,
+        )
+
+        # Auto-feed DPAPI userkey for task credential decryption
+        if lsa_result.dpapi_userkey and not dpapi_key:
+            effective_dpapi_key = lsa_result.dpapi_userkey
+            info(f"{target}: Using DPAPI key from LSA extraction for task credential decryption")
+
     # Perform automatic credential looting if requested
     decrypted_creds: List[Any] = []
     if loot:
         decrypted_creds, loot_lines = perform_dpapi_looting(
             target,
             smb,
-            dpapi_key=dpapi_key,
+            dpapi_key=effective_dpapi_key,
             backup_target_dir=backup_target_dir,
             debug=debug,
         )
@@ -837,17 +860,11 @@ def process_target(
             debug=debug,
         )
 
-        # LSA secret extraction for services (--loot)
-        if svc_rows and loot and not opsec:
-            # Filter out gMSA services (they don't have LSA secrets)
-            lootable = [r for r in svc_rows if not r.is_gmsa]
-            if lootable:
-                from .helpers import perform_lsa_service_looting
+        # Map LSA-extracted service credentials to service rows
+        if svc_rows and lsa_result and lsa_result.service_credentials:
+            from .helpers import _map_lsa_creds_to_service_rows
 
-                perform_lsa_service_looting(
-                    target, smb, server_fqdn or target, lootable,
-                    kerberos=kerberos, dc_ip=dc_ip, debug=debug,
-                )
+            _map_lsa_creds_to_service_rows(svc_rows, lsa_result.service_credentials, target)
 
         if svc_rows and all_service_rows is not None:
             all_service_rows.extend(svc_rows)

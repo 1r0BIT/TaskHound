@@ -953,6 +953,7 @@ This operation involves:
             "laps_cache": laps_cache,
             "validate_creds": args.validate_creds,
             "ldap_tier0": args.ldap_tier0,
+            "no_lsa": getattr(args, "no_lsa", False),
             "services": getattr(args, "services", False),
             "services_only": getattr(args, "services_only", False),
             "all_service_rows": all_service_rows,

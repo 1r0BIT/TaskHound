@@ -606,6 +606,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable credential validation via Task Scheduler RPC. Reduces RPC traffic.",
     )
 
+    scan.add_argument(
+        "--no-lsa",
+        action="store_true",
+        help="Disable registry-based LSA secret extraction. By default, --loot uses Remote Registry "
+        "to extract service credentials and DPAPI system keys without writing files to disk. "
+        "This is noisier than basic scanning (starts RemoteRegistry, reads LSA policy keys). "
+        "Use this flag if you want DPAPI file collection without LSA extraction.",
+    )
+
     # DPAPI decryption options
     dpapi = ap.add_argument_group("DPAPI Credential Decryption")
     dpapi.add_argument(
