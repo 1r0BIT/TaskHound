@@ -4,6 +4,42 @@ All notable changes to TaskHound will be documented in this file.
 
 ---
 
+## [1.1.5] - 2026-03-28
+
+### Highlights
+
+The SID resolver — previously a 2841-line monolith — has been fully replaced by a clean, modular `resolver/` package. This release also introduces SAMR-based local account discovery, credential confidence scoring, and a wave of reliability fixes hardened through live Active Directory lab testing.
+
+---
+
+### New Features
+
+- **Dynamic local account discovery via SAMR** — Enumerates local users/groups through SAMR to correctly classify bare-name task principals instead of guessing
+- **Credential confidence levels** — Never-run tasks with stored credentials now show a confidence indicator to distinguish validated from unvalidated findings
+- **Default thread count raised to 10** — OPSEC mode still enforces sequential scanning; new `--jitter` flag adds random delay between targets
+- **`-T` short flag for `--targets-file`** — Convenience alias for specifying target lists
+
+### Refactors
+
+- **Replaced legacy `utils/sid_resolver.py`** (2841 lines removed) — Four-phase migration to the new `resolver/` package: structure → implementation → consumer migration → test migration → legacy deletion
+- **Credential validation heuristics restructured** — Empirical testing against live AD revealed edge cases; validation logic rewritten to match real-world behavior
+- **`extract_domain_sid_from_hv` moved from constants to backends** — Domain SID extraction now lives with the BloodHound backend where it belongs
+- **Type safety improvements across codebase** — Fixes for mypy strict mode compliance
+
+### Fixes
+
+- **SAMR enumeration infinite loop and CredGuard pipe handle leak** — SAMR queries could hang indefinitely; named pipe handles were leaked when Credential Guard was detected
+- **UPN format handling in highvalue/tier0 checks** — `user@domain` format was not recognized, causing missed classifications
+- **SMB connections leaked on early return paths** — `process_target()` now closes SMB connections in all exit paths
+- **Paged LDAP search for LAPS queries** — Large environments hit `sizeLimitExceeded`; switched to paged results
+- **OpenGraph compatibility with BloodHound v8.9.0+** — Dropped `objectid` from node properties which BH no longer accepts
+- **Credential Guard detection for LsaCfgFlags values 1 and 2** — Previously only detected value 2; value 1 (UEFI lock) was missed
+- **LDAP credential precedence** — `--ldap-*` CLI args now correctly override default credentials
+- **Deduplicate Tier-0 accounts in HTML report** — Same account appearing via multiple group memberships was listed multiple times
+- **NoneType.strip() errors in OpenGraph and highvalue modules** — Null principal names no longer crash the pipeline
+
+---
+
 ## [1.1.0] - 2026-01-02
 
 ### Highlights
@@ -276,5 +312,6 @@ Initial / Beta release.
 
 ---
 
+[1.1.5]: https://github.com/1r0BIT/TaskHound/compare/v1.1.0...v1.1.5
 [1.1.0]: https://github.com/1r0BIT/TaskHound/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/1r0BIT/TaskHound/releases/tag/v1.0.0
