@@ -423,7 +423,7 @@ def prefetch_tier0_members(
     """
     tier0_cache: Dict[str, Tuple[bool, list]] = {}
 
-    if not ldap_tier0 or no_ldap or (hv and hv.loaded):
+    if not ldap_tier0 or no_ldap or (hv and hv.loaded and hv.hv_users):
         return tier0_cache
 
     info(f"{target}: Fetching Tier-0 group members via LDAP (pre-flight)...")

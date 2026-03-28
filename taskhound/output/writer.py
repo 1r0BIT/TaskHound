@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ..smb.tasks import strip_task_root
 from ..utils.logging import good
 from . import COLORS
 
@@ -47,7 +48,7 @@ def _format_task_table(row_dict: Dict[str, Any], hostname: Optional[str] = None)
         border_style = COLORS["task_border"]
         tag = "[TASK]"
 
-    rel_path = row_dict.get("path", "Unknown")
+    rel_path = strip_task_root(row_dict.get("path", "Unknown"))
 
     # Build title with hostname if provided
     title = f"[{header_style}]{tag}[/] {hostname} - {rel_path}" if hostname else f"[{header_style}]{tag}[/] {rel_path}"

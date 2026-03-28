@@ -322,7 +322,7 @@ def _handle_exports(
             print_laps_summary(laps_cache, laps_successes, laps_failures)
 
     # Print backup section (if backup was enabled and we have backups)
-    if args.backup:
+    if args.backup and not getattr(args, "services_only", False):
         backup_dir = os.path.join(output_dir, "raw_backups")
         if os.path.exists(backup_dir):
             print_backup_section(backup_dir)

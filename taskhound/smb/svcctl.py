@@ -22,8 +22,12 @@ from impacket.dcerpc.v5 import scmr, transport
 from impacket.dcerpc.v5.rpcrt import DCERPCException
 from impacket.smbconnection import SMBConnection
 
+from ..utils.cache_manager import get_cache
 from ..utils.logging import debug as log_debug
 from ..utils.logging import warn
+from .builtin_services import BUILTIN_SERVICE_NAMES
+
+_SVC_CACHE_CATEGORY = "service_configs"
 
 # Win32 service types we care about (skip drivers)
 _WIN32_SERVICE_TYPES = (
@@ -99,6 +103,9 @@ def enumerate_services(
         )
 
         services: List[Dict[str, Any]] = []
+        cache = get_cache()
+        cache_hits = 0
+        builtin_skips = 0
 
         for svc in resp:
             svc_name = svc["lpServiceName"][:-1]  # strip null terminator
@@ -110,10 +117,23 @@ def enumerate_services(
             if filter_win32_only and not (svc_type & _WIN32_SERVICE_TYPES):
                 continue
 
-            # Query full config for this service
-            config = _query_service_config(dce, sc_handle, svc_name, host)
-            if config is None:
+            # Skip known Windows built-in services (always LocalSystem/LocalService/NetworkService)
+            if svc_name.lower() in BUILTIN_SERVICE_NAMES:
+                builtin_skips += 1
                 continue
+
+            # Check cache before RPC round-trip
+            cache_key = f"{host.upper()}:{svc_name.lower()}"
+            cached = cache.get(_SVC_CACHE_CATEGORY, cache_key) if cache else None
+            if cached:
+                config = cached
+                cache_hits += 1
+            else:
+                config = _query_service_config(dce, sc_handle, svc_name, host)
+                if config is None:
+                    continue
+                if cache:
+                    cache.set(_SVC_CACHE_CATEGORY, cache_key, config)
 
             services.append({
                 "name": svc_name,
@@ -125,6 +145,10 @@ def enumerate_services(
                 "state": state,
             })
 
+        if builtin_skips:
+            log_debug(f"{host}: SVCCTL - skipped {builtin_skips} known built-in services")
+        if cache_hits:
+            log_debug(f"{host}: SVCCTL - {cache_hits} service configs from cache")
         log_debug(f"{host}: SVCCTL - enumerated {len(services)} Win32 services")
         return services
 

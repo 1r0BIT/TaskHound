@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from bhopengraph import Edge, Node, Properties
 
 from ..resolver import resolve_name_to_sid_via_ldap
+from ..smb.tasks import strip_task_root
 from ..utils.cache_manager import get_cache
 from ..utils.logging import debug, good, info, warn
 
@@ -78,7 +79,7 @@ def _create_task_node(task: Dict) -> Node:
 
     # Build properties dict - bhopengraph Properties class validates schema compliance
     properties_dict = {
-        "name": task_path,
+        "name": strip_task_root(task_path),
         "hostname": hostname,
         "runas": task.get("runas") or "N/A",
         "enabled": str(task.get("enabled", "false")).lower() == "true",

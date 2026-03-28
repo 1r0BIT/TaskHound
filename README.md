@@ -114,6 +114,7 @@ When caffeine intake and free time align:
 - [tijldeneut/DPAPIck3](https://github.com/tijldeneut/DPAPIck3) - DPAPI decryption reference
 - [gentilkiwi/mimikatz](https://github.com/gentilkiwi/mimikatz) - DPAPI research
 - [Synacktiv](https://www.synacktiv.com/publications/lsa-secrets-revisiting-secretsdump) - Registry-only LSA extraction research
+- [Jonas Bülow Knudsen (@Jonas_B_K)](https://x.com/Jonas_B_K) - Inspiration for Windows service enumeration
 
 And everyone who contributed to making offensive security tooling accessible.
 

@@ -4,6 +4,7 @@ from rich.table import Table
 
 from ..parsers.highvalue import HighValueLoader
 from ..resolver import format_runas_with_sid_resolution
+from ..smb.tasks import strip_task_root
 from ..utils import logging as log_utils
 from ..utils.console import console
 from ..utils.credentials import find_password_for_user
@@ -44,7 +45,8 @@ def print_task_table(
         tag = "[TASK]"
 
     # Build the title with tag, hostname (if provided), and path
-    title = f"[{header_style}]{tag}[/] {hostname} - {rel_path}" if hostname else f"[{header_style}]{tag}[/] {rel_path}"
+    display_path = strip_task_root(rel_path)
+    title = f"[{header_style}]{tag}[/] {hostname} - {display_path}" if hostname else f"[{header_style}]{tag}[/] {display_path}"
 
     # Create a simple two-column table
     table = Table(
@@ -497,13 +499,15 @@ def format_block(
             ldap_hashes=ldap_hashes,
         )
 
+    display_path = strip_task_root(rel_path)
+
     if concise:
         # Concise output: One line per task
         # Format: [KIND] Hostname - RunAs | Path | What | (optional reason) | (optional password)
         if hostname:
-            line = f"{header} {hostname} - {display_runas} | {rel_path} | {what}"
+            line = f"{header} {hostname} - {display_runas} | {display_path} | {what}"
         else:
-            line = f"{header} {display_runas} | {rel_path} | {what}"
+            line = f"{header} {display_runas} | {display_path} | {what}"
         if extra_reason:
             line += f" | {extra_reason}"
 
@@ -640,11 +644,11 @@ def format_block(
             rows.append(("Next Step", "Try DPAPI Dump / Task Manipulation"))
 
     # Print Rich table to console
-    print_task_table(kind, rel_path, rows, hostname=hostname)
+    print_task_table(kind, display_path, rows, hostname=hostname)
 
     # Return text format for file output (backward compatibility)
     # Label width is 18 chars + 1 space before colon = 19 chars total before ":"
-    base = [f"\n{header} {hostname} - {rel_path}"] if hostname else [f"\n{header} {rel_path}"]
+    base = [f"\n{header} {hostname} - {display_path}"] if hostname else [f"\n{header} {display_path}"]
     for label, value in rows:
         base.append(f"        {label:<18} : {value}")
 

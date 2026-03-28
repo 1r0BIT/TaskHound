@@ -15,6 +15,23 @@ from ..utils.logging import warn
 
 TASK_ROOT = r"\Windows\System32\Tasks"
 
+# Prefix variants (with/without leading backslash) for display stripping
+_TASK_PREFIX = "Windows\\System32\\Tasks\\"
+_TASK_PREFIX_BS = "\\Windows\\System32\\Tasks\\"
+
+
+def strip_task_root(path: str) -> str:
+    """Strip the static ``\\Windows\\System32\\Tasks\\`` prefix for display.
+
+    Handles paths with or without a leading backslash.  Falls back to
+    the original string when the prefix is not found.
+    """
+    if path.startswith(_TASK_PREFIX_BS):
+        return path[len(_TASK_PREFIX_BS):]
+    if path.startswith(_TASK_PREFIX):
+        return path[len(_TASK_PREFIX):]
+    return path
+
 
 def smb_listdir(smb: SMBConnection, share: str, path: str):
     # Return a list of (is_dir, name) entries for `share:path`.
