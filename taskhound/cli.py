@@ -586,6 +586,39 @@ def main():
     ap = build_parser()
     args = ap.parse_args()
 
+    # Enable debug log recording if --debug-log is set
+    debug_log_path = None
+    if getattr(args, "debug_log", None):
+        import atexit
+        from datetime import datetime as dt
+
+        from .utils.console import console as _console
+
+        # Enable recording on the global console
+        _console.record = True
+
+        # Build timestamped filename in the target directory
+        log_dir = args.debug_log
+        os.makedirs(log_dir, exist_ok=True)
+        timestamp = dt.now().strftime("%Y%m%d_%H%M%S")
+        debug_log_path = os.path.join(log_dir, f"{timestamp}_taskhound_debug.log")
+
+        # Force verbose + debug when logging
+        args.verbose = True
+        args.debug = True
+
+        def _save_debug_log():
+            try:
+                text = _console.export_text()
+                with open(debug_log_path, "w", encoding="utf-8") as f:
+                    f.write(text)
+                _console.record = False
+                print(f"[*] Debug log saved to: {debug_log_path}")
+            except Exception as e:
+                print(f"[!] Failed to save debug log: {e}")
+
+        atexit.register(_save_debug_log)
+
     # Set verbosity early
     set_verbosity(args.verbose, args.debug)
 

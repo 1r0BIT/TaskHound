@@ -720,6 +720,12 @@ def build_parser() -> argparse.ArgumentParser:
     misc.add_argument("--verbose", action="store_true", help="Enable verbose output")
     misc.add_argument("--debug", action="store_true", help="Enable debug output (print full stack traces)")
     misc.add_argument(
+        "--debug-log",
+        metavar="PATH",
+        help="Save all console output (including debug) to a timestamped log file. "
+        "Accepts a directory path — file will be named YYYYMMDD_HHMMSS_taskhound_debug.log",
+    )
+    misc.add_argument(
         "--no-confirm",
         action="store_true",
         help="Skip confirmation prompts for noisy operations (useful for automation/CI)",
