@@ -5,7 +5,7 @@ Contains logic for building OpenGraph nodes, edges, and resolving identities.
 """
 
 import hashlib
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from bhopengraph import Edge, Node, Properties
 
@@ -1018,3 +1018,191 @@ def resolve_object_ids_chunked(
 
     good(f"Resolution complete: {len(computer_sid_map)} computers, {len(user_sid_map)} users")
     return computer_sid_map, user_sid_map
+
+
+# ---------------------------------------------------------------------------
+# Windows Service OpenGraph builders
+# ---------------------------------------------------------------------------
+
+
+def _create_service_object_id(hostname: str, service_name: str) -> str:
+    """
+    Create unique, deterministic object ID for a Windows service.
+
+    Format: HOSTNAME_HASH_SERVICENAME
+    Same pattern as _create_task_object_id but for services.
+    """
+    identifier = f"{hostname.upper()}|SVC|{service_name.upper()}"
+    hash_short = hashlib.md5(identifier.encode()).hexdigest()[:8].upper()
+    safe_name = service_name.upper().replace(" ", "_")[:40]
+    return f"{hostname}_{hash_short}_{safe_name}"
+
+
+def _create_service_node(svc: Dict) -> Node:
+    """
+    Create a WindowsService node for BloodHound OpenGraph.
+
+    Node kinds: ["WindowsService", "Base", "TaskHound"]
+    """
+    hostname = (svc.get("host") or "").strip().upper()
+    service_name = (svc.get("service_name") or "").strip()
+
+    if not hostname:
+        raise ValueError(f"Service missing 'host' field: {svc}")
+    if not service_name:
+        raise ValueError(f"Service missing 'service_name' field: {svc}")
+
+    object_id = _create_service_object_id(hostname, service_name)
+
+    properties_dict: Dict[str, Any] = {
+        "name": service_name,
+        "hostname": hostname,
+        "servicename": service_name,
+    }
+
+    # Add optional properties
+    display_name = svc.get("display_name")
+    if display_name:
+        properties_dict["displayname"] = display_name
+
+    start_name = svc.get("start_name")
+    if start_name:
+        properties_dict["startname"] = start_name
+
+    binary_path = svc.get("binary_path")
+    if binary_path:
+        properties_dict["binarypath"] = binary_path
+
+    start_type = svc.get("start_type")
+    if start_type:
+        properties_dict["starttype"] = start_type
+
+    service_type = svc.get("service_type")
+    if service_type:
+        properties_dict["servicetype"] = str(service_type)
+
+    state = svc.get("state")
+    if state:
+        properties_dict["state"] = state
+
+    svc_type = svc.get("type")
+    if svc_type:
+        properties_dict["serviceclassification"] = svc_type
+
+    reason = svc.get("reason")
+    if reason:
+        properties_dict["classification"] = reason
+
+    password_analysis = svc.get("password_analysis")
+    if password_analysis:
+        properties_dict["passwordanalysis"] = password_analysis
+
+    properties_dict["credentialsstored"] = True  # All domain-account services store creds
+    properties_dict["isgmsa"] = svc.get("is_gmsa", False)
+
+    return Node(
+        id=object_id,
+        kinds=["WindowsService", "Base", "TaskHound"],
+        properties=Properties(**properties_dict),
+    )
+
+
+def _create_service_edges(
+    svc: Dict,
+    computer_map: Dict,
+    user_map: Dict,
+    bh_connector=None,
+    allow_orphans: bool = False,
+    netbios_name: Optional[str] = None,
+) -> Tuple[List["Edge"], Dict[str, int]]:
+    """
+    Create edges for a Windows service node.
+
+    Edge types:
+    - HasServiceWithStoredCreds: Computer → WindowsService (all domain-account services)
+    - RunsAs: WindowsService → User
+    """
+    from bhopengraph import Edge
+
+    edges: List[Edge] = []
+    skipped = {"computers": 0, "users": 0}
+
+    hostname = (svc.get("host") or "").strip().upper()
+    service_name = (svc.get("service_name") or "").strip()
+    start_name = (svc.get("start_name") or "").strip()
+
+    if not hostname or not service_name:
+        return edges, skipped
+
+    service_id = _create_service_object_id(hostname, service_name)
+
+    # Helper to extract domain from FQDN
+    def _extract_domain(fqdn: str) -> str:
+        if "." in fqdn:
+            parts = fqdn.split(".")
+            if len(parts) >= 2:
+                return ".".join(parts[1:]).upper()
+        return "WORKGROUP"
+
+    # Edge: Computer → WindowsService (HasServiceWithStoredCreds)
+    computer_info = computer_map.get(hostname)
+    if computer_info:
+        _, computer_sid, *_ = computer_info
+        if computer_sid:
+            edges.append(Edge(
+                start_node=computer_sid,
+                end_node=service_id,
+                kind="HasServiceWithStoredCreds",
+                start_match_by="id",
+                end_match_by="id",
+            ))
+    elif allow_orphans:
+        edges.append(Edge(
+            start_node=hostname,
+            end_node=service_id,
+            kind="HasServiceWithStoredCreds",
+            start_match_by="name",
+            end_match_by="id",
+        ))
+    else:
+        skipped["computers"] += 1
+
+    # Edge: WindowsService → User (RunsAs)
+    if start_name:
+        fqdn_domain = _extract_domain(hostname)
+        principal_id = _create_principal_id(start_name, fqdn_domain, svc, bh_connector, local_netbios=netbios_name)
+
+        if principal_id:
+            user_info = user_map.get(principal_id)
+            if user_info:
+                _, user_sid, *_ = user_info
+                if user_sid:
+                    edges.append(Edge(
+                        start_node=service_id,
+                        end_node=user_sid,
+                        kind="RunsAs",
+                        start_match_by="id",
+                        end_match_by="id",
+                    ))
+                elif allow_orphans:
+                    edges.append(Edge(
+                        start_node=service_id,
+                        end_node=principal_id,
+                        kind="RunsAs",
+                        start_match_by="id",
+                        end_match_by="name",
+                    ))
+                else:
+                    skipped["users"] += 1
+            elif allow_orphans:
+                edges.append(Edge(
+                    start_node=service_id,
+                    end_node=principal_id,
+                    kind="RunsAs",
+                    start_match_by="id",
+                    end_match_by="name",
+                ))
+            else:
+                skipped["users"] += 1
+
+    return edges, skipped

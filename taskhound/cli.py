@@ -47,6 +47,7 @@ def _handle_opengraph(
     all_rows: List[Dict],
     opengraph_json_path: Optional[str],
     opengraph_json_overwrites: bool,
+    service_rows: Optional[List] = None,
 ) -> None:
     """Handle BloodHound OpenGraph generation and upload."""
     from .config_model import BloodHoundConfig
@@ -115,7 +116,7 @@ def _handle_opengraph(
     # OpenGraph files go to {output_dir}/opengraph/
     opengraph_output_dir = os.path.join(args.output_dir, "opengraph")
 
-    # Generate OpenGraph files
+    # Generate OpenGraph files for tasks
     generate_opengraph_files(
         output_dir=opengraph_output_dir,
         tasks=list(all_rows),
@@ -125,6 +126,28 @@ def _handle_opengraph(
         computer_sids=computer_sids if computer_sids else None,
         netbios_name=netbios_name,
     )
+
+    # Generate separate OpenGraph files for services (distinct source_kind)
+    if service_rows:
+        from .opengraph.writer import generate_service_opengraph_files
+
+        # Also extract computer SIDs from service rows
+        for row in service_rows:
+            row_dict = row.to_dict() if hasattr(row, "to_dict") else row
+            host = (row_dict.get("host") or "").upper()
+            sid = row_dict.get("computer_sid")
+            if host and sid:
+                computer_sids[host] = sid
+
+        generate_service_opengraph_files(
+            output_dir=opengraph_output_dir,
+            services=list(service_rows),
+            bh_connector=bh_connector,
+            ldap_config=ldap_config,
+            allow_orphans=getattr(args, "bh_allow_orphans", False),
+            computer_sids=computer_sids if computer_sids else None,
+            netbios_name=netbios_name,
+        )
 
     # Upload to BloodHound if not disabled and we have credentials
     _upload_opengraph(bh_config, None, opengraph_json_path)
@@ -977,4 +1000,4 @@ This operation involves:
 
     # BloodHound OpenGraph Integration
     if args.bh_opengraph:
-        _handle_opengraph(args, all_rows, opengraph_json_path, opengraph_json_overwrites)
+        _handle_opengraph(args, all_rows, opengraph_json_path, opengraph_json_overwrites, service_rows=all_service_rows)

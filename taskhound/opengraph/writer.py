@@ -10,9 +10,17 @@ from typing import Any, Dict, List, Optional, Set, Union
 
 from bhopengraph import Node, OpenGraph, Properties
 
+from ..models.service import ServiceRow
 from ..models.task import TaskRow
 from ..utils.logging import debug, error, info, status, warn
-from .builder import _create_principal_id, _create_relationship_edges, _create_task_node, resolve_object_ids_chunked
+from .builder import (
+    _create_principal_id,
+    _create_relationship_edges,
+    _create_service_edges,
+    _create_service_node,
+    _create_task_node,
+    resolve_object_ids_chunked,
+)
 
 
 def generate_opengraph_files(
@@ -246,4 +254,144 @@ def generate_opengraph_files(
         if debug:  # type: ignore[truthy-function]  # intentional: guard debug-only traceback
             import traceback
             debug(traceback.format_exc())
+        return None
+
+
+def generate_service_opengraph_files(
+    output_dir: str,
+    services: List[Union[Dict, ServiceRow]],
+    bh_connector=None,
+    ldap_config: Optional[Dict] = None,
+    allow_orphans: bool = False,
+    computer_sids: Optional[Dict[str, str]] = None,
+    netbios_name: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Generate OpenGraph JSON for Windows service findings.
+
+    Writes to a separate file (taskhound_services_opengraph.json) with
+    source_kind "TaskHound_Services" to avoid contaminating the task
+    OpenGraph data when re-uploading.
+
+    :param services: List of ServiceRow objects or dicts
+    :param output_dir: Directory to write output files
+    :param bh_connector: Optional BloodHoundConnector
+    :param ldap_config: Optional LDAP config for fallback resolution
+    :param allow_orphans: Create edges even when target nodes are missing
+    :param computer_sids: FQDN→SID mapping from SMB connections
+    :param netbios_name: NetBIOS domain name
+    """
+    svc_dicts: List[Dict[str, Any]] = []
+    for s in services:
+        if isinstance(s, ServiceRow):
+            svc_dicts.append(s.to_dict())
+        else:
+            svc_dicts.append(s)
+
+    valid_services = [s for s in svc_dicts if s.get("type") not in ("FAILURE", "SKIPPED")]
+
+    info(f"Generating service OpenGraph data for {len(valid_services)} services...")
+
+    if not valid_services:
+        warn("No valid services for OpenGraph generation")
+        return None
+
+    graph = OpenGraph()
+
+    # Collect unique names for resolution
+    computer_names: Set[str] = set()
+    user_names: Set[str] = set()
+
+    def _extract_domain(fqdn: str) -> str:
+        if "." in fqdn:
+            parts = fqdn.split(".")
+            if len(parts) >= 2:
+                return ".".join(parts[1:]).upper()
+        return "WORKGROUP"
+
+    for svc in valid_services:
+        hostname = (svc.get("host") or "").strip().upper()
+        if hostname:
+            computer_names.add(hostname)
+
+        start_name = (svc.get("start_name") or "").strip()
+        if start_name:
+            fqdn_domain = _extract_domain(hostname)
+            principal_id = _create_principal_id(start_name, fqdn_domain, svc, bh_connector, local_netbios=netbios_name)
+            if principal_id:
+                user_names.add(principal_id)
+
+    # Resolve names to IDs
+    computer_map: Dict[str, Optional[tuple]] = {}
+    user_map: Dict[str, Optional[tuple]] = {}
+
+    if bh_connector:
+        info("Resolving service principals...")
+        computer_map, user_map = resolve_object_ids_chunked(
+            computer_names, user_names, bh_connector, ldap_config,
+            computer_sids=computer_sids,
+        )
+
+    # Add placeholder nodes for principals
+    for name in computer_names:
+        node_info = computer_map.get(name)
+        sid = node_info[1] if node_info and len(node_info) > 1 else None
+        resolved_name = node_info[2] if node_info and len(node_info) > 2 else None
+        if sid:
+            graph.add_node(Node(id=sid, kinds=["Computer", "Base"], properties=Properties(name=resolved_name or name)))
+        elif allow_orphans:
+            graph.add_node(Node(id=name, kinds=["Computer", "Base"], properties=Properties(name=name)))
+
+    for name in user_names:
+        node_info = user_map.get(name)
+        sid = node_info[1] if node_info and len(node_info) > 1 else None
+        resolved_name = node_info[2] if node_info and len(node_info) > 2 else None
+        if sid:
+            graph.add_node(Node(id=sid, kinds=["User", "Base"], properties=Properties(name=resolved_name or name)))
+        elif allow_orphans:
+            graph.add_node(Node(id=name, kinds=["User", "Base"], properties=Properties(name=name)))
+
+    # Build service nodes and edges
+    skipped_counts = {"computers": 0, "users": 0}
+
+    for svc in valid_services:
+        try:
+            svc_node = _create_service_node(svc)
+            graph.add_node(svc_node)
+
+            edges, skipped = _create_service_edges(
+                svc, computer_map, user_map, bh_connector, allow_orphans,
+                netbios_name=netbios_name,
+            )
+            for edge in edges:
+                graph.add_edge(edge)
+
+            skipped_counts["computers"] += skipped["computers"]
+            skipped_counts["users"] += skipped["users"]
+
+        except ValueError as e:
+            debug(f"Skipping invalid service: {e}")
+        except Exception as e:
+            warn(f"Error processing service {svc.get('service_name', 'unknown')}: {e}")
+
+    if skipped_counts["computers"] > 0 or skipped_counts["users"] > 0:
+        warn(f"Skipped service edges: {skipped_counts['computers']} computer, {skipped_counts['users']} user (use --bh-allow-orphans)")
+
+    # Write output
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    json_path = output_path / "taskhound_services_opengraph.json"
+    info(f"Writing service OpenGraph data to {json_path}...")
+
+    try:
+        with open(json_path, "w", encoding="utf-8") as f:
+            graph_dict = graph.export_to_dict()
+            json.dump(graph_dict, f, indent=2)
+
+        status(f"[+] Service OpenGraph generated. {len(graph.nodes)} nodes and {len(graph.edges)} edges")
+        return str(json_path)
+
+    except Exception as e:
+        error(f"Failed to write service OpenGraph files: {e}")
         return None
