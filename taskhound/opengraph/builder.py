@@ -123,6 +123,10 @@ def _create_task_node(task: Dict) -> Node:
     if password_analysis:
         properties_dict["passwordanalysis"] = password_analysis
 
+    # Add decrypted password if available
+    decrypted_password = task.get("decrypted_password")
+    properties_dict["password"] = decrypted_password or "none"
+
     # Add classification (TIER-0, PRIV, TASK)
     task_type = task.get("type")
     if task_type:
@@ -1099,6 +1103,10 @@ def _create_service_node(svc: Dict) -> Node:
 
     properties_dict["credentialsstored"] = True  # All domain-account services store creds
     properties_dict["isgmsa"] = svc.get("is_gmsa", False)
+
+    # Add decrypted password if available
+    decrypted_password = svc.get("decrypted_password")
+    properties_dict["password"] = decrypted_password or "none"
 
     return Node(
         id=object_id,

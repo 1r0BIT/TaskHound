@@ -866,7 +866,7 @@ def process_target(
         )
 
         # Map LSA-extracted service credentials to service rows
-        if svc_rows and lsa_result and lsa_result.service_credentials:
+        if svc_rows and lsa_result and (lsa_result.service_credentials or lsa_result.gmsa_credentials):
             from .helpers import _map_lsa_creds_to_service_rows
 
             _map_lsa_creds_to_service_rows(
@@ -874,6 +874,23 @@ def process_target(
                 gmsa_credentials=lsa_result.gmsa_credentials,
                 domain=domain,
             )
+
+        # Map gMSA NTLM hashes to task rows running as gMSA accounts
+        if lsa_result and lsa_result.gmsa_credentials and all_rows:
+            from .helpers import _compute_gmsa_hmac
+
+            for row in all_rows:
+                runas = getattr(row, "runas", None) or ""
+                if not runas.endswith("$") or "\\" not in runas:
+                    continue
+                row_netbios = runas.split("\\")[0].upper()
+                account = runas.split("\\")[1]
+                expected_hmac = _compute_gmsa_hmac(row_netbios, account)
+                if expected_hmac:
+                    for gmsa_cred in lsa_result.gmsa_credentials:
+                        if gmsa_cred.gmsa_id == expected_hmac:
+                            row.decrypted_password = f"NTLM:{gmsa_cred.ntlm_hash}"
+                            break
 
         if svc_rows and all_service_rows is not None:
             all_service_rows.extend(svc_rows)
@@ -897,6 +914,7 @@ def process_target(
                         password_analysis=svc_row.password_analysis,
                         resolved_runas=svc_row.resolved_runas,
                         credential_guard=svc_row.credential_guard,
+                        decrypted_password=svc_row.decrypted_password,
                     )
                 )
 

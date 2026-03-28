@@ -117,7 +117,7 @@ def _handle_opengraph(
     opengraph_output_dir = os.path.join(args.output_dir, "opengraph")
 
     # Generate OpenGraph files for tasks
-    generate_opengraph_files(
+    task_og_path = generate_opengraph_files(
         output_dir=opengraph_output_dir,
         tasks=list(all_rows),
         bh_connector=bh_connector,
@@ -128,6 +128,7 @@ def _handle_opengraph(
     )
 
     # Generate separate OpenGraph files for services (distinct source_kind)
+    svc_og_path = None
     if service_rows:
         from .opengraph.writer import generate_service_opengraph_files
 
@@ -139,7 +140,7 @@ def _handle_opengraph(
             if host and sid:
                 computer_sids[host] = sid
 
-        generate_service_opengraph_files(
+        svc_og_path = generate_service_opengraph_files(
             output_dir=opengraph_output_dir,
             services=list(service_rows),
             bh_connector=bh_connector,
@@ -150,7 +151,10 @@ def _handle_opengraph(
         )
 
     # Upload to BloodHound if not disabled and we have credentials
-    _upload_opengraph(bh_config, None, opengraph_json_path)
+    if task_og_path:
+        _upload_opengraph(bh_config, task_og_path, opengraph_json_path)
+    if svc_og_path:
+        _upload_opengraph(bh_config, svc_og_path, None)
 
 
 def _upload_opengraph(bh_config: Any, opengraph_file: Optional[str], json_data_path: Optional[str] = None) -> None:
@@ -587,19 +591,29 @@ def main():
 
     validate_args(args)
 
-    # Adult check for noisy operations (Credential Guard detection)
-    if args.credguard_detect and not getattr(args, 'no_confirm', False):
-        warning_text = """[bold yellow]WARNING: Credential Guard detection is enabled (default)[/]
+    # Adult check for noisy operations (CredGuard + LSA extraction)
+    has_noisy_ops = (args.credguard_detect or (args.loot and not getattr(args, 'no_lsa', False)))
+    if has_noisy_ops and not getattr(args, 'no_confirm', False):
+        noisy_items = []
+        if args.loot and not getattr(args, 'no_lsa', False):
+            noisy_items.append("  [dim]•[/] [bold]LSA secret extraction[/] via Remote Registry ([cyan]\\pipe\\winreg[/]) — reads SECURITY hive keys")
+        if args.credguard_detect:
+            noisy_items.append("  [dim]•[/] Credential Guard detection via Remote Registry ([cyan]\\pipe\\winreg[/])")
+        noisy_items.append("  [dim]•[/] Starting/stopping the [cyan]RemoteRegistry[/] service on targets")
 
-This operation involves:
-  [dim]•[/] Starting/stopping the [cyan]RemoteRegistry[/] service on targets
-  [dim]•[/] Reading registry keys via RPC ([cyan]\\pipe\\winreg[/])
+        noisy_list = "\n".join(noisy_items)
+        warning_text = f"""[bold yellow]WARNING: Noisy operations are enabled by default[/]
 
-[bold red]This is NOISY(!) and may trigger EDR/SOC alerts![/]
+This scan involves:
+{noisy_list}
 
-[dim]To disable this check:[/]
+[bold red]This WILL trigger EDR/SOC alerts on monitored hosts![/]
+
+[dim]To reduce noise:[/]
+  [green]--no-lsa[/]        Skip LSA secret extraction (most noisy)
   [green]--no-credguard[/]  Skip Credential Guard detection
-  [green]--opsec[/]         Disable all noisy operations
+  [green]--no-loot[/]       Skip all credential extraction
+  [green]--opsec[/]         Disable all noisy operations at once
 
 [dim]To skip this prompt in the future:[/]
   [green]--no-confirm[/]    Accept warnings automatically"""

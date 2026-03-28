@@ -176,7 +176,7 @@ class TestClassifyService:
 
         assert result.task_type == "SERVICE"
         assert "gMSA" in (row.reason or "")
-        assert "LSA extraction not yet supported" in (row.reason or "")
+        assert "check LSA dump results" in (row.reason or "")
 
     def test_disabled_account_service_level(self):
         hv = MagicMock()
