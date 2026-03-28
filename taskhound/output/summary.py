@@ -139,7 +139,7 @@ def print_summary_table(
     rich_summary_table(host_stats, has_hv_data=has_hv)
 
 
-def print_decrypted_credentials(all_rows: List[Any]) -> int:
+def print_decrypted_credentials(all_rows: List[Any], service_rows: Optional[List[Any]] = None) -> int:
     """
     Print a summary of all decrypted credentials found during the scan.
 
@@ -158,11 +158,8 @@ def print_decrypted_credentials(all_rows: List[Any]) -> int:
 
         decrypted_password = row_dict.get("decrypted_password")
         if decrypted_password:
-            # Use resolved_runas if available, otherwise fall back to runas
             runas = row_dict.get("runas", "Unknown")
             resolved_runas = row_dict.get("resolved_runas")
-
-            # Format display: if we have resolved username for a SID, show "username (SID)"
             display_runas = f"{resolved_runas} ({runas})" if resolved_runas and runas.startswith("S-1-5-") else runas
 
             creds_found.append({
@@ -171,6 +168,26 @@ def print_decrypted_credentials(all_rows: List[Any]) -> int:
                 "runas": display_runas,
                 "password": decrypted_password,
                 "type": row_dict.get("type", "TASK"),
+                "source": "Task",
+            })
+
+    # Also collect service credentials
+    for row in (service_rows or []):
+        row_dict = row.to_dict() if hasattr(row, "to_dict") else row
+
+        decrypted_password = row_dict.get("decrypted_password")
+        if decrypted_password:
+            start_name = row_dict.get("start_name", "Unknown")
+            resolved_runas = row_dict.get("resolved_runas")
+            display_runas = f"{resolved_runas} ({start_name})" if resolved_runas and start_name.startswith("S-1-5-") else start_name
+
+            creds_found.append({
+                "host": row_dict.get("host", "Unknown"),
+                "path": row_dict.get("service_name", "Unknown"),
+                "runas": display_runas,
+                "password": decrypted_password,
+                "type": row_dict.get("type", "SERVICE"),
+                "source": "Service",
             })
 
     if not creds_found:
@@ -186,10 +203,11 @@ def print_decrypted_credentials(all_rows: List[Any]) -> int:
     )
 
     table.add_column("Type", style="dim", width=8)
+    table.add_column("Source", style="dim", width=8)
     table.add_column("Host", style="white")
     table.add_column("RunAs", style="white")
     table.add_column("Password", style="bold green")
-    table.add_column("Task Path", style="dim")
+    table.add_column("Name", style="dim")
 
     for cred in creds_found:
         task_type = cred["type"]
@@ -200,8 +218,12 @@ def print_decrypted_credentials(all_rows: List[Any]) -> int:
         else:
             type_style = "bold green"
 
+        source = cred.get("source", "Task")
+        source_style = "cyan" if source == "Service" else "dim"
+
         table.add_row(
             f"[{type_style}]{task_type}[/]",
+            f"[{source_style}]{source}[/]",
             cred["host"],
             cred["runas"],
             cred["password"],

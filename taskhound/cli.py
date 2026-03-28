@@ -307,7 +307,7 @@ def _handle_exports(
             print_audit_report_section(html_path)
 
     # Print decrypted credentials summary
-    print_decrypted_credentials(all_rows)
+    print_decrypted_credentials(all_rows, service_rows=service_rows)
 
     # Print summary table
     if not args.no_summary:
