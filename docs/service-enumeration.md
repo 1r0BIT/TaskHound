@@ -35,7 +35,7 @@ Built-in accounts (always excluded):
 
 Local accounts are also excluded via SAMR enumeration of the host's local user database.
 
-What remains: `DOMAIN\svc_backup`, `svc_sql@corp.local`, or bare usernames that aren't
+What remains: `SHINRA\svc_mako`, `svc_materia@shinra.local`, or bare usernames that aren't
 in the local SAM. These are the ones with passwords in LSA secrets.
 
 ## Classification
@@ -44,9 +44,9 @@ Services use the same classification engine as scheduled tasks:
 
 | Level | Meaning | Example |
 |-------|---------|---------|
-| TIER-0 | Domain Admin, Enterprise Admin, etc. | CORP\svc_adfs (member of Domain Admins) |
-| PRIV | High-value per BloodHound or custom list | CORP\svc_sql (marked HVT in BloodHound) |
-| SERVICE | Normal domain account | CORP\svc_backup |
+| TIER-0 | Domain Admin, Enterprise Admin, etc. | SHINRA\svc_mako (member of Domain Admins) |
+| PRIV | High-value per BloodHound or custom list | SHINRA\svc_materia (marked HVT in BloodHound) |
+| SERVICE | Normal domain account | SHINRA\svc_backup |
 
 Same BloodHound data, same LDAP queries, same tier-0 detection. The only difference is
 the label: SERVICE instead of TASK.
@@ -54,25 +54,28 @@ the label: SERVICE instead of TASK.
 ### gMSA detection
 
 Accounts ending in `$` get flagged as `[gMSA]` -- Group Managed Service Accounts. These
-use automatically rotated passwords managed by AD, not stored in LSA secrets the way
-normal service account passwords are. Still worth knowing about (they tell you what's
-running where), but LSA extraction won't get you their passwords.
+use automatically rotated passwords managed by AD. Their passwords are stored in LSA
+secrets, but under a different key format (`_SC_GMSA_{GUID}_<HMAC>`) that makes matching
+them back to the account name non-trivial. gMSA credential extraction via LSA is not yet
+implemented in TaskHound -- the easier path is LDAP retrieval of the `msDS-ManagedPassword`
+attribute, which is planned for a future release. Still worth knowing about (they tell you
+what's running where).
 
 ## CLI flags
 
 ```bash
 # Enumerate both tasks AND services (default is tasks only)
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 --services
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local --services
 
 # Services only, skip task enumeration entirely
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 --services-only
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local --services-only
 
 # Services + BloodHound integration for classification
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 --services \
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local --services \
   --bh-live --bhce --bh-api-key-id KEYID --bh-api-key SECRET
 
 # Services + credential extraction (LSA secrets for service passwords)
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 --services
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local --services
 # (--loot is on by default, extracts service passwords from LSA)
 ```
 
@@ -91,5 +94,5 @@ graph relationships. Jamming them into one file felt wrong.
 
 - Requires admin access to the target (SCM queries need it)
 - Only enumerates Win32 services, not kernel/filesystem drivers (those don't run as user accounts)
-- gMSA password extraction is not supported (that's a different protocol entirely -- MS-GKDI)
+- gMSA password extraction is not yet implemented (LSA secrets use a different key format for gMSA; LDAP-based retrieval via `msDS-ManagedPassword` is planned)
 - Service binary path analysis is informational only -- TaskHound doesn't check for DLL hijacking or unquoted paths (yet)

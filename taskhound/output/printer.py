@@ -698,7 +698,7 @@ def format_service_block(
         if resolved_runas and resolved_runas != start_name:
             account_display = f"{resolved_runas} (SID: {start_name})"
         if is_gmsa:
-            account_display += " [gMSA]"
+            account_display += " \\[gMSA]"
         rows.append(("Run As", account_display))
     if binary_path:
         rows.append(("Binary Path", binary_path))

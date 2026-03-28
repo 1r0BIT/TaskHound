@@ -15,13 +15,13 @@ TaskHound defaults to plain text on stdout because that's what you need 90% of t
 
 ```bash
 # Single format
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.local -o json
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local -o json
 
 # Multiple formats at once (comma-separated)
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.local -o plain,json,html
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local -o plain,json,html
 
 # Custom output directory
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.local -o json,html --output-dir ./engagement-results
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local -o json,html --output-dir ./engagement-results
 ```
 
 ## Directory Structure

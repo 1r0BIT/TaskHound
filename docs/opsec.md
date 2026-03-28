@@ -52,11 +52,11 @@ access. Just SMB share crawling for task XMLs.
 
 ```bash
 # Quiet scan with jitter
-taskhound -u admin -p 'P@ss' -d corp.local -t targets.txt \
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t targets.txt \
   --opsec --jitter 5
 
 # Opsec mode + BloodHound for classification (recommended)
-taskhound -u admin -p 'P@ss' -d corp.local -t targets.txt \
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t targets.txt \
   --opsec --jitter 5 \
   --bh-live --bhce --bh-api-key-id KEYID --bh-api-key SECRET
 ```
@@ -116,9 +116,9 @@ and extract credentials through a different channel.
    ```
    Zero network traffic for the parsing step.
 
-5. **Use a BOF.** If you're in a C2 framework, the SMB share crawling and XML parsing
-   could be reimplemented as a Beacon Object File. TaskHound doesn't provide one (yet),
-   but the protocol is just SMB reads.
+5. **Use a BOF.** For maximum stealth, use the BOF implementation -- it runs in-process
+   and only touches SMB. Available in the [Adaptix Extension-Kit](https://github.com/Adaptix-Framework/Extension-Kit)
+   under `SAR-BOF/taskhound/`.
 
 6. **Separate noisy operations.** Do the quiet scan first (`--opsec`), then come back
    for credential extraction on specific targets with full features enabled. Two passes

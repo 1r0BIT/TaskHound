@@ -8,10 +8,10 @@ By default, TaskHound uses 10 threads. That's fine for most networks. Adjust as 
 
 ```bash
 # 20 threads for a large environment
-taskhound -u user -p pass -d corp.local --targets-file hosts.txt --threads 20
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local --targets-file targets.txt --threads 20
 
 # Sequential mode (one host at a time, for when you're being careful)
-taskhound -u user -p pass -d corp.local -t host1 --threads 1
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local --threads 1
 ```
 
 Note: Windows limits around 10 concurrent SMB connections per source host. If you're scanning few targets repeatedly, `--rate-limit` helps avoid getting your connections dropped:
@@ -35,7 +35,7 @@ Or just use `--opsec` which bundles all the quiet options together: `--no-ldap -
 Instead of maintaining a host list, let TaskHound find targets for you:
 
 ```bash
-taskhound -u user -p pass -d corp.local --dc-ip 10.0.0.1 --auto-targets
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local --dc-ip 10.0.0.1 --auto-targets
 ```
 
 ### Data Source Priority
@@ -127,4 +127,4 @@ That's it. Small flag, surprisingly important when you're pivoting through three
 
 ## AdaptixC2 BOF Integration
 
-There's a BOF (Beacon Object File) implementation of TaskHound's core enumeration logic in the Extension-Kit repository. It runs inside AdaptixC2 agents, which means you can enumerate scheduled tasks without dropping a Python runtime on target. The BOF handles the SMB and XML parsing natively. If you're using AdaptixC2, check the Extension-Kit repo for the taskhound module -- I would have loved to integrate some sort of association between the two tools, but for now they're separate. Left as an exercise for the reader.
+A BOF (Beacon Object File) implementation of TaskHound's core enumeration logic is available in the [Adaptix Extension-Kit](https://github.com/Adaptix-Framework/Extension-Kit) under `SAR-BOF/taskhound/`. It runs inside AdaptixC2 agents, which means you can enumerate scheduled tasks without dropping a Python runtime on target. The BOF handles SMB share crawling and XML parsing natively, runs in-process, and only touches SMB. It is a separate tool from the Python version -- the BOF covers core enumeration while the Python tool provides the full pipeline (classification, SID resolution, BloodHound integration, credential extraction, reporting).

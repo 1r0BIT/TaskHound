@@ -43,19 +43,19 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt && pip install .
 
 # Basic scan — tasks only
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.local
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local
 
 # Tasks + services (discovers domain-account services too)
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.local --services
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local --services
 
 # Services only (skip task enumeration)
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.local --services-only
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local --services-only
 
 # Auto-discover all domain computers, 20 threads
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local --dc-ip 10.0.0.1 --auto-targets --threads 20
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local --dc-ip 10.0.0.1 --auto-targets --threads 20
 
 # Full stealth mode
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.local --opsec --jitter 5
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local --opsec --jitter 5
 ```
 
 ## Key Features
@@ -63,7 +63,7 @@ taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.
 | Feature | Description |
 |---------|-------------|
 | **Scheduled Task Discovery** | Enumerates tasks over SMB, parses XMLs, identifies stored credentials |
-| **Service Enumeration** | Discovers Windows services running as domain accounts via SVCCTL RPC |
+| **Windows Service Discovery** | Discovers Windows services running as domain accounts via SVCCTL RPC |
 | **Tier-0 & PRIV Detection** | Identifies tasks/services running as Domain Admins, Enterprise Admins, high-value targets |
 | **BloodHound OpenGraph** | Visualize tasks and services as attack path nodes in BloodHound CE |
 | **LSA Secret Extraction** | Registry-only credential extraction (no disk writes) for service passwords + DPAPI keys |

@@ -2,8 +2,8 @@
 
 ## The point
 
-Finding a scheduled task running as `CORP\svc_backup` is useful. Extracting
-`svc_backup`'s actual password is more useful. TaskHound does both, and with the
+Finding a scheduled task running as `SHINRA\svc_mako` is useful. Extracting
+`svc_mako`'s actual password is more useful. TaskHound does both, and with the
 LSA extraction addition, the whole pipeline is now automatic -- no more shelling
 out to nxc or secretsdump as a separate step.
 
@@ -56,10 +56,10 @@ run `nxc --lsa` separately, copy the hex key, and pass `--dpapi-key`. Now it jus
 
 ```bash
 # Disable LSA extraction specifically (still collect DPAPI blobs)
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 --no-lsa
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local --no-lsa
 
 # Disable all credential extraction
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 --no-loot
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local --no-loot
 ```
 
 ## DPAPI Credential Extraction
@@ -87,7 +87,7 @@ If you already have the key (or extracted it some other way), you can still pass
 manually. The manual key takes precedence over the auto-extracted one:
 
 ```bash
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 \
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local \
   --dpapi-key 0x51e43225a1b7b4c3...
 ```
 
@@ -97,7 +97,7 @@ Don't have the DPAPI key yet? TaskHound still collects the encrypted blobs:
 
 ```bash
 # Collect blobs without decryption (no LSA, no manual key)
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 --no-lsa
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local --no-lsa
 
 # Later, decrypt offline with the key
 taskhound --offline ./loot/ --dpapi-key 0x51e43225...
@@ -137,7 +137,7 @@ its trigger, or missing `SeBatchLogonRight`. The password could still be perfect
 ### Disable it
 
 ```bash
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 --no-validate-creds
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local --no-validate-creds
 ```
 
 This skips the Task Scheduler RPC queries, which reduces noise but means you lose the
@@ -146,6 +146,6 @@ confidence assessment.
 ## Limitations
 
 - LSA extraction requires admin access (same as secretsdump -- there's no magic here)
-- gMSA passwords are not in LSA secrets; they use a completely different key distribution protocol
+- gMSA passwords ARE stored in LSA secrets, but under a different key format (`_SC_GMSA_{GUID}_<HMAC>` instead of `_SC_<ServiceName>`). They can be extracted via LSA dump (nxc `--lsa`, secretsdump, regsecrets), but mapping the HMAC-based key back to the account name requires additional computation. TaskHound currently skips gMSA credential matching because the key format differs -- this is a known limitation, not an impossibility. The easier path for gMSA password retrieval is via LDAP (`msDS-ManagedPassword` attribute), planned for future implementation
 - DPAPI decryption only works for SYSTEM-context credential blobs (user-context blobs need the user's master key, which is a different problem)
 - Credential validation via RPC has a blind spot: Windows doesn't record failed authentication as task runs, so the absence of recent runs is ambiguous

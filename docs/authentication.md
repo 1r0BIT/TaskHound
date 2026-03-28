@@ -7,7 +7,7 @@ TaskHound needs credentials. Ideally ones that work. Here are all the ways to pr
 The obvious one:
 
 ```bash
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.local
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local
 ```
 
 Quote your password. Shells love to eat special characters and then you'll spend 20 minutes debugging an auth problem that isn't one.
@@ -17,8 +17,8 @@ Quote your password. Shells love to eat special characters and then you'll spend
 When you have a hash but not a password. As one does.
 
 ```bash
-taskhound -u homer.simpson --hashes aad3b435b51404eeaad3b435b51404ee:1fc552f8c075075c4e76aece1b9a2c58 \
-  -d thesimpsons.local -t moe.thesimpsons.local
+taskhound -u cloud.strife --hashes aad3b435b51404eeaad3b435b51404ee:1fc552f8c075075c4e76aece1b9a2c58 \
+  -d shinra.local -t reactor01.shinra.local
 ```
 
 Accepts `LM:NT` format or just the 32-char NT hash by itself. The LM half is almost always `aad3b435b51404eeaad3b435b51404ee` these days (because LM hashes are disabled on anything modern), so either works.
@@ -29,11 +29,11 @@ For when you want to avoid sending NTLM over the wire, or when the environment f
 
 ```bash
 # Step 1: Get a TGT (using impacket's getTGT.py)
-getTGT.py thesimpsons.local/homer.simpson:'Doh!123' -dc-ip 10.0.0.1
+getTGT.py shinra.local/cloud.strife:'Buster$word97!' -dc-ip 10.0.0.1
 
 # Step 2: Use the ccache
-export KRB5CCNAME=homer.simpson.ccache
-taskhound -u homer.simpson -d thesimpsons.local -t moe.thesimpsons.local -k
+export KRB5CCNAME=cloud.strife.ccache
+taskhound -u cloud.strife -d shinra.local -t reactor01.shinra.local -k
 ```
 
 The `-k` flag tells TaskHound to use Kerberos. It picks up the TGT from `KRB5CCNAME`. Make sure DNS is working or use `--dc-ip` — Kerberos is famously allergic to DNS problems.
@@ -46,12 +46,12 @@ For the rare occasion you have an AES key (post-exploitation, DCSync, etc.):
 
 ```bash
 # AES-256 (64 hex chars)
-taskhound -u homer.simpson --aes-key 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
-  -d thesimpsons.local -t moe.thesimpsons.local
+taskhound -u cloud.strife --aes-key 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+  -d shinra.local -t reactor01.shinra.local
 
 # AES-128 (32 hex chars)
-taskhound -u homer.simpson --aes-key 0123456789abcdef0123456789abcdef \
-  -d thesimpsons.local -t moe.thesimpsons.local
+taskhound -u cloud.strife --aes-key 0123456789abcdef0123456789abcdef \
+  -d shinra.local -t reactor01.shinra.local
 ```
 
 This implicitly uses Kerberos under the hood.
@@ -63,7 +63,7 @@ LAPS lets you use per-host local admin passwords that Active Directory manages. 
 ### Basic Usage
 
 ```bash
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local --targets-file hosts.txt --laps --threads 10
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local --targets-file targets.txt --laps --threads 10
 ```
 
 TaskHound queries LDAP for each target's LAPS password, then authenticates to that host with it. Your domain account needs read permissions on the LAPS attributes (which is a common delegation).
@@ -73,7 +73,7 @@ TaskHound queries LDAP for each target's LAPS password, then authenticates to th
 If the LAPS-managed account isn't called `Administrator` (some orgs rename it, and honestly, they should):
 
 ```bash
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.local --laps --laps-user localadmin
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local --laps --laps-user localadmin
 ```
 
 ### LAPS + OPSEC Mode
@@ -81,7 +81,7 @@ taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.
 OPSEC mode disables LDAP and RPC operations for stealth, which conflicts with LAPS (it needs LDAP). If you want LAPS anyway, use `--force-laps`:
 
 ```bash
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.local --laps --opsec --force-laps
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local --laps --opsec --force-laps
 ```
 
 I know this is far from ideal and will certainly blow up in edge cases, but sometimes you need LAPS more than you need stealth.
@@ -101,8 +101,8 @@ TaskHound tries all three attributes and uses whatever it finds. If a host has b
 Sometimes the account you're scanning with doesn't have the best LDAP access for SID resolution (or you want to use a different account for the LDAP-heavy operations). You can specify separate LDAP credentials:
 
 ```bash
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.local \
-  --ldap-user svc_ldap --ldap-password 'LdapPass!456'
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local \
+  --ldap-user svc_materia --ldap-password 'LdapPass!456'
 ```
 
-This uses `homer.simpson` for SMB connections to targets but `svc_ldap` for all LDAP/GC SID resolution queries. Niche, but it comes up.
+This uses `cloud.strife` for SMB connections to targets but `svc_materia` for all LDAP/GC SID resolution queries. Niche, but it comes up.

@@ -17,9 +17,9 @@ CLI arguments override config file values. Always. Environment variables sit in 
 
 ```toml
 [authentication]
-username = "homer.simpson"
-domain = "THESIMPSONS.LOCAL"
-# password = "Doh!123"  # Works but consider env vars for secrets
+username = "cloud.strife"
+domain = "SHINRA.LOCAL"
+# password = "Buster$word97!"  # Works but consider env vars for secrets
 
 [target]
 dc_ip = "10.0.0.1"
@@ -60,10 +60,10 @@ api_key_id = "${BH_API_KEY_ID}"
 ```
 
 ```bash
-export TH_PASSWORD='Doh!123'
+export TH_PASSWORD='Buster$word97!'
 export BH_API_KEY='your-api-key'
 export BH_API_KEY_ID='your-key-id'
-taskhound -t moe.thesimpsons.local   # Everything else from config
+taskhound -t reactor01.shinra.local   # Everything else from config
 ```
 
 This is marginally better than plaintext in a file. Not great, but better. For proper secret management you're on your own.

@@ -18,17 +18,17 @@ Requires Python 3.11+. If you're on an older version, I'm sorry but you'll need 
 ## Your First Scan
 
 ```bash
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.local
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local
 ```
 
 Breaking that down:
 
 | Flag | What it does |
 |------|-------------|
-| `-u homer.simpson` | Domain username |
-| `-p 'Doh!123'` | Password (quote it, shells are vindictive) |
-| `-d thesimpsons.local` | Domain FQDN |
-| `-t moe.thesimpsons.local` | Target host to scan |
+| `-u cloud.strife` | Domain username |
+| `-p 'Buster$word97!'` | Password (quote it, shells are vindictive) |
+| `-d shinra.local` | Domain FQDN |
+| `-t reactor01.shinra.local` | Target host to scan |
 
 ## What to Expect
 
@@ -44,10 +44,10 @@ You'll get a summary table at the end showing task counts per host. Default outp
 
 ```bash
 # From a file (one host per line)
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local --targets-file hosts.txt --threads 10
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local --targets-file targets.txt --threads 10
 
 # Auto-discover every domain computer (this will make any decent SOC light up like a Christmas tree)
-taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local --dc-ip 10.0.0.1 --auto-targets --threads 20
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local --dc-ip 10.0.0.1 --auto-targets --threads 20
 ```
 
 ## Common First-Run Issues

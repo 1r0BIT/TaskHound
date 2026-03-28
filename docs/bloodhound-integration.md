@@ -2,8 +2,8 @@
 
 ## Why bother
 
-Without BloodHound, TaskHound can tell you that `CORP\svc_sql` runs a scheduled task
-with stored credentials on DBSERVER01. With BloodHound, it can tell you that `svc_sql`
+Without BloodHound, TaskHound can tell you that `SHINRA\svc_mako` runs a scheduled task
+with stored credentials on REACTOR01. With BloodHound, it can tell you that `svc_mako`
 has a path to Domain Admin through three group memberships and an unconstrained delegation.
 That's the difference between "mildly interesting" and "hair on fire."
 
@@ -17,9 +17,9 @@ TaskHound supports three BloodHound backends. Pick one.
 ### BloodHound Community Edition (BHCE) with API key (recommended)
 
 ```bash
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 \
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local \
   --bh-live --bhce \
-  --bh-connector https://bh.corp.local:8080 \
+  --bh-connector http://127.0.0.1:8080 \
   --bh-api-key-id YOUR_KEY_ID \
   --bh-api-key YOUR_API_KEY
 ```
@@ -27,16 +27,16 @@ taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 \
 ### BHCE with username/password
 
 ```bash
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 \
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local \
   --bh-live --bhce \
-  --bh-connector https://bh.corp.local:8080 \
+  --bh-connector http://127.0.0.1:8080 \
   --bh-user admin@bh.local --bh-password 'BHpassword'
 ```
 
 ### Legacy BloodHound (Neo4j)
 
 ```bash
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 \
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local \
   --bh-live --legacy \
   --bh-connector bolt://neo4j.local:7687 \
   --bh-user neo4j --bh-password 'neo4jpass'
@@ -47,7 +47,7 @@ Or put all of this in `taskhound.toml` and never type it again:
 ```toml
 [bloodhound]
 type = "bhce"
-url = "https://bh.corp.local:8080"
+url = "http://127.0.0.1:8080"
 api_key_id = "YOUR_KEY_ID"
 api_key = "YOUR_API_KEY"
 ```
@@ -72,7 +72,7 @@ Don't have a live BloodHound instance? You can export high-value targets and fee
 
 ```bash
 # From BHCE or Legacy, export HVT list to CSV/JSON, then:
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 \
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local \
   --bh-data ./hvt_export.csv
 ```
 
@@ -122,13 +122,13 @@ This keeps the graph clean and lets you ingest them independently.
 
 ```bash
 # Generate OpenGraph files (auto-uploads to BHCE if connected)
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 \
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local \
   --bh-live --bhce --bh-opengraph \
-  --bh-connector https://bh.corp.local:8080 \
+  --bh-connector http://127.0.0.1:8080 \
   --bh-api-key-id KEYID --bh-api-key SECRET
 
 # Generate without auto-upload
-taskhound -u admin -p 'P@ss' -d corp.local -t 10.0.0.5 \
+taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local \
   --bh-live --bhce --bh-opengraph --bh-no-upload
 
 # Upload a previously generated file manually
