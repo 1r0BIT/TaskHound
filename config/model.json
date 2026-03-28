@@ -6,6 +6,13 @@
         "name": "clock",
         "color": "#8B5CF6"
       }
+    },
+    "WindowsService": {
+      "icon": {
+        "type": "font-awesome",
+        "name": "gears",
+        "color": "#06B6D4"
+      }
     }
   }
 }

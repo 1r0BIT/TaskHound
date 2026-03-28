@@ -581,7 +581,8 @@ def _set_custom_icon(
             # Fallback to hardcoded structure
             model_data = {
                 "custom_types": {
-                    "ScheduledTask": {"icon": {"type": "font-awesome", "name": icon_name, "color": icon_color}}
+                    "ScheduledTask": {"icon": {"type": "font-awesome", "name": icon_name, "color": icon_color}},
+                    "WindowsService": {"icon": {"type": "font-awesome", "name": "gears", "color": "#06B6D4"}},
                 }
             }
         else:
