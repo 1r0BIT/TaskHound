@@ -39,7 +39,7 @@ from .utils.console import (
 from .utils.date_parser import parse_timestamp
 from .utils.helpers import normalize_targets
 from .utils.logging import debug, good, info, set_verbosity, status, warn
-from .utils.network import verify_ldap_connection
+from .utils.network import preflight_credential_check, verify_ldap_connection
 
 
 def _handle_opengraph(
@@ -661,6 +661,32 @@ This scan involves:
         except (KeyboardInterrupt, EOFError):
             console.print("\n[blue][*][/] Aborted.")
             sys.exit(0)
+
+    # Pre-flight credential validation (online mode only)
+    # Validates creds with a single auth attempt BEFORE scanning to prevent
+    # account lockout from repeated bad-password attempts across N targets.
+    if not args.offline and not getattr(args, "offline_disk", None) and hasattr(args, "username") and args.username:
+        # Build a quick target list for fallback if no --dc-ip
+        quick_targets = []
+        if args.target:
+            quick_targets = [t.strip() for t in args.target.split(",") if t.strip()]
+
+        preflight_credential_check(
+            domain=args.domain,
+            username=args.username,
+            password=args.password,
+            hashes=args.hashes,
+            kerberos=args.kerberos or getattr(args, "aes_key", None) is not None,
+            dc_ip=args.dc_ip,
+            timeout=args.timeout,
+            aes_key=getattr(args, "aes_key", None),
+            ldap_domain=args.ldap_domain,
+            ldap_user=args.ldap_user,
+            ldap_password=args.ldap_password,
+            ldap_hashes=args.ldap_hashes,
+            no_ldap=args.no_ldap,
+            targets=quick_targets,
+        )
 
     # Initialize Cache
     cache_file = Path(args.cache_file) if args.cache_file else None
