@@ -40,11 +40,18 @@ def match_username(username1: str, username2: str) -> bool:
     if u1 == u2:
         return True
 
-    # Extract username portions (after backslash if present)
-    u1_name = u1.split("\\")[-1] if "\\" in u1 else u1
-    u2_name = u2.split("\\")[-1] if "\\" in u2 else u2
+    # Extract username portions:
+    #   DOMAIN\user -> user
+    #   user@domain.local -> user
+    #   user -> user
+    def _extract_name(u: str) -> str:
+        if "\\" in u:
+            return u.split("\\")[-1]
+        if "@" in u:
+            return u.split("@")[0]
+        return u
 
-    return u1_name == u2_name
+    return _extract_name(u1) == _extract_name(u2)
 
 
 def find_password_for_user(

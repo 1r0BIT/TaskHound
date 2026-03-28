@@ -77,10 +77,10 @@ def resolve_sid_via_ldap(
         base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
         debug(f"Using LDAP base DN: {base_dn}")
 
-        # Create search filter using binary SID
-        # Impacket expects hex-escaped binary format
-        binary_sid_escaped = "".join([f"\\{b:02x}" for b in binary_sid])
-        search_filter = f"(objectSid={binary_sid_escaped})"
+        # Create search filter using string SID format
+        # Impacket's LDAP implementation handles string SIDs correctly
+        # but does NOT handle binary-escaped \xx format
+        search_filter = f"(objectSid={sid})"
         debug(f"LDAP search filter: {search_filter}")
 
         # Perform the search
