@@ -8,6 +8,8 @@ COLORS = {
     "priv_border": "yellow",
     "task_header": "bold green",
     "task_border": "green",
+    "service_header": "bold cyan",
+    "service_border": "cyan",
     "label": "dim",
     "value": "white",
     "password": "bold green",

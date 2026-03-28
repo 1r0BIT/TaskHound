@@ -473,6 +473,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument("--bh-data", help="Path to High Value Target export (csv/json from Neo4j)")
 
+    # Service enumeration options
+    svc_group = ap.add_argument_group("Service Enumeration")
+    svc_group.add_argument(
+        "--services",
+        action="store_true",
+        help="Enable Windows Service enumeration via SVCCTL RPC alongside task scanning. "
+        "Discovers services running as domain accounts with stored credentials.",
+    )
+    svc_group.add_argument(
+        "--services-only",
+        action="store_true",
+        help="Only enumerate services (skip scheduled task scanning). Implies --services.",
+    )
+
     # BloodHound live connection options
     bh_group = ap.add_argument_group("BloodHound Live Connection")
     bh_group.add_argument(
@@ -717,6 +731,10 @@ def validate_args(args):
     # Initialize no_rpc if not present (for backwards compatibility)
     if not hasattr(args, 'no_rpc'):
         args.no_rpc = False
+
+    # --services-only implies --services
+    if getattr(args, "services_only", False):
+        args.services = True
 
     # Parse and validate --output formats
     args.output_formats = set()

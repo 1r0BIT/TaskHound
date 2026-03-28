@@ -890,6 +890,9 @@ This operation involves:
         # Compute backup directory path for online scanning
         online_backup_dir = os.path.join(args.output_dir, "raw_backups") if args.backup else None
 
+        # Track service results separately from task results
+        all_service_rows: list = []
+
         # Common kwargs for process_target
         process_kwargs = {
             "auth": auth,
@@ -910,6 +913,9 @@ This operation involves:
             "laps_cache": laps_cache,
             "validate_creds": args.validate_creds,
             "ldap_tier0": args.ldap_tier0,
+            "services": getattr(args, "services", False),
+            "services_only": getattr(args, "services_only", False),
+            "all_service_rows": all_service_rows,
         }
 
         # Parallel mode (--threads > 1) or sequential with jitter
@@ -928,7 +934,8 @@ This operation involves:
             _ = (time.perf_counter() - start_time) * 1000  # elapsed_ms for future use
 
             # Aggregate results
-            all_rows, laps_failures, laps_successes = aggregate_results(results)
+            all_rows, agg_service_rows, laps_failures, laps_successes = aggregate_results(results)
+            all_service_rows.extend(agg_service_rows)
 
         else:
             # Sequential mode (default, --threads 1)

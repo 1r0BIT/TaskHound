@@ -246,7 +246,7 @@ class TestAggregateResults:
             TargetResult(target="h2", success=True, rows=[{"host": "h2"}, {"host": "h2_2"}]),
         ]
 
-        all_rows, laps_failures, laps_successes = aggregate_results(results)
+        all_rows, _svc_rows, laps_failures, laps_successes = aggregate_results(results)
 
         assert len(all_rows) == 3
         assert laps_successes == 0
@@ -265,7 +265,7 @@ class TestAggregateResults:
             TargetResult(target="h3", success=True, laps_result=True),
         ]
 
-        all_rows, laps_failures, laps_successes = aggregate_results(results)
+        all_rows, _svc_rows, laps_failures, laps_successes = aggregate_results(results)
 
         assert laps_successes == 2
         assert len(laps_failures) == 1
@@ -278,7 +278,7 @@ class TestAggregateResults:
             TargetResult(target="h3", success=True, rows=[{"b": 2}]),
         ]
 
-        all_rows, _, _ = aggregate_results(results)
+        all_rows, _, _, _ = aggregate_results(results)
 
         assert len(all_rows) == 2
 
@@ -425,7 +425,7 @@ class TestRealisticScenarios:
         targets = ["host1", "host2_nolaps", "host3", "host4_nolaps", "host5"]
         results = engine.run(targets, laps_process)
 
-        all_rows, laps_failures, laps_successes = aggregate_results(results)
+        all_rows, _svc_rows, laps_failures, laps_successes = aggregate_results(results)
 
         assert laps_successes == 3
         assert len(laps_failures) == 2

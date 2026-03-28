@@ -459,6 +459,73 @@ def prefetch_tier0_members(
     return tier0_cache
 
 
+def perform_service_enumeration(
+    target: str,
+    smb: Any,
+    host: str,
+    *,
+    target_ip: Optional[str] = None,
+    computer_sid: Optional[str] = None,
+    local_accounts: Optional[set] = None,
+    credguard_status: Optional[bool] = None,
+    debug: bool = False,
+) -> List[Any]:
+    """
+    Enumerate Windows services via SVCCTL RPC and filter to domain accounts.
+
+    Args:
+        target: Target identifier (for logging)
+        smb: Authenticated SMB connection
+        host: Server FQDN
+        target_ip: Original target IP
+        computer_sid: Computer SID
+        local_accounts: Known local account names (lowercase) from SAMR
+        credguard_status: Credential Guard status for the host
+        debug: Enable debug output
+
+    Returns:
+        List of ServiceRow instances for domain-account services
+    """
+    from ..models.service import ServiceRow
+    from ..parsers.service_filter import filter_domain_services
+    from ..smb.svcctl import enumerate_services
+
+    try:
+        raw_services = enumerate_services(smb, host)
+    except Exception as e:
+        warn(f"{target}: Service enumeration failed: {e}")
+        if debug:
+            traceback.print_exc()
+        return []
+
+    if not raw_services:
+        info(f"{target}: No Win32 services found")
+        return []
+
+    # Filter to domain accounts only
+    domain_services = filter_domain_services(raw_services, local_accounts=local_accounts)
+
+    if not domain_services:
+        info(f"{target}: No services running as domain accounts")
+        return []
+
+    good(f"{target}: Found {len(domain_services)} services running as domain accounts")
+
+    # Build ServiceRow instances
+    rows = []
+    for svc in domain_services:
+        row = ServiceRow.from_svcctl(
+            host=host,
+            svc=svc,
+            target_ip=target_ip,
+            computer_sid=computer_sid,
+        )
+        row.credential_guard = credguard_status
+        rows.append(row)
+
+    return rows
+
+
 def sort_tasks_by_priority(lines: List[str]) -> List[str]:
     """
     Sort task blocks by priority: TIER-0 > PRIV > TASK.

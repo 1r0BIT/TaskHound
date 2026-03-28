@@ -101,6 +101,9 @@ def process_target(
     laps_cache: Optional[LAPSCache] = None,
     validate_creds: bool = False,
     ldap_tier0: bool = False,
+    services: bool = False,
+    services_only: bool = False,
+    all_service_rows: Optional[List] = None,
 ) -> Tuple[List[str], Optional[Union[bool, LAPSFailure]]]:
     """
     Connect to `target`, enumerate scheduled tasks, and return printable lines.
@@ -427,37 +430,41 @@ def process_target(
                 smb.close()
             return out_lines, laps_result
 
-    if not include_ms:
-        info(f"{target}: Crawling Scheduled Tasks (skipping \\Microsoft for speed)")
+    # Skip task enumeration if --services-only
+    if services_only:
+        items = []
     else:
-        warn(f"{target}: Crawling ALL Scheduled Tasks, including \\Microsoft (this may be slow!)")
+        if not include_ms:
+            info(f"{target}: Crawling Scheduled Tasks (skipping \\Microsoft for speed)")
+        else:
+            warn(f"{target}: Crawling ALL Scheduled Tasks, including \\Microsoft (this may be slow!)")
 
-    try:
-        items = crawl_tasks(smb, include_ms=include_ms)
-    except SessionError:
-        if debug:
-            traceback.print_exc()
-        status(f"[Collecting] {target} [-] (Access Denied)")
-        all_rows.append(TaskRow.failure(
-            target,
-            "Access Denied (Failed to crawl tasks)",
-        ))
-        warn(f"{target}: Failed to Crawl Tasks. Skipping... (Are you Local Admin?)", verbose_only=True)
-        with contextlib.suppress(Exception):
-            smb.close()
-        return out_lines, laps_result
-    except Exception as e:
-        if debug:
-            traceback.print_exc()
-        status(f"[Collecting] {target} [-] ({e})")
-        all_rows.append(TaskRow.failure(
-            target,
-            f"Crawling failed: {e}",
-        ))
-        warn(f"{target}: Unexpected error while crawling tasks: {e}", verbose_only=True)
-        with contextlib.suppress(Exception):
-            smb.close()
-        return out_lines, laps_result
+        try:
+            items = crawl_tasks(smb, include_ms=include_ms)
+        except SessionError:
+            if debug:
+                traceback.print_exc()
+            status(f"[Collecting] {target} [-] (Access Denied)")
+            all_rows.append(TaskRow.failure(
+                target,
+                "Access Denied (Failed to crawl tasks)",
+            ))
+            warn(f"{target}: Failed to Crawl Tasks. Skipping... (Are you Local Admin?)", verbose_only=True)
+            with contextlib.suppress(Exception):
+                smb.close()
+            return out_lines, laps_result
+        except Exception as e:
+            if debug:
+                traceback.print_exc()
+            status(f"[Collecting] {target} [-] ({e})")
+            all_rows.append(TaskRow.failure(
+                target,
+                f"Crawling failed: {e}",
+            ))
+            warn(f"{target}: Unexpected error while crawling tasks: {e}", verbose_only=True)
+            with contextlib.suppress(Exception):
+                smb.close()
+            return out_lines, laps_result
 
     # First pass: identify tasks with Password logon type for credential validation
     # Credential validation requires RPC (Task Scheduler pipe), skip if no_rpc is set
@@ -788,8 +795,54 @@ def process_target(
         status(f"[Collected] {target}: {total} Tasks, {priv_display} Privileged")
     good(f"{target}: Found {filtered_count} tasks (of {total} total), privileged {priv_display}{backup_msg}{laps_msg}")
 
+    # --- Service enumeration (if enabled) ---
+    service_lines: List[str] = []
+    if services:
+        from ..smb.local_users import enumerate_local_users
+        from .helpers import perform_service_enumeration
+
+        local_accounts: Optional[set] = None
+        if not no_rpc:
+            try:
+                local_users_dict = enumerate_local_users(smb, server_fqdn or target)
+                local_accounts = set(local_users_dict.keys())
+            except Exception:
+                pass
+
+        svc_rows = perform_service_enumeration(
+            target,
+            smb,
+            server_fqdn or target,
+            target_ip=target,
+            computer_sid=server_sid,
+            local_accounts=local_accounts,
+            credguard_status=credguard_status,
+            debug=debug,
+        )
+
+        if svc_rows and all_service_rows is not None:
+            all_service_rows.extend(svc_rows)
+
+        if svc_rows:
+            from ..output.printer import format_service_block
+
+            for svc_row in svc_rows:
+                service_lines.extend(
+                    format_service_block(
+                        kind=svc_row.type,
+                        service_name=svc_row.service_name,
+                        display_name=svc_row.display_name,
+                        start_name=svc_row.start_name,
+                        binary_path=svc_row.binary_path,
+                        start_type=svc_row.start_type,
+                        state=svc_row.state,
+                        is_gmsa=svc_row.is_gmsa,
+                        hostname=hostname,
+                    )
+                )
+
     # Combine credential loot output with task listing output
     # Put credentials first since they're the most valuable
     with contextlib.suppress(Exception):
         smb.close()
-    return out_lines + sorted_lines, laps_result
+    return out_lines + sorted_lines + service_lines, laps_result

@@ -31,6 +31,7 @@ from rich.progress import (
 )
 
 from ..laps import LAPSFailure
+from ..models.service import ServiceRow
 from ..models.task import TaskRow
 from ..utils.console import (
     console,
@@ -79,7 +80,10 @@ class TargetResult:
     """Output lines from processing."""
 
     rows: List[TaskRow] = field(default_factory=list)
-    """Structured data rows for export."""
+    """Structured task data rows for export."""
+
+    service_rows: List[ServiceRow] = field(default_factory=list)
+    """Structured service data rows for export."""
 
     laps_result: Optional[Union[bool, LAPSFailure]] = None
     """LAPS authentication result if applicable."""
@@ -182,15 +186,20 @@ class AsyncTaskHound:
         start_time = time.perf_counter()
         result = TargetResult(target=target, success=False)
 
-        # Each worker gets its own row collector
+        # Each worker gets its own row collectors
         target_rows: List[TaskRow] = []
+        target_service_rows: List[ServiceRow] = []
 
         try:
+            # Override the shared service_rows list with a per-target one
+            worker_kwargs = dict(kwargs)
+            worker_kwargs["all_service_rows"] = target_service_rows
+
             # Call the actual processing function
             lines, laps_result = process_fn(
                 target=target,
                 all_rows=target_rows,
-                **kwargs
+                **worker_kwargs
             )
 
             # Check if processing actually succeeded by looking at rows
@@ -210,6 +219,7 @@ class AsyncTaskHound:
             result.success = not has_failure and not has_skipped
             result.lines = lines
             result.rows = target_rows
+            result.service_rows = target_service_rows
             result.laps_result = laps_result
 
             # Mark as skipped only if explicitly flagged via SKIPPED row
@@ -489,7 +499,7 @@ class AsyncTaskHound:
             print_fn(lines)
 
 
-def aggregate_results(results: List[TargetResult]) -> Tuple[List[TaskRow], List[LAPSFailure], int]:
+def aggregate_results(results: List[TargetResult]) -> Tuple[List[TaskRow], List[ServiceRow], List[LAPSFailure], int]:
     """
     Aggregate results from parallel processing.
 
@@ -497,14 +507,16 @@ def aggregate_results(results: List[TargetResult]) -> Tuple[List[TaskRow], List[
         results: List of TargetResult objects
 
     Returns:
-        Tuple of (all_rows, laps_failures, laps_successes)
+        Tuple of (all_rows, all_service_rows, laps_failures, laps_successes)
     """
     all_rows: List[TaskRow] = []
+    all_service_rows: List[ServiceRow] = []
     laps_failures: List[LAPSFailure] = []
     laps_successes = 0
 
     for result in results:
         all_rows.extend(result.rows)
+        all_service_rows.extend(result.service_rows)
 
         if result.laps_result is not None:
             if result.laps_result is True:
@@ -512,7 +524,7 @@ def aggregate_results(results: List[TargetResult]) -> Tuple[List[TaskRow], List[
             elif isinstance(result.laps_result, LAPSFailure):
                 laps_failures.append(result.laps_result)
 
-    return all_rows, laps_failures, laps_successes
+    return all_rows, all_service_rows, laps_failures, laps_successes
 
 
 def print_summary(

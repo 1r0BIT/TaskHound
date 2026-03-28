@@ -665,3 +665,117 @@ def _find_decrypted_password(
     primary_username = display_runas if display_runas else runas
     return find_password_for_user(primary_username, decrypted_creds, resolved_username)
 
+
+def format_service_block(
+    kind: str,
+    service_name: str,
+    display_name: Optional[str] = None,
+    start_name: Optional[str] = None,
+    binary_path: Optional[str] = None,
+    start_type: Optional[str] = None,
+    state: Optional[str] = None,
+    is_gmsa: bool = False,
+    hostname: Optional[str] = None,
+    reason: Optional[str] = None,
+    password_analysis: Optional[str] = None,
+    decrypted_password: Optional[str] = None,
+    resolved_runas: Optional[str] = None,
+    credential_guard: Optional[bool] = None,
+) -> List[str]:
+    """
+    Format a Windows service finding for rich console output.
+
+    Returns a list of output lines (for compatibility with the task
+    format_block pattern used by process_target).
+    """
+    # Build row tuples for print_service_table
+    rows: List[tuple] = []
+
+    if display_name:
+        rows.append(("Display Name", display_name))
+    if start_name:
+        account_display = start_name
+        if resolved_runas and resolved_runas != start_name:
+            account_display = f"{resolved_runas} (SID: {start_name})"
+        if is_gmsa:
+            account_display += " [gMSA]"
+        rows.append(("Run As", account_display))
+    if binary_path:
+        rows.append(("Binary Path", binary_path))
+    if start_type:
+        rows.append(("Start Type", start_type))
+    if state:
+        rows.append(("State", state))
+    if reason:
+        rows.append(("Reason", reason))
+    if password_analysis:
+        rows.append(("Pwd Analysis", password_analysis))
+    if decrypted_password:
+        rows.append(("Decrypted Pwd", decrypted_password))
+    if credential_guard is True:
+        rows.append(("Cred Guard", "DETECTED - LSA extraction may fail"))
+
+    # Use the same table renderer as tasks
+    print_service_table(kind, service_name, rows, hostname=hostname)
+
+    # Return a summary line for the text output stream
+    tag = f"[{kind}]"
+    account = start_name or "?"
+    if is_gmsa:
+        account += " [gMSA]"
+    line = f"\n{tag} {hostname or ''} - {service_name} (Run As: {account})"
+    return [line]
+
+
+def print_service_table(
+    kind: str,
+    service_name: str,
+    rows: List[tuple],
+    hostname: Optional[str] = None,
+) -> None:
+    """Print a service finding as a Rich table with colored borders."""
+    if not (log_utils._VERBOSE or log_utils._DEBUG):
+        return
+
+    # Select colors based on classification
+    if kind == "TIER-0":
+        header_style = COLORS["tier0_header"]
+        border_style = COLORS["tier0_border"]
+        tag = "[TIER-0]"
+    elif kind == "PRIV":
+        header_style = COLORS["priv_header"]
+        border_style = COLORS["priv_border"]
+        tag = "[PRIV]"
+    else:
+        header_style = COLORS["service_header"]
+        border_style = COLORS["service_border"]
+        tag = "[SERVICE]"
+
+    title = f"[{header_style}]{tag}[/] {hostname} - {service_name}" if hostname else f"[{header_style}]{tag}[/] {service_name}"
+
+    table = Table(
+        title=title,
+        title_style=header_style,
+        border_style=border_style,
+        show_header=False,
+        expand=False,
+        padding=(0, 1),
+    )
+
+    table.add_column("Field", style=COLORS["label"], width=18)
+    table.add_column("Value", style=COLORS["value"])
+
+    for label, value in rows:
+        value_style = COLORS["value"]
+        if label == "Decrypted Pwd" and value:
+            value_style = COLORS["password"]
+        elif label == "Pwd Analysis":
+            if "GOOD" in value.upper():
+                value_style = COLORS["success"]
+            elif "BAD" in value.upper():
+                value_style = COLORS["warning"]
+        table.add_row(f"[{COLORS['label']}]{label}[/]", f"[{value_style}]{value}[/]")
+
+    console.print()
+    console.print(table)
+
