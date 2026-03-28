@@ -468,10 +468,27 @@ def perform_service_enumeration(
     computer_sid: Optional[str] = None,
     local_accounts: Optional[set] = None,
     credguard_status: Optional[bool] = None,
+    hv: Optional[Any] = None,
+    bh_connector: Optional[Any] = None,
+    no_ldap: bool = False,
+    no_rpc: bool = False,
+    domain: Optional[str] = None,
+    dc_ip: Optional[str] = None,
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+    hashes: Optional[str] = None,
+    kerberos: bool = False,
+    aes_key: Optional[str] = None,
+    ldap_domain: Optional[str] = None,
+    ldap_user: Optional[str] = None,
+    ldap_password: Optional[str] = None,
+    ldap_hashes: Optional[str] = None,
+    pwd_cache: Optional[Dict] = None,
+    tier0_cache: Optional[Dict] = None,
     debug: bool = False,
 ) -> List[Any]:
     """
-    Enumerate Windows services via SVCCTL RPC and filter to domain accounts.
+    Enumerate Windows services via SVCCTL RPC, resolve SIDs, and classify.
 
     Args:
         target: Target identifier (for logging)
@@ -481,13 +498,25 @@ def perform_service_enumeration(
         computer_sid: Computer SID
         local_accounts: Known local account names (lowercase) from SAMR
         credguard_status: Credential Guard status for the host
+        hv: HighValueLoader for privilege classification
+        bh_connector: BloodHound connector for SID resolution
+        no_ldap: Disable LDAP queries
+        no_rpc: Disable RPC operations
+        domain: Domain name for SID resolution
+        dc_ip: Domain controller IP
+        username/password/hashes/kerberos/aes_key: Auth for SID resolution
+        ldap_domain/ldap_user/ldap_password/ldap_hashes: LDAP auth overrides
+        pwd_cache: Pre-fetched pwdLastSet data
+        tier0_cache: Pre-fetched Tier-0 membership data
         debug: Enable debug output
 
     Returns:
         List of ServiceRow instances for domain-account services
     """
+    from ..classification import classify_service
     from ..models.service import ServiceRow
     from ..parsers.service_filter import filter_domain_services
+    from ..resolver import format_runas_with_sid_resolution, is_sid
     from ..smb.svcctl import enumerate_services
 
     try:
@@ -511,7 +540,7 @@ def perform_service_enumeration(
 
     good(f"{target}: Found {len(domain_services)} services running as domain accounts")
 
-    # Build ServiceRow instances
+    # Build ServiceRow instances with SID resolution and classification
     rows = []
     for svc in domain_services:
         row = ServiceRow.from_svcctl(
@@ -521,7 +550,48 @@ def perform_service_enumeration(
             computer_sid=computer_sid,
         )
         row.credential_guard = credguard_status
+
+        account = row.start_name or ""
+
+        # SID resolution
+        if account and is_sid(account):
+            resolved = format_runas_with_sid_resolution(
+                account,
+                hv=hv,
+                bh_connector=bh_connector,
+                smb_connection=None if no_rpc else smb,
+                no_ldap=no_ldap,
+                domain=domain,
+                dc_ip=dc_ip,
+                username=username,
+                password=password,
+                hashes=hashes,
+                kerberos=kerberos,
+                ldap_domain=ldap_domain,
+                ldap_user=ldap_user,
+                ldap_password=ldap_password,
+                ldap_hashes=ldap_hashes,
+            )
+            if resolved and resolved != account:
+                row.resolved_runas = resolved
+
+        # Classify
+        classify_service(
+            row,
+            account,
+            hv=hv,
+            pwd_cache=pwd_cache,
+            tier0_cache=tier0_cache,
+            resolved_account=row.resolved_runas,
+        )
+
         rows.append(row)
+
+    # Summary counts
+    tier0_count = sum(1 for r in rows if r.type == "TIER-0")
+    priv_count = sum(1 for r in rows if r.type == "PRIV")
+    if tier0_count or priv_count:
+        good(f"{target}: Services classified — {tier0_count} TIER-0, {priv_count} PRIV, {len(rows) - tier0_count - priv_count} SERVICE")
 
     return rows
 

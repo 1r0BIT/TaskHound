@@ -1,8 +1,9 @@
-# Task classification logic for determining privilege levels.
+# Classification logic for determining privilege levels.
 #
 # This module provides shared classification logic used by both online
-# and offline processing modes. It determines whether a task is TIER-0,
-# PRIV (high-value), or TASK (normal) based on the runas account.
+# and offline processing modes. It determines whether a task or service
+# is TIER-0, PRIV (high-value), or TASK/SERVICE (normal) based on the
+# runas/start_name account.
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,6 +13,7 @@ from .resolver import looks_like_domain_user
 from .utils.logging import warn
 
 if TYPE_CHECKING:
+    from .models.service import ServiceRow
     from .models.task import TaskRow
 
 from .models.task import TaskType
@@ -19,9 +21,9 @@ from .models.task import TaskType
 
 @dataclass
 class ClassificationResult:
-    """Result of task classification."""
+    """Result of task or service classification."""
 
-    task_type: str  # "TIER-0", "PRIV", or "TASK"
+    task_type: str  # "TIER-0", "PRIV", "TASK", or "SERVICE"
     reason: Optional[str] = None
     password_analysis: Optional[str] = None
     should_include: bool = True  # Whether to include in output
@@ -281,4 +283,191 @@ def classify_task(
         reason=None,
         password_analysis=password_analysis,
         should_include=should_include,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Shared privilege detection helpers
+# ---------------------------------------------------------------------------
+
+
+def _check_account_disabled(hv: Any, account: str) -> bool:
+    """Check if an account is disabled in AD via BloodHound data."""
+    if hv and hv.loaded:
+        enabled = hv.is_account_enabled(account)
+        if enabled is False:
+            return True
+    return False
+
+
+def _classify_by_privilege(
+    account: str,
+    hv: Optional[Any],
+    tier0_cache: Optional[Tier0Cache] = None,
+    resolved_account: Optional[str] = None,
+) -> Optional[Tuple[str, str]]:
+    """
+    Check if an account is TIER-0 or PRIV via BloodHound or LDAP cache.
+
+    This is the shared privilege detection used by both classify_task()
+    and classify_service().
+
+    Args:
+        account: The account name (domain\\user, UPN, SID, or bare name)
+        hv: HighValueLoader instance (can be None)
+        tier0_cache: Pre-fetched LDAP Tier-0 membership data
+        resolved_account: Resolved username if account was a SID
+
+    Returns:
+        Tuple of (classification, reason) if TIER-0 or PRIV detected,
+        None if the account is not privileged.
+    """
+    # Priority 1: BloodHound data
+    if hv and hv.loaded:
+        is_tier0, tier0_reasons = hv.check_tier0(account)
+        if is_tier0:
+            return "TIER-0", "; ".join(tier0_reasons)
+
+        if hv.check_highvalue(account):
+            return "PRIV", "High Value match found (Check BloodHound Outbound Object Control for Details)"
+
+    # Priority 2: LDAP tier0_cache (when BloodHound not available)
+    elif tier0_cache:
+        from .resolver import is_sid
+
+        lookup_user = account
+        if is_sid(account) and resolved_account:
+            lookup_user = resolved_account
+
+        has_domain_qualifier = "\\" in lookup_user or "@" in lookup_user or is_sid(account)
+        norm_user = lookup_user.split("\\")[-1].lower() if "\\" in lookup_user else lookup_user.lower()
+        tier0_result = tier0_cache.get(norm_user) if has_domain_qualifier else None
+
+        if tier0_result:
+            is_tier0, groups = tier0_result
+            if is_tier0:
+                return "TIER-0", f"Tier-0 via LDAP: member of {', '.join(groups)}"
+
+    return None
+
+
+def _get_password_analysis_from_cache(
+    account: str,
+    pwd_cache: Optional[PwdLastSetCache],
+    hv: Optional[Any] = None,
+) -> Optional[str]:
+    """
+    Get password age analysis for an account from cache or BloodHound.
+
+    Unlike _analyze_password_age() which needs task metadata dates,
+    this version works with accounts directly (for services).
+    """
+    # Try BloodHound first
+    if hv and hv.loaded:
+        risk_level, pwd_analysis = hv.analyze_password_age(account, None)
+        if risk_level != "UNKNOWN":
+            return f"{risk_level}: {pwd_analysis}"
+
+    # Fall back to LDAP pwd_cache
+    if pwd_cache:
+        try:
+            from .parsers.highvalue import _analyze_password_freshness
+
+            norm_user = account.split("\\")[-1].lower() if "\\" in account else account.lower()
+            pwd_last_set = pwd_cache.get(norm_user)
+
+            if pwd_last_set:
+                risk_level, pwd_analysis = _analyze_password_freshness(None, pwd_last_set)
+                if risk_level != "UNKNOWN":
+                    return f"{risk_level}: {pwd_analysis}"
+        except Exception:
+            pass
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Service classification
+# ---------------------------------------------------------------------------
+
+
+def classify_service(
+    row: "ServiceRow",
+    account: str,
+    hv: Optional[Any],
+    pwd_cache: Optional[PwdLastSetCache] = None,
+    tier0_cache: Optional[Tier0Cache] = None,
+    resolved_account: Optional[str] = None,
+) -> ClassificationResult:
+    """
+    Classify a service as TIER-0, PRIV, or SERVICE based on the start_name account.
+
+    Unlike tasks, ALL domain-account services inherently store credentials
+    in LSA secrets — there is no "no saved credentials" state. Classification
+    focuses on privilege level and account status.
+
+    Args:
+        row: ServiceRow instance (modified in place with type/reason/password_analysis)
+        account: The account the service runs as (start_name)
+        hv: HighValueLoader instance (can be None)
+        pwd_cache: Pre-fetched dict of username -> pwdLastSet datetime
+        tier0_cache: Pre-fetched dict of username -> (is_tier0, group_list) from LDAP
+        resolved_account: Pre-resolved username if account was a SID
+
+    Returns:
+        ClassificationResult with task_type, reason, password_analysis, should_include
+    """
+    from .models.service import ServiceType
+
+    # Check privilege level
+    priv_result = _classify_by_privilege(account, hv, tier0_cache, resolved_account)
+
+    if priv_result:
+        classification, reason = priv_result
+
+        # Check if account is disabled
+        if _check_account_disabled(hv, account):
+            reason = f"[ACCOUNT DISABLED] {reason}"
+            row.is_disabled_account = True
+
+        # gMSA annotation
+        if row.is_gmsa:
+            reason = f"[gMSA] {reason}"
+
+        # Password age analysis
+        password_analysis = _get_password_analysis_from_cache(account, pwd_cache, hv)
+
+        # Update row in place
+        row.type = ServiceType.TIER0.value if classification == "TIER-0" else ServiceType.PRIV.value
+        row.reason = reason
+        row.password_analysis = password_analysis
+
+        return ClassificationResult(
+            task_type=classification,
+            reason=reason,
+            password_analysis=password_analysis,
+            should_include=True,
+        )
+
+    # Regular SERVICE — still check disabled status and password age
+    reason = None
+    if _check_account_disabled(hv, account):
+        reason = "[ACCOUNT DISABLED]"
+        row.is_disabled_account = True
+
+    if row.is_gmsa:
+        gmsa_note = "[gMSA] Managed password — LSA secret extraction not applicable"
+        reason = f"{reason} {gmsa_note}" if reason else gmsa_note
+
+    password_analysis = _get_password_analysis_from_cache(account, pwd_cache, hv)
+
+    row.type = ServiceType.SERVICE.value
+    row.reason = reason
+    row.password_analysis = password_analysis
+
+    return ClassificationResult(
+        task_type="SERVICE",
+        reason=reason,
+        password_analysis=password_analysis,
+        should_include=True,
     )

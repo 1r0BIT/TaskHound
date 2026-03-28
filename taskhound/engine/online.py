@@ -817,6 +817,23 @@ def process_target(
             computer_sid=server_sid,
             local_accounts=local_accounts,
             credguard_status=credguard_status,
+            hv=hv,
+            bh_connector=bh_connector,
+            no_ldap=no_ldap,
+            no_rpc=no_rpc,
+            domain=domain,
+            dc_ip=dc_ip,
+            username=username,
+            password=password,
+            hashes=hashes,
+            kerberos=kerberos,
+            aes_key=aes_key,
+            ldap_domain=ldap_domain,
+            ldap_user=ldap_user,
+            ldap_password=ldap_password,
+            ldap_hashes=ldap_hashes,
+            pwd_cache=pwd_cache,
+            tier0_cache=tier0_cache,
             debug=debug,
         )
 
@@ -838,6 +855,10 @@ def process_target(
                         state=svc_row.state,
                         is_gmsa=svc_row.is_gmsa,
                         hostname=hostname,
+                        reason=svc_row.reason,
+                        password_analysis=svc_row.password_analysis,
+                        resolved_runas=svc_row.resolved_runas,
+                        credential_guard=svc_row.credential_guard,
                     )
                 )
 
