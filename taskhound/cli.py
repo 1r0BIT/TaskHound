@@ -213,14 +213,18 @@ def _handle_exports(
     laps_cache: Optional[LAPSCache],
     laps_successes: int,
     laps_failures: List[LAPSFailure],
+    service_rows: Optional[List] = None,
 ) -> tuple:
     """Handle all export formats and summary output.
 
     Returns:
         Tuple of (opengraph_json_path, opengraph_json_overwrites) for OpenGraph handling.
     """
+    from .output.writer import write_combined_json, write_service_csv
+
     output_dir = args.output_dir
     output_formats = args.output_formats
+    service_rows = service_rows or []
 
     # Track if we need to auto-generate JSON for OpenGraph
     opengraph_json_path = None
@@ -237,7 +241,8 @@ def _handle_exports(
             write_json(opengraph_json_path, all_rows, silent=True)
 
     # Write outputs based on --output formats
-    if all_rows:
+    has_data = all_rows or service_rows
+    if has_data:
         # Plain text output
         if "plain" in output_formats:
             plain_dir = os.path.join(output_dir, "plain")
@@ -247,15 +252,23 @@ def _handle_exports(
         if "json" in output_formats:
             json_dir = os.path.join(output_dir, "json")
             os.makedirs(json_dir, exist_ok=True)
-            json_path = os.path.join(json_dir, "taskhound_results.json")
-            write_json(json_path, all_rows)
+            if service_rows:
+                json_path = os.path.join(json_dir, "taskhound_results.json")
+                write_combined_json(json_path, all_rows, service_rows)
+            elif all_rows:
+                json_path = os.path.join(json_dir, "taskhound_results.json")
+                write_json(json_path, all_rows)
 
         # CSV output
         if "csv" in output_formats:
             csv_dir = os.path.join(output_dir, "csv")
             os.makedirs(csv_dir, exist_ok=True)
-            csv_path = os.path.join(csv_dir, "taskhound_results.csv")
-            write_csv(csv_path, all_rows)
+            if all_rows:
+                csv_path = os.path.join(csv_dir, "taskhound_tasks.csv")
+                write_csv(csv_path, all_rows)
+            if service_rows:
+                svc_csv_path = os.path.join(csv_dir, "taskhound_services.csv")
+                write_service_csv(svc_csv_path, service_rows)
 
         # HTML report output
         if "html" in output_formats:
@@ -263,7 +276,7 @@ def _handle_exports(
             html_dir = os.path.join(output_dir, "html")
             os.makedirs(html_dir, exist_ok=True)
             html_path = os.path.join(html_dir, "taskhound_report.html")
-            generate_html_report(all_rows, html_path)
+            generate_html_report(all_rows, html_path, service_rows=service_rows or None)
             print_audit_report_section(html_path)
 
     # Print decrypted credentials summary
@@ -272,7 +285,11 @@ def _handle_exports(
     # Print summary table
     if not args.no_summary:
         has_tier0_detection = hv_loaded or args.ldap_tier0
-        print_summary_table(all_rows, has_tier0_detection=has_tier0_detection)
+        print_summary_table(
+            all_rows,
+            has_tier0_detection=has_tier0_detection,
+            service_rows=service_rows or None,
+        )
 
         if laps_cache is not None:
             print_laps_summary(laps_cache, laps_successes, laps_failures)
@@ -954,7 +971,8 @@ This operation involves:
 
     # Handle exports and summary
     opengraph_json_path, opengraph_json_overwrites = _handle_exports(
-        args, all_rows, hv_loaded, laps_cache, laps_successes, laps_failures
+        args, all_rows, hv_loaded, laps_cache, laps_successes, laps_failures,
+        service_rows=all_service_rows,
     )
 
     # BloodHound OpenGraph Integration

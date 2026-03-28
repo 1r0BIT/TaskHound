@@ -1260,6 +1260,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {{EXECUTIVE_SUMMARY}}
         {{CLASSIFICATION_REFERENCE}}
         {{DETAILED_FINDINGS}}
+        {{SERVICE_FINDINGS}}
         {{FAILURES}}
         {{FOOTER}}
     </div>
@@ -1625,10 +1626,82 @@ def _generate_footer() -> str:
     """
 
 
+def _generate_service_findings(service_rows: list[Any]) -> str:
+    """Generate HTML section for Windows service findings."""
+    if not service_rows:
+        return ""
+
+    rows_html = []
+    for row in service_rows:
+        row_dict = row.to_dict() if hasattr(row, "to_dict") else row
+        svc_type = row_dict.get("type", "SERVICE")
+        if svc_type in ("FAILURE", "SKIPPED"):
+            continue
+
+        severity_class = {
+            "TIER-0": "severity-critical",
+            "PRIV": "severity-high",
+        }.get(svc_type, "severity-medium")
+
+        account = row_dict.get("start_name", "")
+        resolved = row_dict.get("resolved_runas")
+        display_account = f"{resolved} ({account})" if resolved and account.startswith("S-1-5-") else account
+        gmsa_tag = ' <span style="color: var(--accent-light);">[gMSA]</span>' if row_dict.get("is_gmsa") else ""
+        disabled_tag = ' <span style="color: var(--failure-light);">[DISABLED]</span>' if row_dict.get("is_disabled_account") else ""
+
+        rows_html.append(f"""
+            <tr>
+                <td><span class="{severity_class}" style="padding: 2px 8px; border-radius: 4px;">{html.escape(svc_type)}</span></td>
+                <td>{html.escape(row_dict.get('host', ''))}</td>
+                <td>{html.escape(row_dict.get('service_name', ''))}</td>
+                <td>{html.escape(display_account)}{gmsa_tag}{disabled_tag}</td>
+                <td>{html.escape(row_dict.get('binary_path', '') or '')}</td>
+                <td>{html.escape(row_dict.get('start_type', '') or '')}</td>
+                <td>{html.escape(row_dict.get('state', '') or '')}</td>
+                <td>{html.escape(row_dict.get('reason', '') or '')}</td>
+            </tr>""")
+
+    if not rows_html:
+        return ""
+
+    tier0_count = sum(1 for r in service_rows if (r.to_dict() if hasattr(r, "to_dict") else r).get("type") == "TIER-0")
+    priv_count = sum(1 for r in service_rows if (r.to_dict() if hasattr(r, "to_dict") else r).get("type") == "PRIV")
+    total = len(rows_html)
+
+    return f"""
+    <div class="section">
+        <h2>Windows Service Findings ({total} services)</h2>
+        <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+            Services running as domain accounts with stored credentials (LSA secrets).
+            {f'<strong style="color: var(--failure-light);">{tier0_count} TIER-0</strong>, ' if tier0_count else ''}
+            {f'<strong style="color: orange;">{priv_count} PRIV</strong>, ' if priv_count else ''}
+            {total - tier0_count - priv_count} SERVICE.
+        </p>
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="border-bottom: 1px solid var(--border);">
+                    <th style="padding: 8px; text-align: left;">Type</th>
+                    <th style="padding: 8px; text-align: left;">Host</th>
+                    <th style="padding: 8px; text-align: left;">Service</th>
+                    <th style="padding: 8px; text-align: left;">Run As</th>
+                    <th style="padding: 8px; text-align: left;">Binary Path</th>
+                    <th style="padding: 8px; text-align: left;">Start Type</th>
+                    <th style="padding: 8px; text-align: left;">State</th>
+                    <th style="padding: 8px; text-align: left;">Reason</th>
+                </tr>
+            </thead>
+            <tbody>
+                {''.join(rows_html)}
+            </tbody>
+        </table>
+    </div>"""
+
+
 def generate_html_report(
     rows: list[Any],
     output_path: str,
     scan_time: str | None = None,
+    service_rows: list[Any] | None = None,
 ) -> str:
     """
     Generate a comprehensive HTML security audit report.
@@ -1637,6 +1710,7 @@ def generate_html_report(
         rows: List of task dictionaries or TaskRow objects from scan results
         output_path: Path to write the HTML file
         scan_time: Optional timestamp string (defaults to current time)
+        service_rows: Optional list of ServiceRow objects for service findings
 
     Returns:
         The output path where the report was written
@@ -1653,6 +1727,7 @@ def generate_html_report(
     executive_summary = _generate_executive_summary(stats)
     classification_reference = _generate_classification_reference()
     detailed_findings = _generate_detailed_findings(rows, findings)
+    service_findings = _generate_service_findings(service_rows or [])
     failures = _generate_failures(stats)
     footer = _generate_footer()
 
@@ -1663,6 +1738,7 @@ def generate_html_report(
         .replace("{{EXECUTIVE_SUMMARY}}", executive_summary)
         .replace("{{CLASSIFICATION_REFERENCE}}", classification_reference)
         .replace("{{DETAILED_FINDINGS}}", detailed_findings)
+        .replace("{{SERVICE_FINDINGS}}", service_findings)
         .replace("{{FAILURES}}", failures)
         .replace("{{FOOTER}}", footer)
     )

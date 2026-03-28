@@ -78,9 +78,15 @@ def _clean_failure_reason(reason: str) -> str:
     return reason
 
 
-def print_summary_table(all_rows: List[Any], backup_dir: Optional[str] = None, has_hv_data: bool = False, has_tier0_detection: bool = False):
-    """Print a nicely formatted summary table showing task counts per host."""
-    if not all_rows:
+def print_summary_table(
+    all_rows: List[Any],
+    backup_dir: Optional[str] = None,
+    has_hv_data: bool = False,
+    has_tier0_detection: bool = False,
+    service_rows: Optional[List[Any]] = None,
+):
+    """Print a nicely formatted summary table showing task/service counts per host."""
+    if not all_rows and not service_rows:
         return
 
     # Support both old and new parameter names
@@ -97,7 +103,7 @@ def print_summary_table(all_rows: List[Any], backup_dir: Optional[str] = None, h
         reason = row_dict.get("reason", "")
 
         if host not in host_stats:
-            host_stats[host] = {"tier0": 0, "privileged": 0, "normal": 0, "status": "[+]", "failure_reason": ""}
+            host_stats[host] = {"tier0": 0, "privileged": 0, "normal": 0, "services": 0, "status": "[+]", "failure_reason": ""}
 
         if task_type == "FAILURE":
             host_stats[host]["status"] = "[-]"
@@ -108,6 +114,23 @@ def print_summary_table(all_rows: List[Any], backup_dir: Optional[str] = None, h
             host_stats[host]["privileged"] += 1
         else:
             host_stats[host]["normal"] += 1
+
+    # Aggregate service data
+    if service_rows:
+        for row in service_rows:
+            row_dict = row.to_dict() if hasattr(row, "to_dict") else row
+            host = row_dict.get("host", "Unknown")
+            svc_type = row_dict.get("type", "SERVICE")
+
+            if host not in host_stats:
+                host_stats[host] = {"tier0": 0, "privileged": 0, "normal": 0, "services": 0, "status": "[+]", "failure_reason": ""}
+
+            if svc_type == "TIER-0":
+                host_stats[host]["tier0"] += 1
+            elif svc_type == "PRIV":
+                host_stats[host]["privileged"] += 1
+            else:
+                host_stats[host]["services"] += 1
 
     if not host_stats:
         return

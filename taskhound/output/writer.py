@@ -456,40 +456,90 @@ def write_json(path: str, rows: List[Any], silent: bool = False):
         good(f"Wrote JSON results to {path}")
 
 
+def write_combined_json(
+    path: str,
+    task_rows: List[Any],
+    service_rows: List[Any],
+    silent: bool = False,
+):
+    """Write combined JSON with separate 'tasks' and 'services' keys."""
+    data = {
+        "tasks": _rows_to_dicts(task_rows),
+        "services": _rows_to_dicts(service_rows),
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    if not silent:
+        good(f"Wrote combined JSON results to {path}")
+
+
+_TASK_CSV_FIELDS = [
+    "host",
+    "target_ip",
+    "computer_sid",
+    "path",
+    "type",
+    "runas",
+    "resolved_runas",
+    "command",
+    "arguments",
+    "author",
+    "date",
+    "logon_type",
+    "enabled",
+    "trigger_type",
+    "start_boundary",
+    "interval",
+    "duration",
+    "days_interval",
+    "reason",
+    "credentials_hint",
+    "credential_guard",
+    "password_analysis",
+    "cred_status",
+    "cred_password_valid",
+    "cred_hijackable",
+    "cred_last_run",
+    "cred_return_code",
+    "cred_detail",
+    "decrypted_password",
+]
+
+_SERVICE_CSV_FIELDS = [
+    "host",
+    "target_ip",
+    "computer_sid",
+    "service_name",
+    "display_name",
+    "type",
+    "start_name",
+    "resolved_runas",
+    "binary_path",
+    "start_type",
+    "service_type",
+    "state",
+    "is_gmsa",
+    "is_disabled_account",
+    "reason",
+    "credential_guard",
+    "password_analysis",
+    "decrypted_password",
+    "lsa_secret_name",
+]
+
+
 def write_csv(path: str, rows: List[Any]):
-    fieldnames = [
-        "host",
-        "target_ip",
-        "computer_sid",
-        "path",
-        "type",
-        "runas",
-        "resolved_runas",
-        "command",
-        "arguments",
-        "author",
-        "date",
-        "logon_type",
-        "enabled",
-        "trigger_type",
-        "start_boundary",
-        "interval",
-        "duration",
-        "days_interval",
-        "reason",
-        "credentials_hint",
-        "credential_guard",
-        "password_analysis",
-        "cred_status",
-        "cred_password_valid",
-        "cred_hijackable",
-        "cred_last_run",
-        "cred_return_code",
-        "cred_detail",
-        "decrypted_password",
-    ]
     with open(path, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w = csv.DictWriter(f, fieldnames=_TASK_CSV_FIELDS)
         w.writeheader()
         w.writerows(_rows_to_dicts(rows))
     good(f"Wrote CSV results to {path}")
+
+
+def write_service_csv(path: str, rows: List[Any]):
+    """Write service results to a CSV file."""
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=_SERVICE_CSV_FIELDS, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(_rows_to_dicts(rows))
+    good(f"Wrote service CSV results to {path}")

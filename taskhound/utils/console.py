@@ -281,6 +281,10 @@ def print_summary_table(
     total_tier0 = 0
     total_priv = 0
     total_normal = 0
+    total_services = 0
+
+    # Check if any host has service data
+    has_services = any(stats.get("services", 0) > 0 for stats in host_stats.values())
 
     # Print successful hosts table
     if success_hosts:
@@ -295,6 +299,8 @@ def print_summary_table(
         table.add_column("Tier-0", justify="center", style="red")
         table.add_column("Privileged", justify="center", style="yellow")
         table.add_column("Normal", justify="center", style="green")
+        if has_services:
+            table.add_column("Services", justify="center", style="cyan")
 
         for host in sorted(success_hosts.keys()):
             stats = success_hosts[host]
@@ -305,26 +311,34 @@ def print_summary_table(
             total_tier0 += stats["tier0"]
             total_priv += stats["privileged"]
             total_normal += stats["normal"]
+            total_services += stats.get("services", 0)
 
-            table.add_row(host, tier0, priv, normal)
+            row_values = [host, tier0, priv, normal]
+            if has_services:
+                row_values.append(str(stats.get("services", 0)))
+            table.add_row(*row_values)
 
         # Add totals row if multiple hosts
         if len(success_hosts) > 1:
             table.add_section()
             tier0_total = str(total_tier0) if has_hv else "N/A"
             priv_total = str(total_priv) if has_hv else "N/A"
-            table.add_row(
+            row_values = [
                 "[bold]TOTAL[/]",
                 f"[bold]{tier0_total}[/]",
                 f"[bold]{priv_total}[/]",
                 f"[bold]{total_normal}[/]",
-            )
+            ]
+            if has_services:
+                row_values.append(f"[bold]{total_services}[/]")
+            table.add_row(*row_values)
 
+        panel_title = "[bold]TASK & SERVICE SUMMARY[/]" if has_services else "[bold]TASK SUMMARY[/]"
         console.print()
         console.print(
             Panel(
                 table,
-                title="[bold]TASK SUMMARY[/]",
+                title=panel_title,
                 border_style="cyan",
             )
         )
