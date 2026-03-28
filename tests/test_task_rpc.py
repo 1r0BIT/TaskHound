@@ -9,11 +9,15 @@ from taskhound.smb.task_rpc import (
     ACCOUNT_BLOCKED_CODES,
     PASSWORD_INVALID_CODES,
     PASSWORD_VALID_CODES,
-    RETURN_CODE_DESCRIPTIONS,
     TASK_RUNNABLE_CODES,
+    TASK_SCHEDULER_CODES,
+    CredentialConfidence,
+    CredentialContext,
     CredentialStatus,
     TaskRunInfo,
     TaskSchedulerRPC,
+    calculate_confidence,
+    enrich_with_confidence,
     get_return_code_description,
 )
 
@@ -89,7 +93,7 @@ class TestTaskRunInfo:
         info = TaskRunInfo(
             task_path="\\BlockedTask",
             last_run=datetime(2024, 1, 1),
-            return_code=0x8007056B,
+            return_code=0x80070533,  # ERROR_ACCOUNT_DISABLED
             credential_status=CredentialStatus.BLOCKED,
             status_detail="Account disabled",
             password_valid=False,
@@ -110,9 +114,10 @@ class TestReturnCodeSets:
         """Test FILE_NOT_FOUND code is in PASSWORD_VALID_CODES."""
         assert 0x00000002 in PASSWORD_VALID_CODES
 
-    def test_password_valid_codes_contains_logon_type_not_granted(self):
-        """Test ERROR_LOGON_TYPE_NOT_GRANTED is in PASSWORD_VALID_CODES."""
-        assert 0x80070569 in PASSWORD_VALID_CODES
+    def test_account_restricted_codes_contains_logon_type_not_granted(self):
+        """Test ERROR_LOGON_TYPE_NOT_GRANTED is in ACCOUNT_RESTRICTED_CODES (documentation only)."""
+        from taskhound.smb.task_rpc import ACCOUNT_RESTRICTED_CODES
+        assert 0x80070569 in ACCOUNT_RESTRICTED_CODES
 
     def test_task_runnable_codes_subset_of_valid(self):
         """Test TASK_RUNNABLE_CODES is subset of PASSWORD_VALID_CODES."""
@@ -132,7 +137,7 @@ class TestReturnCodeSets:
 
     def test_account_blocked_codes_contains_disabled(self):
         """Test ERROR_ACCOUNT_DISABLED is in ACCOUNT_BLOCKED_CODES."""
-        assert 0x8007056B in ACCOUNT_BLOCKED_CODES
+        assert 0x80070533 in ACCOUNT_BLOCKED_CODES  # Win32 0x0533 = 1331
 
     def test_account_blocked_codes_contains_locked_out(self):
         """Test ERROR_ACCOUNT_LOCKED_OUT is in ACCOUNT_BLOCKED_CODES."""
@@ -155,34 +160,57 @@ class TestGetReturnCodeDescription:
     def test_success_code(self):
         """Test description for SUCCESS code."""
         desc = get_return_code_description(0x00000000)
-        assert desc == "Task completed successfully"
+        # impacket returns STATUS_SUCCESS for 0x0
+        assert "SUCCESS" in desc.upper()
 
     def test_file_not_found_code(self):
-        """Test description for FILE_NOT_FOUND code."""
-        desc = get_return_code_description(0x00000002)
-        assert desc == "File not found"
+        """Test description for ERROR_FILE_NOT_FOUND code."""
+        # Use HRESULT form which maps through impacket's system_errors
+        desc = get_return_code_description(0x80070002)
+        assert "FILE_NOT_FOUND" in desc.upper() or "NOT_FOUND" in desc.upper()
 
     def test_logon_failure_code(self):
         """Test description for ERROR_LOGON_FAILURE code."""
         desc = get_return_code_description(0x8007052E)
-        assert desc == "Logon failure (wrong password)"
+        # impacket returns the Win32 error name
+        assert "LOGON" in desc.upper()
 
     def test_account_disabled_code(self):
         """Test description for ERROR_ACCOUNT_DISABLED code."""
-        desc = get_return_code_description(0x8007056B)
-        assert desc == "Account disabled"
+        # ERROR_ACCOUNT_DISABLED is Win32 0x0533 (1331), HRESULT 0x80070533
+        desc = get_return_code_description(0x80070533)
+        assert "DISABLED" in desc.upper() or "ACCOUNT" in desc.upper()
 
     def test_unknown_code(self):
         """Test description for unknown code."""
         desc = get_return_code_description(0x12345678)
-        assert "Unknown code" in desc
-        assert "12345678" in desc
+        assert "Unknown" in desc
+        assert "12345678" in desc.upper()
 
     def test_all_documented_codes_have_descriptions(self):
-        """Test all documented codes have descriptions."""
-        for code in RETURN_CODE_DESCRIPTIONS:
+        """Test all Task Scheduler codes have descriptions."""
+        for code in TASK_SCHEDULER_CODES:
             desc = get_return_code_description(code)
             assert desc != ""
+
+    def test_task_scheduler_code_returns_our_description(self):
+        """Test Task Scheduler-specific codes use our descriptions."""
+        # SCHED_S_TASK_HAS_NOT_RUN
+        desc = get_return_code_description(0x00041303)
+        assert desc == "Task not yet run"
+
+    def test_ntstatus_uses_impacket(self):
+        """Test NTSTATUS codes are resolved via impacket."""
+        # STATUS_LOGON_FAILURE
+        desc = get_return_code_description(0xC000006D)
+        assert "LOGON" in desc.upper()
+
+    def test_hresult_win32_extraction(self):
+        """Test HRESULT codes with Win32 errors extract correctly."""
+        # 0x80070533 = HRESULT wrapper of ERROR_ACCOUNT_DISABLED (Win32 0x0533)
+        desc = get_return_code_description(0x80070533)
+        assert "Unknown" not in desc
+        assert "DISABLED" in desc.upper()
 
 
 class TestTaskSchedulerRPCInit:
@@ -382,7 +410,11 @@ class TestTaskSchedulerRPCInterpretReturnCode:
         assert hijackable is True
 
     def test_interpret_logon_type_not_granted(self):
-        """Test interpreting ERROR_LOGON_TYPE_NOT_GRANTED code."""
+        """Test interpreting ERROR_LOGON_TYPE_NOT_GRANTED code.
+
+        NOTE: This code should never appear via RPC in practice (Windows doesn't
+        record batch logon failures), but we handle it for robustness.
+        """
         last_run = datetime(2024, 1, 1)
         status, valid, hijackable, detail = self.rpc._interpret_return_code(
             0x80070569, last_run
@@ -390,9 +422,14 @@ class TestTaskSchedulerRPCInterpretReturnCode:
         assert status == CredentialStatus.VALID_RESTRICTED
         assert valid is True
         assert hijackable is False
+        assert "unexpected via RPC" in detail
 
     def test_interpret_logon_failure(self):
-        """Test interpreting ERROR_LOGON_FAILURE code."""
+        """Test interpreting ERROR_LOGON_FAILURE code.
+
+        NOTE: This code should never appear via RPC in practice (Windows doesn't
+        record auth failures), but we handle it for robustness.
+        """
         last_run = datetime(2024, 1, 1)
         status, valid, hijackable, detail = self.rpc._interpret_return_code(
             0x8007052E, last_run
@@ -400,16 +437,22 @@ class TestTaskSchedulerRPCInterpretReturnCode:
         assert status == CredentialStatus.INVALID
         assert valid is False
         assert hijackable is False
+        assert "unexpected via RPC" in detail
 
     def test_interpret_account_disabled(self):
-        """Test interpreting ERROR_ACCOUNT_DISABLED code."""
+        """Test interpreting ERROR_ACCOUNT_DISABLED code.
+
+        NOTE: This code should never appear via RPC in practice (Windows doesn't
+        record account status failures), but we handle it for robustness.
+        """
         last_run = datetime(2024, 1, 1)
         status, valid, hijackable, detail = self.rpc._interpret_return_code(
-            0x8007056B, last_run
+            0x80070533, last_run  # ERROR_ACCOUNT_DISABLED (Win32 0x0533)
         )
         assert status == CredentialStatus.BLOCKED
         assert valid is False
         assert hijackable is False
+        assert "unexpected via RPC" in detail
 
     def test_interpret_unknown_code(self):
         """Test interpreting unknown code."""
@@ -685,3 +728,373 @@ class TestTaskSchedulerRPCConnect:
 
         assert result is False
         assert self.rpc._dce is None
+
+
+class TestCredentialConfidence:
+    """Tests for CredentialConfidence enum."""
+
+    def test_definitely_stale_status(self):
+        """Test DEFINITELY_STALE status value."""
+        assert CredentialConfidence.DEFINITELY_STALE.value == "definitely_stale"
+
+    def test_high_confidence_valid_status(self):
+        """Test HIGH_CONFIDENCE_VALID status value."""
+        assert CredentialConfidence.HIGH_CONFIDENCE_VALID.value == "high_confidence"
+
+    def test_confirmed_valid_status(self):
+        """Test CONFIRMED_VALID status value."""
+        assert CredentialConfidence.CONFIRMED_VALID.value == "confirmed_valid"
+
+    def test_likely_valid_status(self):
+        """Test LIKELY_VALID status value."""
+        assert CredentialConfidence.LIKELY_VALID.value == "likely_valid"
+
+    def test_possibly_stale_status(self):
+        """Test POSSIBLY_STALE status value."""
+        assert CredentialConfidence.POSSIBLY_STALE.value == "possibly_stale"
+
+    def test_never_ran_likely_valid_status(self):
+        """Test NEVER_RAN_LIKELY_VALID status value."""
+        assert CredentialConfidence.NEVER_RAN_LIKELY_VALID.value == "never_ran_likely_valid"
+
+    def test_never_ran_possibly_stale_status(self):
+        """Test NEVER_RAN_POSSIBLY_STALE status value."""
+        assert CredentialConfidence.NEVER_RAN_POSSIBLY_STALE.value == "never_ran_possibly_stale"
+
+    def test_never_ran_unknown_status(self):
+        """Test NEVER_RAN_UNKNOWN status value."""
+        assert CredentialConfidence.NEVER_RAN_UNKNOWN.value == "never_ran_unknown"
+
+    def test_unknown_status(self):
+        """Test UNKNOWN status value."""
+        assert CredentialConfidence.UNKNOWN.value == "unknown"
+
+    def test_all_confidence_levels_exist(self):
+        """Test all expected confidence levels exist."""
+        expected = {
+            "DEFINITELY_STALE",
+            "HIGH_CONFIDENCE_VALID",
+            "CONFIRMED_VALID",
+            "LIKELY_VALID",
+            "POSSIBLY_STALE",
+            "NEVER_RAN_LIKELY_VALID",
+            "NEVER_RAN_POSSIBLY_STALE",
+            "NEVER_RAN_UNKNOWN",
+            "UNKNOWN",
+        }
+        actual = {c.name for c in CredentialConfidence}
+        assert actual == expected
+
+
+class TestCredentialContext:
+    """Tests for CredentialContext dataclass."""
+
+    def test_create_empty_context(self):
+        """Test creating CredentialContext with defaults."""
+        context = CredentialContext()
+        assert context.pwd_last_set is None
+        assert context.task_creation_date is None
+        assert context.trigger_interval_days is None
+        assert context.current_time is not None  # Should default to now
+
+    def test_create_full_context(self):
+        """Test creating CredentialContext with all fields."""
+        now = datetime(2026, 1, 3, 12, 0, 0)
+        context = CredentialContext(
+            pwd_last_set=datetime(2025, 12, 1),
+            task_creation_date=datetime(2025, 11, 1),
+            trigger_interval_days=1,
+            current_time=now,
+        )
+        assert context.pwd_last_set == datetime(2025, 12, 1)
+        assert context.task_creation_date == datetime(2025, 11, 1)
+        assert context.trigger_interval_days == 1
+        assert context.current_time == now
+
+
+class TestCalculateConfidence:
+    """Tests for calculate_confidence function."""
+
+    def _make_run_info(self, last_run, status=CredentialStatus.VALID):
+        """Helper to create TaskRunInfo objects."""
+        return TaskRunInfo(
+            task_path="\\TestTask",
+            last_run=last_run,
+            return_code=0x0,
+            credential_status=status,
+            status_detail="SUCCESS",
+            password_valid=True,
+            task_hijackable=True,
+        )
+
+    def test_never_ran_unknown_when_no_context(self):
+        """Test NEVER_RAN_UNKNOWN confidence when task never ran and no context available."""
+        run_info = self._make_run_info(None)
+        run_info.credential_status = CredentialStatus.UNKNOWN
+
+        confidence, reason = calculate_confidence(run_info, None)
+
+        assert confidence == CredentialConfidence.NEVER_RAN_UNKNOWN
+        assert "never ran" in reason.lower()
+        assert "valid at creation" in reason.lower()
+
+    def test_never_ran_likely_valid_when_pwd_unchanged(self):
+        """Test NEVER_RAN_LIKELY_VALID when task never ran but password unchanged since creation."""
+        now = datetime(2026, 1, 5, 12, 0, 0)
+        run_info = self._make_run_info(None)
+        run_info.credential_status = CredentialStatus.UNKNOWN
+        context = CredentialContext(
+            pwd_last_set=datetime(2025, 6, 15),  # Password set long ago
+            task_creation_date=datetime(2025, 12, 1),  # Task created after pwd change
+            current_time=now,
+        )
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.NEVER_RAN_LIKELY_VALID
+        assert "never ran" in reason.lower()
+        assert "unchanged" in reason.lower()
+        assert "batch logon" in reason.lower() or "trigger" in reason.lower()
+
+    def test_never_ran_possibly_stale_when_pwd_changed_after_creation(self):
+        """Test NEVER_RAN_POSSIBLY_STALE when task never ran and password changed after creation."""
+        now = datetime(2026, 1, 5, 12, 0, 0)
+        run_info = self._make_run_info(None)
+        run_info.credential_status = CredentialStatus.UNKNOWN
+        context = CredentialContext(
+            pwd_last_set=datetime(2026, 1, 1),  # Password changed recently
+            task_creation_date=datetime(2025, 6, 15),  # Task created before pwd change
+            current_time=now,
+        )
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.NEVER_RAN_POSSIBLY_STALE
+        assert "never ran" in reason.lower()
+        assert "changed" in reason.lower()
+        assert "stale" in reason.lower()
+
+    def test_unknown_when_blocked(self):
+        """Test UNKNOWN confidence when account is blocked."""
+        run_info = self._make_run_info(datetime(2026, 1, 1))
+        run_info.credential_status = CredentialStatus.BLOCKED
+
+        confidence, reason = calculate_confidence(run_info, None)
+
+        assert confidence == CredentialConfidence.UNKNOWN
+        assert "blocked" in reason.lower()
+
+    def test_definitely_stale_when_invalid_status(self):
+        """Test DEFINITELY_STALE when status is INVALID."""
+        run_info = self._make_run_info(datetime(2026, 1, 1))
+        run_info.credential_status = CredentialStatus.INVALID
+
+        confidence, reason = calculate_confidence(run_info, None)
+
+        assert confidence == CredentialConfidence.DEFINITELY_STALE
+        assert "invalid" in reason.lower()
+
+    def test_likely_valid_without_context(self):
+        """Test LIKELY_VALID when no context is provided."""
+        run_info = self._make_run_info(datetime(2026, 1, 1))
+
+        confidence, reason = calculate_confidence(run_info, None)
+
+        assert confidence == CredentialConfidence.LIKELY_VALID
+        assert "no ad context" in reason.lower()
+
+    def test_definitely_stale_pwd_changed_after_last_run(self):
+        """Test DEFINITELY_STALE when password changed after last run."""
+        now = datetime(2026, 1, 3, 12, 0, 0)
+        run_info = self._make_run_info(datetime(2026, 1, 1, 12, 0))  # Ran Jan 1
+        context = CredentialContext(
+            pwd_last_set=datetime(2026, 1, 2, 15, 0),  # Password changed Jan 2
+            current_time=now,
+        )
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.DEFINITELY_STALE
+        assert "changed" in reason.lower()
+        assert "2026-01-01" in reason
+
+    def test_high_confidence_pwd_unchanged_but_no_trigger(self):
+        """Test HIGH_CONFIDENCE_VALID when password unchanged but trigger timing unknown."""
+        now = datetime(2026, 1, 3, 12, 0, 0)
+        run_info = self._make_run_info(datetime(2026, 1, 2, 12, 0))
+        context = CredentialContext(
+            pwd_last_set=datetime(2025, 6, 15),  # Password set long ago
+            task_creation_date=datetime(2025, 12, 1),  # Task created after pwd
+            # No trigger_interval_days - can't verify execution timing
+            current_time=now,
+        )
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.HIGH_CONFIDENCE_VALID
+        assert "unchanged" in reason.lower()
+        assert "trigger timing unknown" in reason.lower()
+
+    def test_confirmed_valid_pwd_unchanged_and_ran_within_schedule(self):
+        """Test CONFIRMED_VALID when password unchanged AND task ran within schedule."""
+        now = datetime(2026, 1, 3, 12, 0, 0)
+        run_info = self._make_run_info(datetime(2026, 1, 3, 8, 0))  # Ran today
+        context = CredentialContext(
+            pwd_last_set=datetime(2025, 6, 15),  # Password set long ago
+            task_creation_date=datetime(2025, 11, 1),  # Task created after pwd change
+            trigger_interval_days=1,  # Daily task
+            current_time=now,
+        )
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.CONFIRMED_VALID
+        assert "unchanged since task creation" in reason.lower()
+        assert "within schedule" in reason.lower()
+
+    def test_likely_valid_pwd_changed_but_task_still_runs(self):
+        """Test LIKELY_VALID when password changed but task still runs within schedule."""
+        now = datetime(2026, 1, 3, 12, 0, 0)
+        run_info = self._make_run_info(datetime(2026, 1, 3, 8, 0))  # Ran today
+        context = CredentialContext(
+            pwd_last_set=datetime(2026, 1, 1, 10, 0),  # Password changed Jan 1
+            task_creation_date=datetime(2025, 11, 1),  # Task created before pwd change
+            trigger_interval_days=1,  # Daily task
+            current_time=now,
+        )
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.LIKELY_VALID
+        assert "changed after task creation" in reason.lower()
+        assert "within schedule" in reason.lower()
+
+    def test_likely_valid_within_schedule(self):
+        """Test LIKELY_VALID when task ran within expected schedule."""
+        now = datetime(2026, 1, 3, 12, 0, 0)
+        run_info = self._make_run_info(datetime(2026, 1, 2, 12, 0))  # Ran yesterday
+        context = CredentialContext(
+            trigger_interval_days=1,  # Daily task
+            current_time=now,
+        )
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.LIKELY_VALID
+        assert "1d ago" in reason
+
+    def test_possibly_stale_outside_schedule(self):
+        """Test POSSIBLY_STALE when task hasn't run within expected schedule."""
+        now = datetime(2026, 1, 3, 12, 0, 0)
+        run_info = self._make_run_info(datetime(2025, 12, 20, 12, 0))  # Ran 14 days ago
+        context = CredentialContext(
+            trigger_interval_days=1,  # Daily task - should have run 14 times!
+            current_time=now,
+        )
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.POSSIBLY_STALE
+        assert "missed" in reason.lower()
+
+    def test_possibly_stale_pwd_unchanged_but_missed_schedule(self):
+        """Test POSSIBLY_STALE when password unchanged but task missed its schedule."""
+        now = datetime(2026, 1, 3, 12, 0, 0)
+        run_info = self._make_run_info(datetime(2025, 12, 20, 12, 0))  # Ran 14 days ago
+        context = CredentialContext(
+            pwd_last_set=datetime(2025, 6, 15),  # Password unchanged
+            task_creation_date=datetime(2025, 11, 1),  # Task created after pwd
+            trigger_interval_days=1,  # Daily task - should have run 14 times!
+            current_time=now,
+        )
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.POSSIBLY_STALE
+        assert "password unchanged" in reason.lower()
+        assert "missed" in reason.lower()
+
+    def test_high_confidence_valid_pwd_unchanged_since_run(self):
+        """Test HIGH_CONFIDENCE_VALID when password unchanged since last run (no schedule)."""
+        now = datetime(2026, 1, 3, 12, 0, 0)
+        run_info = self._make_run_info(datetime(2026, 1, 2, 12, 0))
+        context = CredentialContext(
+            pwd_last_set=datetime(2026, 1, 1, 10, 0),  # Password set before last run
+            current_time=now,
+        )
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.HIGH_CONFIDENCE_VALID
+        assert "unchanged since last successful run" in reason.lower()
+
+    def test_fallback_recent_run(self):
+        """Test LIKELY_VALID fallback for recent run with limited context."""
+        now = datetime(2026, 1, 3, 12, 0, 0)
+        run_info = self._make_run_info(datetime(2026, 1, 1, 12, 0))  # 2 days ago
+        context = CredentialContext(current_time=now)  # Empty context
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.LIKELY_VALID
+        assert "2d ago" in reason
+
+    def test_fallback_old_run(self):
+        """Test POSSIBLY_STALE fallback for old run with limited context."""
+        now = datetime(2026, 1, 3, 12, 0, 0)
+        run_info = self._make_run_info(datetime(2025, 11, 1, 12, 0))  # 63 days ago
+        context = CredentialContext(current_time=now)  # Empty context
+
+        confidence, reason = calculate_confidence(run_info, context)
+
+        assert confidence == CredentialConfidence.POSSIBLY_STALE
+        assert "63d ago" in reason
+
+
+class TestEnrichWithConfidence:
+    """Tests for enrich_with_confidence function."""
+
+    def test_enriches_run_info_in_place(self):
+        """Test that enrich_with_confidence modifies the object in place."""
+        run_info = TaskRunInfo(
+            task_path="\\TestTask",
+            last_run=datetime(2026, 1, 1),
+            return_code=0x0,
+            credential_status=CredentialStatus.VALID,
+            status_detail="SUCCESS",
+            password_valid=True,
+            task_hijackable=True,
+        )
+
+        # Initially should be UNKNOWN with empty reason
+        assert run_info.confidence == CredentialConfidence.UNKNOWN
+        assert run_info.confidence_reason == ""
+
+        result = enrich_with_confidence(run_info)
+
+        # Should be enriched
+        assert result is run_info  # Same object
+        assert run_info.confidence == CredentialConfidence.LIKELY_VALID
+        assert run_info.confidence_reason != ""
+
+    def test_enriches_with_context(self):
+        """Test enrich_with_confidence with additional context."""
+        now = datetime(2026, 1, 3, 12, 0, 0)
+        run_info = TaskRunInfo(
+            task_path="\\TestTask",
+            last_run=datetime(2026, 1, 1),
+            return_code=0x0,
+            credential_status=CredentialStatus.VALID,
+            status_detail="SUCCESS",
+            password_valid=True,
+            task_hijackable=True,
+        )
+        context = CredentialContext(
+            pwd_last_set=datetime(2026, 1, 2),  # Password changed AFTER last run
+            current_time=now,
+        )
+
+        result = enrich_with_confidence(run_info, context)
+
+        assert result.confidence == CredentialConfidence.DEFINITELY_STALE
+        assert "changed" in result.confidence_reason.lower()

@@ -147,8 +147,8 @@ TTTTT  AAA   SSS  K   K H   H  OOO  U   U N   N DDDD
 │ Date             │ 2025-06-15T02:30:00                                       │
 │ Trigger          │ Calendar (starts 2025-06-15 02:30, daily)                 │
 │ Reason           │ Tier 0 - Domain Admins membership                         │
-│ Cred Validation  │ VALID                                                     │
-│ Pwd Analysis     │ Password changed BEFORE task creation - credentials valid │
+│ Cred Validation  │ CONFIRMED_VALID                                           │
+│ Pwd Analysis     │ Password unchanged AND ran within schedule - confirmed    │
 └──────────────────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -161,8 +161,8 @@ TTTTT  AAA   SSS  K   K H   H  OOO  U   U N   N DDDD
 │ Date             │ 2025-03-10T08:00:00                                       │
 │ Trigger          │ Calendar (starts 2025-03-10 08:00, every 4 hours)         │
 │ Reason           │ High Value match found in BloodHound                      │
-│ Cred Validation  │ LIKELY INVALID (password older than pwdLastSet)          │
-│ Pwd Analysis     │ Password changed AFTER task - credentials may be stale    │
+│ Cred Validation  │ DEFINITELY_STALE                                          │
+│ Pwd Analysis     │ Password changed AFTER last run - credentials are stale   │
 └──────────────────────────────────────────────────────────────────────────────┘
 
 ╭─────────────────────────── SCAN COMPLETE ────────────────────────────────────╮
@@ -320,7 +320,7 @@ taskhound -t moe.thesimpsons.local -u homer.simpson -p 'Doh!123' -d thesimpsons.
 
 ## Credential Validation
 
-TaskHound verifies if stored task passwords are still valid by querying task execution history via RPC. This is **enabled by default**.
+TaskHound assesses if stored task passwords are likely still valid by querying task execution history via RPC and applying heuristics. This is **enabled by default**.
 
 ```bash
 # Credential validation is on by default, no flag needed
@@ -330,13 +330,29 @@ taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.
 taskhound -u homer.simpson -p 'Doh!123' -d thesimpsons.local -t moe.thesimpsons.local --no-validate-creds
 ```
 
-Output includes validation status:
-- `VALID` - Credentials confirmed working, task can execute
-- `VALID (restricted)` - Password correct but account restricted (e.g., no batch or interactive logon right)
-- `INVALID (wrong password)` - Logon failure (0x8007052E)
-- `BLOCKED (account disabled/expired)` - Account disabled, locked, or password expired
-- `UNKNOWN` - Task never ran, cannot determine
-- `LIKELY VALID/INVALID` - Heuristic based on password freshness when task never ran
+### How It Works
+
+Windows Task Scheduler only records **successful** task executions. Authentication failures (wrong password, account locked, etc.) are silently ignored. The task just doesn't run.
+
+**Key insight**: Windows validates credentials at task creation time. If you try to create a task with a wrong password, you get `ERROR_LOGON_FAILURE` and the task isn't created. This means: **if a task with stored credentials exists, the password was valid when the task was created.**
+
+TaskHound uses heuristics to estimate credential validity:
+
+| Status | Meaning |
+|--------|---------|
+| `CONFIRMED_VALID` | Password unchanged since task creation AND task ran within expected schedule - credentials confirmed working |
+| `HIGH_CONFIDENCE_VALID` | Password unchanged since task creation, but trigger timing unknown (e.g., boot trigger) - credentials likely valid |
+| `LIKELY_VALID` | Password changed but task ran within schedule (creds updated), OR task ran successfully (RPC-only mode) |
+| `POSSIBLY_STALE` | Task should have run but hasn't - may indicate stale credentials |
+| `DEFINITELY_STALE` | Password changed after last successful run - credentials are definitely wrong |
+| `NEVER_RAN_LIKELY_VALID` | Task never ran, but password unchanged since creation - likely valid (may lack batch logon rights) |
+| `NEVER_RAN_POSSIBLY_STALE` | Task never ran, and password changed after creation - likely stale |
+| `NEVER_RAN_UNKNOWN` | Task never ran, no AD context - was valid at creation, current status unknown |
+| `UNKNOWN` | Cannot determine (account blocked, etc.) |
+
+The key insight: comparing `pwdLastSet` from AD against `LastRunTime` from Task Scheduler tells us if the password changed after the last successful run. For never-run tasks, comparing `pwdLastSet` against `task_creation_date` tells us if the password changed after the task was created with valid credentials. 
+
+**Without AD data** (e.g., `--no-ldap` and no BloodHound): TaskHound falls back to RPC-only mode, using just the return code and last run time. A successful execution returns `LIKELY_VALID`; schedule-based staleness detection still applies if trigger interval is known from the task XML.
 
 > **Note**: Disabled when using `--opsec` or `--no-rpc`.
 
@@ -541,8 +557,11 @@ Speaking of Engagements: For red team/stealth operations, use `--opsec` to disab
 ### Usage Examples
 
 ```bash
-# Full OPSEC mode (disables: LDAP, RPC, looting, credguard, validation)
+# Full OPSEC mode (disables: LDAP, RPC, looting, credguard, validation; forces sequential scanning)
 taskhound -u user -p 'pass' -d corp.local -t target --opsec
+
+# OPSEC with jitter (random 0-5 second delays between hosts)
+taskhound -u user -p 'pass' -d corp.local --targets-file hosts.txt --opsec --jitter 5
 
 # Disable LDAP only (keep LSARPC for SID resolution)
 taskhound -u user -p 'pass' -d corp.local -t target --no-ldap
@@ -558,8 +577,9 @@ taskhound -u user -p 'pass' -d corp.local --laps --opsec --force-laps
 
 1. **Pre-populate BloodHound data** - Import domain data first with `--bh-live`
 2. **Use `--opsec` flag** - Disables all noisy operations at once
-3. **Collect XMLs via other means** - Analyze offline with `--offline`
-4. **Use the BOF implementation** - Available in AdaptixC2
+3. **Add `--jitter` for timing randomization** - Avoid predictable scan patterns
+4. **Collect XMLs via other means** - Analyze offline with `--offline`
+5. **Use the BOF implementation** - Available in AdaptixC2
 
 ---
 
@@ -591,8 +611,9 @@ TARGET OPTIONS
   --dc-ip               Domain controller IP
   --ns, --nameserver    DNS nameserver for lookups
   --timeout             Connection timeout in seconds (default: 5)
-  --threads             Parallel worker threads (default: 1)
+  --threads             Parallel worker threads (default: 10)
   --rate-limit          Max targets per second (default: unlimited)
+  --jitter SECONDS      Random delay (0-N seconds) between hosts (OPSEC, sequential only)
   --dns-tcp             Force DNS over TCP (for SOCKS proxies)
   --auto-targets        Auto-discover targets (BloodHound first, LDAP fallback)
   --ldap-filter         Filter for auto-targets: 'servers', 'workstations', or raw LDAP
@@ -605,7 +626,7 @@ SCANNING OPTIONS
   --offline-disk        Analyze mounted Windows filesystem
   --disk-hostname       Override hostname for offline-disk
   --bh-data             BloodHound export file for HV detection
-  --opsec               Stealth mode: --no-ldap --no-rpc --no-loot --no-credguard --no-validate-creds
+  --opsec               Stealth mode: --no-ldap --no-rpc --no-loot --no-credguard --no-validate-creds --threads 1
   --no-rpc              Disable RPC operations (LSARPC, CredGuard, validation)
   --include-ms          Include \Microsoft tasks
   --include-local       Include local system accounts

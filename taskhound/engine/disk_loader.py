@@ -46,15 +46,15 @@ def find_windows_root(mount_path: str) -> Optional[Path]:
     Returns:
         Path to the Windows root directory, or None if not found
     """
-    mount_path = Path(mount_path)
+    mount: Path = Path(mount_path)
 
     # Check if Windows folder exists directly
-    if (mount_path / "Windows").exists():
-        return mount_path
+    if (mount / "Windows").exists():
+        return mount
 
     # Check one level down (partition/volume mounts)
     try:
-        for subdir in mount_path.iterdir():
+        for subdir in mount.iterdir():
             if subdir.is_dir() and (subdir / "Windows").exists():
                 info(f"Found Windows root at: {subdir}")
                 return subdir
@@ -63,7 +63,7 @@ def find_windows_root(mount_path: str) -> Optional[Path]:
 
     # Check two levels down (rare but possible)
     try:
-        for subdir in mount_path.iterdir():
+        for subdir in mount.iterdir():
             if subdir.is_dir():
                 for subsubdir in subdir.iterdir():
                     if subsubdir.is_dir() and (subsubdir / "Windows").exists():

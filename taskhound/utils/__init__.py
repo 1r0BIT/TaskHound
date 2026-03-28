@@ -10,5 +10,5 @@ Modules:
     ldap: LDAP connection utilities
     logging: Logging configuration
     network: Network utilities
-    sid_resolver: SID resolution utilities
+    pwd_resolver: Password last set resolution with layered caching
 """

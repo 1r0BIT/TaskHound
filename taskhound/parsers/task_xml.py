@@ -6,11 +6,11 @@
 # Can be extended later if needed.
 
 import xml.etree.ElementTree as ET
-from typing import Dict
+from typing import Dict, Optional, Union
 
 
-def parse_task_xml(xml_bytes: bytes) -> Dict[str, str]:
-    res = {
+def parse_task_xml(xml_bytes: Union[str, bytes]) -> Dict[str, Optional[str]]:
+    res: Dict[str, Optional[str]] = {
         "runas": None,
         "author": None,
         "date": None,

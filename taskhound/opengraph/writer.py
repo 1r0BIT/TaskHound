@@ -23,7 +23,7 @@ def generate_opengraph_files(
     allow_orphans: bool = False,
     computer_sids: Optional[Dict[str, str]] = None,
     netbios_name: Optional[str] = None,
-) -> None:
+) -> Optional[str]:
     """
     Generates OpenGraph compatible JSON files for BloodHound.
 
@@ -76,12 +76,12 @@ def generate_opengraph_files(
     info("Collecting unique principals for resolution...")
     for task in valid_tasks:
         # Add computer hostname (FQDN)
-        hostname = task.get("host", "").strip().upper()
+        hostname = (task.get("host") or "").strip().upper()
         if hostname and hostname != "UNKNOWN_HOST":
             computer_names.add(hostname)
 
         # Add RunAs user
-        runas = task.get("runas", "").strip()
+        runas = (task.get("runas") or "").strip()
         if runas and runas != "N/A":
             # Use helper to normalize principal ID
             fqdn_domain = _extract_domain(hostname)
@@ -92,8 +92,8 @@ def generate_opengraph_files(
     info(f"Found {len(computer_names)} unique computers and {len(user_names)} unique users")
 
     # 2. Resolve names to IDs if connector is available
-    computer_map = {}
-    user_map = {}
+    computer_map: Dict[str, Optional[tuple]] = {}
+    user_map: Dict[str, Optional[tuple]] = {}
 
     if bh_connector:
         info("Resolving Principals...")
@@ -117,19 +117,19 @@ def generate_opengraph_files(
     for name in computer_names:
         sid = None
         resolved_name = None
-        if name in computer_map and computer_map[name]:
-             _, sid, *rest = computer_map[name]
+        node_info = computer_map.get(name)
+        if node_info:
+             _, sid, *rest = node_info
              if rest:
                  resolved_name = rest[0]
 
         if sid:
             # We have a SID - use it as ID (matches builder.py logic)
-            # Note: We include minimal properties to avoid overwriting existing data if possible,
-            # but 'name' and 'objectid' are essential for identity.
+            # Note: 'objectid' is reserved in BH v8.9.0+; identity is carried by id=.
             node = Node(
                 id=sid,
                 kinds=["Computer", "Base"],
-                properties=Properties(name=resolved_name or name, objectid=sid)
+                properties=Properties(name=resolved_name or name)
             )
             graph.add_node(node)
             debug(f"Added placeholder node for Computer: {resolved_name or name} ({sid})")
@@ -147,8 +147,9 @@ def generate_opengraph_files(
     for name in user_names:
         sid = None
         resolved_name = None
-        if name in user_map and user_map[name]:
-             _, sid, *rest = user_map[name]
+        node_info = user_map.get(name)
+        if node_info:
+             _, sid, *rest = node_info
              if rest:
                  resolved_name = rest[0]
 
@@ -156,7 +157,7 @@ def generate_opengraph_files(
             node = Node(
                 id=sid,
                 kinds=["User", "Base"],
-                properties=Properties(name=resolved_name or name, objectid=sid)
+                properties=Properties(name=resolved_name or name)
             )
             graph.add_node(node)
             debug(f"Added placeholder node for User: {resolved_name or name} ({sid})")
@@ -200,7 +201,7 @@ def generate_opengraph_files(
             continue
         except Exception as e:
             warn(f"Error processing task {task.get('path', 'unknown')}: {e}")
-            if debug:
+            if debug:  # type: ignore[truthy-function]  # intentional: guard debug-only traceback
                 import traceback
                 debug(traceback.format_exc())
             continue
@@ -242,7 +243,7 @@ def generate_opengraph_files(
 
     except Exception as e:
         error(f"Failed to write OpenGraph files: {e}")
-        if debug:
+        if debug:  # type: ignore[truthy-function]  # intentional: guard debug-only traceback
             import traceback
             debug(traceback.format_exc())
         return None

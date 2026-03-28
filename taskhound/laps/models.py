@@ -141,7 +141,7 @@ class LAPSCache:
             ttl_hours = 8  # Default for legacy LAPS without expiration info
 
         try:
-            cache.set(LAPS_CACHE_CATEGORY, key, cred.to_cache_dict(), ttl_hours=ttl_hours)
+            cache.set(LAPS_CACHE_CATEGORY, key, cred.to_cache_dict(), ttl_hours=int(ttl_hours))
             debug(f"LAPS: Cached {key} (TTL: {ttl_hours:.1f}h)")
         except Exception as e:
             debug(f"LAPS: Failed to persist {key}: {e}")

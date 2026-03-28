@@ -25,7 +25,7 @@
 # - Sign (variable) - HMAC signature
 
 import struct
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..utils.logging import debug, info, status, warn
 
@@ -61,7 +61,7 @@ class DPAPIBlobParser:
     def __init__(self):
         self.parsed_blobs = []
 
-    def parse_blob(self, blob_data: bytes, blob_path: str = None) -> Optional[Dict]:
+    def parse_blob(self, blob_data: bytes, blob_path: Optional[str] = None) -> Optional[Dict]:
         """
         Parse a DPAPI credential blob and extract metadata.
 
@@ -86,7 +86,7 @@ class DPAPIBlobParser:
                 return None
 
             offset = 0
-            blob_info = {"blob_path": blob_path, "total_size": len(blob_data), "parsed_successfully": False}
+            blob_info: Dict[str, Any] = {"blob_path": blob_path, "total_size": len(blob_data), "parsed_successfully": False}
 
             # Version (4 bytes) - should be 2 for credential blobs
             version = struct.unpack("<I", blob_data[offset : offset + 4])[0]
@@ -184,7 +184,7 @@ class DPAPIBlobParser:
         """Get algorithm name from ID."""
         return self.CALG_ALGORITHMS.get(alg_id, f"Unknown(0x{alg_id:04x})")
 
-    def analyze_blob_collection(self, blob_files: List[str]) -> Dict:
+    def analyze_blob_collection(self, blob_files: List[str]) -> Dict[str, Any]:
         """
         Analyze a collection of DPAPI blobs to identify patterns.
 
@@ -194,7 +194,7 @@ class DPAPIBlobParser:
         Returns:
             Analysis summary with statistics and findings
         """
-        results = {
+        results: Dict[str, Any] = {
             "total_blobs": len(blob_files),
             "successfully_parsed": 0,
             "failed_to_parse": 0,

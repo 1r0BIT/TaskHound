@@ -202,6 +202,17 @@ class TestCreateTaskNode:
         props = node.properties.to_dict() if hasattr(node.properties, 'to_dict') else dict(node.properties)
         assert props.get("enabled") is False
 
+    def test_objectid_not_in_properties(self):
+        """objectid is reserved in BH v8.9.0+ and must not appear in node properties"""
+        task = {
+            "host": "DC01.DOMAIN.LAB",
+            "path": "\\Tasks\\TestTask",
+            "command": "cmd.exe",
+        }
+        node = _create_task_node(task)
+        props = node.properties.to_dict() if hasattr(node.properties, 'to_dict') else dict(node.properties)
+        assert "objectid" not in props
+
     def test_credentials_stored_flag(self):
         """Should set credentialsstored based on credentials_hint"""
         task = {
@@ -343,10 +354,35 @@ class TestCreatePrincipalId:
         assert result == "ADMIN@DOMAIN.LAB"
 
     def test_handles_plain_username(self):
-        """Should handle plain username without domain"""
-        result = _create_principal_id("admin", "DOMAIN.LAB", {})
+        """Bare ambiguous samaccountname (not a known local name) assumes domain"""
+        result = _create_principal_id("svcbackup", "DOMAIN.LAB", {})
 
-        assert result == "ADMIN@DOMAIN.LAB"
+        assert result == "SVCBACKUP@DOMAIN.LAB"
+
+    def test_filters_bare_administrator(self):
+        """Bare 'Administrator' is always a local account per LookupAccountName() order"""
+        result = _create_principal_id("Administrator", "DOMAIN.LAB", {})
+        assert result is None
+
+        result = _create_principal_id("administrator", "DOMAIN.LAB", {})
+        assert result is None
+
+    def test_filters_bare_guest(self):
+        """Bare 'Guest' is always a local account"""
+        assert _create_principal_id("Guest", "DOMAIN.LAB", {}) is None
+        assert _create_principal_id("guest", "DOMAIN.LAB", {}) is None
+
+    def test_filters_bare_defaultaccount(self):
+        """Bare 'DefaultAccount' and 'WDAGUtilityAccount' are local accounts"""
+        assert _create_principal_id("DefaultAccount", "DOMAIN.LAB", {}) is None
+        assert _create_principal_id("WDAGUtilityAccount", "DOMAIN.LAB", {}) is None
+
+    def test_filters_dot_prefix_local_account(self):
+        """.\\username is the explicit MS-TSCH local account format — always skip"""
+        task = {"host": "DC01.DOMAIN.LAB", "path": "\\Tasks\\Test"}
+        assert _create_principal_id(".\\Administrator", "DOMAIN.LAB", task) is None
+        assert _create_principal_id(".\\svcaccount", "DOMAIN.LAB", task) is None
+        assert _create_principal_id(".\\localuser", "DOMAIN.LAB", task) is None
 
     def test_filters_local_account(self):
         """Should filter local accounts (domain matches hostname)"""
@@ -428,6 +464,31 @@ class TestCreatePrincipalId:
         # uppercase runas domain
         result2 = _create_principal_id("corp\\admin", "DOMAIN.LAB", task, local_netbios="CORP")
         assert result2 == "ADMIN@DOMAIN.LAB"
+
+    def test_bare_name_skipped_if_in_host_local_cache(self):
+        """Bare name matching a per-host SAMR cache entry should return None"""
+        from taskhound.utils.cache_manager import get_cache
+        get_cache().set("local_users", "DC01.DOMAIN.LAB", {"svclocal": 1001, "backupadmin": 1002})
+
+        task = {"host": "DC01.DOMAIN.LAB", "path": "\\Tasks\\Test"}
+        assert _create_principal_id("svclocal", "DOMAIN.LAB", task) is None
+        assert _create_principal_id("BackupAdmin", "DOMAIN.LAB", task) is None
+
+    def test_bare_name_falls_through_if_not_in_cache(self):
+        """Bare name NOT in per-host cache falls through to domain assumption"""
+        from taskhound.utils.cache_manager import get_cache
+        get_cache().set("local_users", "DC01.DOMAIN.LAB", {"svclocal": 1001})
+
+        task = {"host": "DC01.DOMAIN.LAB", "path": "\\Tasks\\Test"}
+        # svcbackup is not in the local cache — should assume domain
+        result = _create_principal_id("svcbackup", "DOMAIN.LAB", task)
+        assert result == "SVCBACKUP@DOMAIN.LAB"
+
+    def test_bare_name_no_host_in_task(self):
+        """Bare name with no host in task dict falls through normally (no cache lookup)"""
+        task = {}
+        result = _create_principal_id("svcaccount", "DOMAIN.LAB", task)
+        assert result == "SVCACCOUNT@DOMAIN.LAB"
 
 
 class TestCreatePrincipalIdWithConnector:

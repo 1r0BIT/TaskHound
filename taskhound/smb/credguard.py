@@ -133,23 +133,48 @@ class RemoteRegistryOps:
         """Get the RRP DCE connection for registry operations"""
         return self._rrp
 
+    @staticmethod
+    def _close_dce_pipe(dce) -> None:
+        """Close the named-pipe handle inside a DCE/RPC transport.
+
+        Impacket's ``SMBTransport.disconnect()`` calls ``disconnectTree()``
+        **without** first calling ``closeFile()``, and then disconnects the
+        IPC$ tree.  When two transports share the same SMB connection
+        (svcctl + winreg here), this corrupts state for later pipe users.
+
+        We close only the file handle and leave the IPC$ tree intact so
+        that subsequent named-pipe opens (e.g. SAMR) work correctly.
+        """
+        tp = dce.get_rpc_transport()
+        smb_conn = tp.get_smb_connection()
+        tid = getattr(tp, "_SMBTransport__tid", 0)
+        handle = getattr(tp, "_SMBTransport__handle", 0)
+        if smb_conn and tid and handle:
+            with contextlib.suppress(Exception):
+                smb_conn.closeFile(tid, handle)
+
     def finish(self):
-        """Cleanup: restore service state and disconnect"""
+        """Cleanup: restore service state, close pipe handles."""
         self._restore()
         if self._rrp is not None:
             with contextlib.suppress(Exception):
-                self._rrp.disconnect()
+                self._close_dce_pipe(self._rrp)
         if self._scmr is not None:
             with contextlib.suppress(Exception):
-                self._scmr.disconnect()
+                self._close_dce_pipe(self._scmr)
 
 
 def check_credential_guard(smb_conn, host) -> Optional[bool]:
     """
     Check if Credential Guard is enabled on a remote Windows host.
 
-    Checks HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\LsaCfgFlags == 1
+    Checks HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\LsaCfgFlags
     and/or HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\IsolatedUserMode == 1
+
+    LsaCfgFlags values:
+        0 = Credential Guard disabled
+        1 = Credential Guard enabled with UEFI lock
+        2 = Credential Guard enabled without lock
 
     Automatically starts the RemoteRegistry service if stopped/disabled,
     and restores it to the original state afterward.
@@ -175,14 +200,14 @@ def check_credential_guard(smb_conn, host) -> Optional[bool]:
         lsa_handle = ans["phkResult"]
         log_debug(f"{host}: CredGuard check - opened {lsa_path}")
 
-        # Check LsaCfgFlags
+        # Check LsaCfgFlags (values: 0=disabled, 1=UEFI lock, 2=without lock)
         lsa_cfg_flags = None
         try:
-            val = rrp.hBaseRegQueryValue(dce, lsa_handle, "LsaCfgFlags")
-            lsa_cfg_flags = int.from_bytes(val["lpData"], "little")
+            # hBaseRegQueryValue returns tuple (dataType, data)
+            _, lsa_cfg_flags = rrp.hBaseRegQueryValue(dce, lsa_handle, "LsaCfgFlags")
             log_debug(f"{host}: CredGuard check - LsaCfgFlags = {lsa_cfg_flags}")
-            if lsa_cfg_flags == 1:
-                log_debug(f"{host}: CredGuard check - DETECTED via LsaCfgFlags=1")
+            if lsa_cfg_flags in (1, 2):
+                log_debug(f"{host}: CredGuard check - DETECTED via LsaCfgFlags={lsa_cfg_flags}")
                 return True
         except DCERPCException:
             log_debug(f"{host}: CredGuard check - LsaCfgFlags not present")
@@ -190,8 +215,8 @@ def check_credential_guard(smb_conn, host) -> Optional[bool]:
         # Check IsolatedUserMode
         isolated_user_mode = None
         try:
-            val = rrp.hBaseRegQueryValue(dce, lsa_handle, "IsolatedUserMode")
-            isolated_user_mode = int.from_bytes(val["lpData"], "little")
+            # hBaseRegQueryValue returns tuple (dataType, data)
+            _, isolated_user_mode = rrp.hBaseRegQueryValue(dce, lsa_handle, "IsolatedUserMode")
             log_debug(f"{host}: CredGuard check - IsolatedUserMode = {isolated_user_mode}")
             if isolated_user_mode == 1:
                 log_debug(f"{host}: CredGuard check - DETECTED via IsolatedUserMode=1")

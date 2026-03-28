@@ -24,6 +24,10 @@ from ..models.task import TaskRow
 from ..output.printer import format_block
 from ..parsers.highvalue import HighValueLoader
 from ..parsers.task_xml import parse_task_xml
+from ..resolver import (
+    format_runas_with_sid_resolution,
+    is_sid,
+)
 from ..smb.connection import (
     _dns_ptr_lookup,
     get_server_fqdn,
@@ -39,10 +43,6 @@ from ..utils.credentials import find_password_for_user
 from ..utils.helpers import is_ipv4
 from ..utils.logging import debug as log_debug
 from ..utils.logging import good, info, status, warn
-from ..utils.sid_resolver import (
-    format_runas_with_sid_resolution,
-    is_sid,
-)
 from .helpers import (
     perform_credential_validation,
     perform_dpapi_looting,
@@ -228,6 +228,7 @@ def process_target(
 
             # Phase 3: Authenticate with LAPS credentials
             try:
+                assert laps_cred is not None
                 smb_login(
                     smb,
                     domain=".",  # Local account for LAPS
@@ -245,6 +246,7 @@ def process_target(
                     traceback.print_exc()
                 warn(LAPS_ERRORS["auth_failed"].format(hostname=discovered_hostname), verbose_only=True)
                 status(f"[Collecting] {target} [-] (LAPS auth failed)")
+                assert laps_cred is not None
                 laps_failure = LAPSFailure(
                     hostname=discovered_hostname,
                     failure_type="auth_failed",
@@ -263,7 +265,7 @@ def process_target(
         else:
             # Standard mode: Direct SMB connection
             smb = smb_connect(
-                target, domain, username, hashes or password, kerberos=kerberos, dc_ip=dc_ip, timeout=timeout, aes_key=aes_key
+                target, domain, username, hashes or password, kerberos=kerberos, dc_ip=dc_ip or "", timeout=timeout, aes_key=aes_key or ""
             )
 
         good(f"{target}: Connected via SMB")
@@ -333,6 +335,12 @@ def process_target(
                 log_debug(f"{target}: Credential Guard status unknown (Remote Registry service likely disabled)")
         elif credguard_detect and no_rpc:
             log_debug(f"{target}: Skipping Credential Guard check (--no-rpc mode)")
+
+        # Enumerate local accounts for dynamic bare-name resolution in OpenGraph
+        # Non-fatal: silently returns {} if SAMR is blocked or fails
+        if not no_rpc:
+            from ..smb.local_users import enumerate_local_users
+            enumerate_local_users(smb, server_fqdn)
     except Exception as e:
         if debug:
             traceback.print_exc()
@@ -369,7 +377,7 @@ def process_target(
                 hostname=discovered_hostname or target,
                 failure_type="remote_uac",
                 message=LAPS_ERRORS["remote_uac"].format(hostname=discovered_hostname or target),
-                laps_user_tried=laps_cred.username if laps_cache else None,
+                laps_user_tried=laps_cred.username if laps_cred else None,
                 laps_type_tried=laps_type_used,
             )
             all_rows.append(TaskRow.failure(
@@ -377,6 +385,8 @@ def process_target(
                 "Remote UAC (token filtered)",
                 target_ip=target,
             ))
+            with contextlib.suppress(Exception):
+                smb.close()
             return out_lines, laps_failure
 
         # Check if C$ admin share doesn't exist (DCs, hardened servers, non-Windows)
@@ -388,6 +398,8 @@ def process_target(
                 "C$ admin share not found",
                 target_ip=target,
             ))
+            with contextlib.suppress(Exception):
+                smb.close()
             return out_lines, laps_result
 
         # General access denied (not LAPS-specific)
@@ -399,6 +411,8 @@ def process_target(
                 "Access Denied to C$ share",
                 target_ip=target,
             ))
+            with contextlib.suppress(Exception):
+                smb.close()
             return out_lines, laps_result
 
         else:
@@ -409,6 +423,8 @@ def process_target(
                 f"Admin check failed: {e}",
                 target_ip=target,
             ))
+            with contextlib.suppress(Exception):
+                smb.close()
             return out_lines, laps_result
 
     if not include_ms:
@@ -427,6 +443,8 @@ def process_target(
             "Access Denied (Failed to crawl tasks)",
         ))
         warn(f"{target}: Failed to Crawl Tasks. Skipping... (Are you Local Admin?)", verbose_only=True)
+        with contextlib.suppress(Exception):
+            smb.close()
         return out_lines, laps_result
     except Exception as e:
         if debug:
@@ -437,6 +455,8 @@ def process_target(
             f"Crawling failed: {e}",
         ))
         warn(f"{target}: Unexpected error while crawling tasks: {e}", verbose_only=True)
+        with contextlib.suppress(Exception):
+            smb.close()
         return out_lines, laps_result
 
     # First pass: identify tasks with Password logon type for credential validation
@@ -601,32 +621,34 @@ def process_target(
         if is_sid(runas) and not opsec:
             # Skip SID resolution for well-known local SIDs that will be filtered out
             # This avoids unnecessary cache lookups for SYSTEM (S-1-5-18), etc.
-            from ..utils.sid_resolver import looks_like_domain_user
+            from ..resolver import looks_like_domain_user
             if not looks_like_domain_user(runas) and not include_local:
                 # This SID is a local/system account and we're not including locals
                 # Skip resolution - the task will be filtered out in classify_task()
                 pass
             else:
                 # Derive local domain SID prefix from computer SID for foreign domain detection
-                from ..utils.sid_resolver import get_domain_sid_prefix
+                from ..resolver import get_domain_sid_prefix
                 local_domain_prefix = get_domain_sid_prefix(server_sid) if server_sid else None
 
                 # Get known domain SID prefixes for unknown domain detection
                 # Pass full dict (prefix -> FQDN) for trust-aware display
-                known_prefixes = hv.hv_domain_sids if hv and hasattr(hv, 'hv_domain_sids') and hv.hv_domain_sids else None
+                known_prefixes: Optional[Dict[str, Any]] = hv.hv_domain_sids if hv and hasattr(hv, 'hv_domain_sids') and hv.hv_domain_sids else None
 
                 _, row.resolved_runas = format_runas_with_sid_resolution(
                     runas,
                     hv_loader=hv,
                     bh_connector=bh_connector,
-                    smb_connection=None if no_rpc else smb,  # Skip LSARPC if --no-rpc
+                    smb_connection=None if no_rpc else smb,  # Skip target LSARPC if --no-rpc
                     no_ldap=no_ldap,
+                    no_rpc=no_rpc,  # Also controls DC LSARPC for cross-trust resolution
                     domain=domain,
                     dc_ip=dc_ip,
                     username=username,
                     password=password,
                     hashes=hashes,
                     kerberos=kerberos,
+                    aes_key=aes_key,
                     ldap_domain=ldap_domain,
                     ldap_user=ldap_user,
                     ldap_password=ldap_password,
@@ -683,8 +705,8 @@ def process_target(
                     rel_path,
                     runas,
                     what,
-                    meta.get("author"),
-                    meta.get("date"),
+                    meta.get("author") or "",
+                    meta.get("date") or "",
                     extra_reason=result.reason,
                     password_analysis=result.password_analysis,
                     hv=hv,
@@ -721,8 +743,8 @@ def process_target(
                     rel_path,
                     runas,
                     what,
-                    meta.get("author"),
-                    meta.get("date"),
+                    meta.get("author") or "",
+                    meta.get("date") or "",
                     password_analysis=result.password_analysis,
                     hv=hv,
                     bh_connector=bh_connector,
@@ -768,4 +790,6 @@ def process_target(
 
     # Combine credential loot output with task listing output
     # Put credentials first since they're the most valuable
+    with contextlib.suppress(Exception):
+        smb.close()
     return out_lines + sorted_lines, laps_result

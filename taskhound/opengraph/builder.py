@@ -9,9 +9,9 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from bhopengraph import Edge, Node, Properties
 
+from ..resolver import resolve_name_to_sid_via_ldap
 from ..utils.cache_manager import get_cache
 from ..utils.logging import debug, good, info, warn
-from ..utils.sid_resolver import resolve_name_to_sid_via_ldap
 
 
 def _create_task_object_id(hostname: str, task_path: str) -> str:
@@ -50,8 +50,8 @@ def _create_task_node(task: Dict) -> Node:
     :return: Node instance
     :raises ValueError: If required fields are missing or invalid
     """
-    hostname = task.get("host", "").strip().upper()
-    task_path = task.get("path", "").strip()
+    hostname = (task.get("host") or "").strip().upper()
+    task_path = (task.get("path") or "").strip()
 
     # Validate required fields
     if not hostname:
@@ -80,7 +80,6 @@ def _create_task_node(task: Dict) -> Node:
     properties_dict = {
         "name": task_path,
         "hostname": hostname,
-        "objectid": object_id,
         "runas": task.get("runas") or "N/A",
         "enabled": str(task.get("enabled", "false")).lower() == "true",
         "command": command,
@@ -263,6 +262,11 @@ def _create_principal_id(runas_user: str, local_domain: str, task: Dict, bh_conn
         domain_prefix = domain_prefix.strip().upper()
         user = user.strip().upper()
 
+        # Explicit local account per MS-TSCH spec format 3 (.\username)
+        if domain_prefix == ".":
+            debug(f"Skipping explicit local account '{runas_user}' on {task.get('host', 'unknown')}: {task.get('path', 'unknown')}")
+            return None
+
         # Use provided NetBIOS name, or derive from FQDN first part as fallback
         # The NetBIOS name can differ from FQDN first part (e.g., corp.example.com -> YOURCOMPANY)
         if local_netbios:
@@ -330,23 +334,43 @@ def _create_principal_id(runas_user: str, local_domain: str, task: Dict, bh_conn
         # Use full FQDN format
         return f"{user}@{local_domain}"
     else:
-        # No domain prefix and no @ - assume local domain
-        # This is ambiguous: could be local account or domain account
-        # MS-TSCH spec defines .\user for local, DOMAIN\user for domain
-        # Plain samaccountname is non-standard - warn user about assumption
-        user = runas_user.strip().upper()
+        # No domain prefix and no @ - potentially ambiguous
+        # Per LookupAccountName() order, local accounts are resolved BEFORE domain.
+        # Well-known local account names always resolve to local, never domain.
+        user = runas_user.strip()
         task_path = task.get("path", "unknown")
         hostname = task.get("host", "unknown")
+
+        KNOWN_LOCAL_ACCOUNTS = {
+            "administrator", "guest", "defaultaccount", "wdagutilityaccount",
+            "gast",  # German: guest
+        }
+        if user.lower() in KNOWN_LOCAL_ACCOUNTS:
+            debug(f"Skipping known local account '{user}' on {hostname}: {task_path}")
+            return None
+
+        # Check per-host dynamic local account cache (populated by SAMR during scan)
+        hostname_key = hostname.upper()
+        if hostname_key:
+            _cache = get_cache()
+            local_users = (_cache.get("local_users", hostname_key) if _cache else None) or {}
+            if user.lower() in local_users:
+                rid = local_users[user.lower()]
+                debug(f"Skipping per-host local account '{user}' (RID {rid}) on {hostname}: {task_path}")
+                return None
+
+        # Other bare names remain ambiguous - assume domain with a warning
+        # MS-TSCH spec uses .\user for local, DOMAIN\user for domain
         warn(f"Ambiguous principal on {hostname}: {task_path}")
-        warn(f"  RunAs: '{runas_user}' (no domain prefix) - assuming domain account {user}@{local_domain}")
+        warn(f"  RunAs: '{runas_user}' (no domain prefix) - assuming domain account {user.upper()}@{local_domain}")
         warn(f"  If this is a local account, it should be '.\\{runas_user}' per MS-TSCH spec")
-        return f"{user}@{local_domain}"
+        return f"{user.upper()}@{local_domain}"
 
 
 def _create_relationship_edges(
     task: Dict,
-    computer_map: Dict[str, Tuple[str, str]],
-    user_map: Dict[str, Tuple[str, str]],
+    computer_map: Dict[str, Optional[Tuple[str, str, str]]],
+    user_map: Dict[str, Optional[Tuple[str, str, str]]],
     bh_connector=None,
     allow_orphans: bool = False,
     netbios_name: Optional[str] = None,
@@ -361,9 +385,9 @@ def _create_relationship_edges(
     edges = []
     skipped = {"computers": 0, "users": 0}
 
-    hostname = task.get("host", "").strip().upper()
-    task_path = task.get("path", "").strip()
-    runas_user = task.get("runas", "").strip()
+    hostname = (task.get("host") or "").strip().upper()
+    task_path = (task.get("path") or "").strip()
+    runas_user = (task.get("runas") or "").strip()
 
     # Helper to extract domain from FQDN
     fqdn_domain = "WORKGROUP"
@@ -530,7 +554,7 @@ def resolve_object_ids_chunked(
     ldap_config: Optional[Dict] = None,
     chunk_size: int = 10,
     computer_sids: Optional[Dict[str, str]] = None
-) -> Tuple[Dict[str, Tuple[str, str]], Dict[str, Tuple[str, str]]]:
+) -> Tuple[Dict[str, Optional[Tuple[str, str, str]]], Dict[str, Optional[Tuple[str, str, str]]]]:
     """
     Resolve computer and user names to their node IDs and objectIds (SIDs) using BloodHound API.
     Falls back to LDAP if API queries fail (LDAP only provides objectId, not node_id).
@@ -559,8 +583,8 @@ def resolve_object_ids_chunked(
         Note: If resolved via LDAP fallback, node_id will be empty string: ("", "S-1-5-21-...")
     """
 
-    computer_sid_map = {}
-    user_sid_map = {}
+    computer_sid_map: Dict[str, Optional[Tuple[str, str, str]]] = {}
+    user_sid_map: Dict[str, Optional[Tuple[str, str, str]]] = {}
 
     # Initialize cache
     cache = get_cache()
@@ -570,7 +594,7 @@ def resolve_object_ids_chunked(
         items_list = sorted(items)  # Sort for consistent ordering
         return [items_list[i:i + size] for i in range(0, len(items_list), size)]
 
-    def _query_bloodhound_with_sid_validation(names_with_sids: Dict[str, str], node_type: str) -> Dict[str, Tuple[str, str]]:
+    def _query_bloodhound_with_sid_validation(names_with_sids: Dict[str, str], node_type: str) -> Dict[str, Tuple[str, str, str]]:
         """
         Query BloodHound API by name but VALIDATE with SID for correctness.
 
@@ -606,7 +630,7 @@ def resolve_object_ids_chunked(
                 nodes = data.get("data", {}).get("nodes", {})
 
                 # Group nodes by name to detect duplicates
-                nodes_by_name = {}
+                nodes_by_name: Dict[str, List[Tuple[str, str, str]]] = {}
                 for node_id, node in nodes.items():
                     name = node.get("label")
                     object_id = node.get("objectId")
@@ -651,12 +675,12 @@ def resolve_object_ids_chunked(
                 return {}
         except Exception as e:
             warn(f"Error querying BloodHound with SID validation: {e}")
-            if debug:
+            if debug:  # type: ignore[truthy-function]  # intentional: guard debug-only traceback
                 import traceback
                 traceback.print_exc()
             return {}
 
-    def _query_bloodhound_chunk(names: List[str], node_type: str) -> Dict[str, Tuple[str, str]]:
+    def _query_bloodhound_chunk(names: List[str], node_type: str) -> Dict[str, Tuple[str, str, str]]:
         """
         Query BloodHound API for a chunk of names using the connector.
 
@@ -702,7 +726,7 @@ def resolve_object_ids_chunked(
             debug(traceback.format_exc())
             return {}
 
-    def _query_bloodhound_by_sid_chunk(sids: List[str], node_type: str) -> Dict[str, Tuple[str, str]]:
+    def _query_bloodhound_by_sid_chunk(sids: List[str], node_type: str) -> Dict[str, Tuple[str, str, str]]:
         """
         Query BloodHound API for a chunk of SIDs (objectIds).
 
@@ -745,7 +769,7 @@ def resolve_object_ids_chunked(
             debug(traceback.format_exc())
             return {}
 
-    def _ldap_fallback(names: List[str], is_computer: bool) -> Dict[str, Tuple[str, str]]:
+    def _ldap_fallback(names: List[str], is_computer: bool) -> Dict[str, Tuple[str, str, str]]:
         """
         Fallback to LDAP for resolving names to SIDs.
         Note: LDAP can only provide objectId (SID), not the BloodHound node_id.

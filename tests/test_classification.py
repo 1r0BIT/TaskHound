@@ -230,7 +230,7 @@ class TestClassifyTask:
         assert "DPAPI dump not applicable" in result.reason
         assert result.password_analysis is None  # No analysis for tasks without saved creds
 
-    @patch("taskhound.utils.sid_resolver.looks_like_domain_user")
+    @patch("taskhound.resolver.looks_like_domain_user")
     def test_regular_task_domain_user(self, mock_looks_like):
         """Should include regular domain user tasks."""
         mock_looks_like.return_value = True

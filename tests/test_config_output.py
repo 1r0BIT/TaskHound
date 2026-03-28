@@ -113,6 +113,15 @@ class TestLoadConfigTarget:
             config = load_config()
         assert config["target"] == "dc01.corp.local"
 
+    def test_load_jitter(self, mock_tomllib):
+        """Test loading jitter."""
+        mock_tomllib.load.return_value = {
+            "target": {"jitter": 5.0}
+        }
+        with patch("builtins.open", mock_open()), patch("os.path.exists", return_value=True):
+            config = load_config()
+        assert config["jitter"] == 5.0
+
 
 class TestLoadConfigScanning:
     """Tests for scanning config loading."""
@@ -385,6 +394,7 @@ class TestValidateArgs:
         assert args.loot is False
         assert args.credguard_detect is False
         assert args.validate_creds is False
+        assert args.threads == 1  # OPSEC forces sequential scanning
 
     @patch("taskhound.config.os.path.isdir", return_value=True)
     @patch("taskhound.config.os.path.exists", return_value=True)

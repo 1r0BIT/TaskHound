@@ -43,8 +43,8 @@ class MasterkeyInfo:
         self.guid = guid.lower()
         self.blob = blob
         self.sid = sid
-        self.key = None
-        self._sha1 = None
+        self.key: Optional[bytes] = None
+        self._sha1: Optional[str] = None
 
     def decrypt(self, dpapi_userkey: bytes) -> bool:
         """Decrypt masterkey using SYSTEM dpapi_userkey"""
@@ -363,6 +363,8 @@ class DPAPIDecryptor:
             hash_algo = HASH_ALGOS.get(blob["HashAlgo"], SHA1)
 
             # Derive session key
+            if masterkey.sha1 is None:
+                return None
             key_hash = unhexlify(masterkey.sha1)
             session_key = self._compute_session_key(key_hash=key_hash, salt=blob["Salt"], hash_algo=hash_algo)
 

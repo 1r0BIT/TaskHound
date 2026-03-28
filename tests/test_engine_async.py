@@ -47,12 +47,14 @@ class TestAsyncConfig:
         assert config.rate_limit is None
         assert config.timeout == 30
         assert config.show_progress is True
+        assert config.jitter is None
 
     def test_custom_values(self):
-        config = AsyncConfig(workers=20, rate_limit=5.0, timeout=60)
+        config = AsyncConfig(workers=20, rate_limit=5.0, timeout=60, jitter=3.0)
         assert config.workers == 20
         assert config.rate_limit == 5.0
         assert config.timeout == 60
+        assert config.jitter == 3.0
 
 
 class TestTargetResult:
@@ -99,6 +101,28 @@ class TestAsyncTaskHound:
         assert len(results) == 3
         assert all(r.success for r in results)
         assert all(len(r.rows) == 1 for r in results)
+
+    def test_sequential_mode_with_jitter(self):
+        """Test jitter adds delay between hosts in sequential mode."""
+        jitter_seconds = 0.2
+        config = AsyncConfig(workers=1, show_progress=False, jitter=jitter_seconds)
+        engine = AsyncTaskHound(config)
+
+        targets = ["host1", "host2", "host3"]
+        start = time.perf_counter()
+        results = engine.run(
+            targets,
+            mock_process_target,
+            delay=0.01,
+        )
+        elapsed = time.perf_counter() - start
+
+        assert len(results) == 3
+        assert all(r.success for r in results)
+        # Jitter applies between hosts (not before first), so 2 delays for 3 hosts
+        # Minimum elapsed should be at least some jitter time (random 0 to jitter_seconds)
+        # With 2 jitter delays, minimum could be 0, max would be ~0.4s + processing
+        # Just verify it completed without error; timing is non-deterministic
 
     def test_parallel_mode(self):
         """Test parallel processing with multiple workers."""

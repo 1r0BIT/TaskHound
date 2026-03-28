@@ -3,11 +3,11 @@ from typing import Any, Dict, List, Optional
 from rich.table import Table
 
 from ..parsers.highvalue import HighValueLoader
+from ..resolver import format_runas_with_sid_resolution
 from ..utils import logging as log_utils
 from ..utils.console import console
 from ..utils.credentials import find_password_for_user
 from ..utils.date_parser import parse_iso_date
-from ..utils.sid_resolver import format_runas_with_sid_resolution
 from . import COLORS
 
 
@@ -95,7 +95,7 @@ def print_task_table(
     console.print(table)
 
 
-def format_trigger_info(meta: Dict[str, str]) -> Optional[str]:
+def format_trigger_info(meta: Dict[str, Optional[str]]) -> Optional[str]:
     """Format trigger information for display"""
     trigger_type = meta.get("trigger_type")
     if not trigger_type:
@@ -321,9 +321,9 @@ def _check_gmsa_account(
     # Cache key uses the clean username (lowercase for consistency)
     cache_key = clean_username.lower().rstrip("$")
 
-    # Tier 1: Check cache first
-    if cache_manager:
-        cached = cache_manager.get("gmsa_status", cache_key)
+    # Tier 1: Check cache first (only for potential service accounts ending with $)
+    if cache_manager and clean_username.endswith("$"):
+        cached = cache_manager.get("svc_account", cache_key)
         if cached is not None:
             if cached.get("is_gmsa") or cached.get("is_msa"):
                 return _format_gmsa_hint(cached.get("is_gmsa", False), cached.get("is_msa", False))
@@ -337,9 +337,9 @@ def _check_gmsa_account(
                 is_gmsa = result.get("is_gmsa", False)
                 is_msa = result.get("is_msa", False)
 
-                # Cache the result
-                if cache_manager:
-                    cache_manager.set("gmsa_status", cache_key, {
+                # Cache the result only for service accounts (ending with $)
+                if cache_manager and clean_username.endswith("$"):
+                    cache_manager.set("svc_account", cache_key, {
                         "is_gmsa": is_gmsa,
                         "is_msa": is_msa,
                         "source": "bloodhound",
@@ -373,7 +373,7 @@ def _check_gmsa_account(
 
             # Cache the LDAP result
             if cache_manager:
-                cache_manager.set("gmsa_status", cache_key, {
+                cache_manager.set("svc_account", cache_key, {
                     "is_gmsa": is_gmsa,
                     "is_msa": is_msa,
                     "source": "ldap",
@@ -391,7 +391,7 @@ def _check_gmsa_account(
 
     # Cache heuristic result (lower confidence)
     if cache_manager:
-        cache_manager.set("gmsa_status", cache_key, {
+        cache_manager.set("svc_account", cache_key, {
             "is_gmsa": True,  # Assume gMSA for $ accounts (more common than MSA)
             "is_msa": False,
             "source": "heuristic",
@@ -444,7 +444,7 @@ def format_block(
     ldap_user: Optional[str] = None,
     ldap_password: Optional[str] = None,
     ldap_hashes: Optional[str] = None,
-    meta: Optional[Dict[str, str]] = None,
+    meta: Optional[Dict[str, Optional[str]]] = None,
     decrypted_creds: Optional[List] = None,
     concise: bool = False,
     cred_validation: Optional[Dict[str, Any]] = None,
@@ -474,27 +474,27 @@ def format_block(
     # Use pre-resolved username if available, otherwise resolve now
     if resolved_runas:
         # Already resolved - format display string
-        from ..utils.sid_resolver import is_sid
+        from ..resolver import is_sid
         display_runas = f"{resolved_runas} ({runas})" if is_sid(runas) else runas
         resolved_username = resolved_runas
     else:
         # Resolve SID in RunAs field for better display (uses 4-tier fallback: offline BH → API → SMB → LDAP)
-        display_runas, resolved_username = format_runas_with_sid_resolution(
+        display_runas, resolved_username = format_runas_with_sid_resolution(  # type: ignore[assignment]  # resolved_username may be None
             runas,
-            hv,
-            bh_connector,
-            smb_connection,
-            no_ldap,
-            domain,
-            dc_ip,
-            username,
-            password,
-            hashes,
-            kerberos,
-            ldap_domain,
-            ldap_user,
-            ldap_password,
-            ldap_hashes,
+            hv_loader=hv,
+            bh_connector=bh_connector,
+            smb_connection=smb_connection,
+            no_ldap=no_ldap,
+            domain=domain,
+            dc_ip=dc_ip,
+            username=username,
+            password=password,
+            hashes=hashes,
+            kerberos=kerberos,
+            ldap_domain=ldap_domain,
+            ldap_user=ldap_user,
+            ldap_password=ldap_password,
+            ldap_hashes=ldap_hashes,
         )
 
     if concise:
@@ -623,7 +623,7 @@ def format_block(
     # Credential Guard status (shown when credguard_detect is enabled, which is default)
     if credential_guard is not None:
         if credential_guard:
-            rows.append(("Cred Guard", "[red]ENABLED[/] - DPAPI extraction will fail"))
+            rows.append(("Cred Guard", "[red]ENABLED[/]"))
         else:
             rows.append(("Cred Guard", "[green]DISABLED[/] - DPAPI extraction possible"))
 

@@ -6,7 +6,7 @@
 
 import os
 import traceback
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..classification import classify_task
 from ..models.task import TaskRow
@@ -70,7 +70,7 @@ def process_offline_directory(
         hostname = os.path.basename(offline_dir)
         info(f"Detected single-host backup structure for {hostname}")
 
-        decrypted_creds = []
+        decrypted_creds: list[Any] = []
         if has_masterkeys and has_credentials and dpapi_key:
             dpapi_lines, decrypted_creds = _process_offline_dpapi_decryption(hostname, offline_dir, dpapi_key, debug)
             out_lines.extend(dpapi_lines)
@@ -338,8 +338,8 @@ def _process_offline_host(
                     rel_path,
                     runas,
                     what,
-                    meta.get("author"),
-                    meta.get("date"),
+                    meta.get("author") or "",
+                    meta.get("date") or "",
                     extra_reason=result.reason,
                     password_analysis=result.password_analysis,
                     hv=hv,
@@ -364,8 +364,8 @@ def _process_offline_host(
                     rel_path,
                     runas,
                     what,
-                    meta.get("author"),
-                    meta.get("date"),
+                    meta.get("author") or "",
+                    meta.get("date") or "",
                     password_analysis=result.password_analysis,
                     hv=hv,
                     no_ldap=no_ldap,

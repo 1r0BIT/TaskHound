@@ -540,13 +540,23 @@ class TestCheckHighvalue:
         assert loaded_loader.check_highvalue("") is False
         assert loaded_loader.check_highvalue(None) is False
 
-    def test_match_by_sam(self, loaded_loader):
-        """Matches user by SAM account name."""
-        assert loaded_loader.check_highvalue("admin") is True
-        assert loaded_loader.check_highvalue("svc_backup") is True
+    def test_bare_name_not_matched(self, loaded_loader):
+        """Bare names (no domain prefix) never match domain data.
+
+        Per LookupAccountName() resolution order, bare names resolve to local
+        accounts before domain accounts. We require an explicit qualifier.
+        """
+        assert loaded_loader.check_highvalue("admin") is False
+        assert loaded_loader.check_highvalue("svc_backup") is False
+
+    def test_bare_administrator_not_matched(self, loaded_loader):
+        """Bare 'Administrator' must not match even if domain Administrator is in BH data."""
+        loaded_loader.hv_users["administrator"] = {"sid": "S-1-5-21-1234-5678-9012-500"}
+        assert loaded_loader.check_highvalue("Administrator") is False
+        assert loaded_loader.check_highvalue("administrator") is False
 
     def test_match_by_domain_sam(self, loaded_loader):
-        """Matches user by DOMAIN\\sam format."""
+        """Matches user by DOMAIN\\sam format (explicit qualifier required)."""
         assert loaded_loader.check_highvalue("DOMAIN\\admin") is True
         assert loaded_loader.check_highvalue("CORP\\svc_backup") is True
 
@@ -615,20 +625,52 @@ class TestCheckTier0:
         assert reasons == []
 
     def test_domain_admin_membership(self, loaded_loader):
-        """Detects Tier 0 via Domain Admins membership."""
-        is_tier0, reasons = loaded_loader.check_tier0("domain_admin")
+        """Detects Tier 0 via Domain Admins membership (requires DOMAIN\\sam qualifier)."""
+        is_tier0, reasons = loaded_loader.check_tier0("DOMAIN\\domain_admin")
         assert is_tier0 is True
         assert "TIER0 Group Membership" in reasons
 
     def test_enterprise_admin_membership(self, loaded_loader):
-        """Detects Tier 0 via Enterprise Admins membership."""
-        is_tier0, reasons = loaded_loader.check_tier0("enterprise_admin")
+        """Detects Tier 0 via Enterprise Admins membership (requires DOMAIN\\sam qualifier)."""
+        is_tier0, reasons = loaded_loader.check_tier0("DOMAIN\\enterprise_admin")
+        assert is_tier0 is True
+        assert "TIER0 Group Membership" in reasons
+
+    def test_bare_name_not_tier0(self, loaded_loader):
+        """Bare names (no domain qualifier) never classified as Tier 0.
+
+        Per LookupAccountName() order, bare names resolve to LOCAL accounts before
+        domain accounts. Require an explicit DOMAIN\\user or user@domain qualifier.
+        """
+        is_tier0, reasons = loaded_loader.check_tier0("domain_admin")
+        assert is_tier0 is False
+        assert reasons == []
+
+    def test_bare_administrator_not_tier0(self, loaded_loader):
+        """Bare 'Administrator' must not match domain Administrator in BloodHound data."""
+        loaded_loader.hv_users["administrator"] = {
+            "sid": "S-1-5-21-1234-5678-9012-500",
+            "groups": ["S-1-5-21-1234-5678-9012-512"],
+            "group_names": ["Domain Admins"],
+        }
+        is_tier0, reasons = loaded_loader.check_tier0("Administrator")
+        assert is_tier0 is False
+        assert reasons == []
+
+    def test_domain_qualified_administrator_is_tier0(self, loaded_loader):
+        """DOMAIN\\Administrator with Tier 0 group membership IS classified correctly."""
+        loaded_loader.hv_users["administrator"] = {
+            "sid": "S-1-5-21-1234-5678-9012-500",
+            "groups": ["S-1-5-21-1234-5678-9012-512"],
+            "group_names": ["Domain Admins"],
+        }
+        is_tier0, reasons = loaded_loader.check_tier0("DOMAIN\\Administrator")
         assert is_tier0 is True
         assert "TIER0 Group Membership" in reasons
 
     def test_admin_sd_holder_alone_not_tier0(self, loaded_loader):
         """AdminSDHolder alone is NOT sufficient for Tier 0 - may be historical."""
-        is_tier0, reasons = loaded_loader.check_tier0("admin_sd_holder")
+        is_tier0, reasons = loaded_loader.check_tier0("DOMAIN\\admin_sd_holder")
         assert is_tier0 is False  # AdminSDHolder alone is NOT Tier 0
         assert reasons == []
 
@@ -641,14 +683,14 @@ class TestCheckTier0:
             "group_names": ["Domain Admins"],
             "admincount": "1",  # AdminSDHolder protected
         }
-        is_tier0, reasons = loaded_loader.check_tier0("admin_with_groups")
+        is_tier0, reasons = loaded_loader.check_tier0("DOMAIN\\admin_with_groups")
         assert is_tier0 is True
         assert "TIER0 Group Membership" in reasons
         assert "AdminSDHolder" in reasons  # Additional context
 
     def test_regular_user_not_tier0(self, loaded_loader):
         """Regular user is not Tier 0."""
-        is_tier0, reasons = loaded_loader.check_tier0("regular_user")
+        is_tier0, reasons = loaded_loader.check_tier0("DOMAIN\\regular_user")
         assert is_tier0 is False
         assert reasons == []
 

@@ -14,9 +14,9 @@ try:
 except ImportError:
     # Fallback for older Python versions if needed
     try:
-        import tomli as tomllib
+        import tomli as tomllib  # type: ignore[no-redef]  # conditional import fallback
     except ImportError:
-        tomllib = None
+        tomllib = None  # type: ignore[assignment]  # conditional import fallback
 
 from .utils.helpers import is_ipv4
 
@@ -202,6 +202,8 @@ def load_config() -> Dict[str, Any]:
         defaults["threads"] = target["threads"]
     if "rate_limit" in target:
         defaults["rate_limit"] = target["rate_limit"]
+    if "jitter" in target:
+        defaults["jitter"] = target["jitter"]
     if "dns_tcp" in target:
         defaults["dns_tcp"] = target["dns_tcp"]
 
@@ -373,7 +375,7 @@ def build_parser() -> argparse.ArgumentParser:
     # Target selection
     target = ap.add_argument_group("Target options")
     target.add_argument("-t", "--target", action=OnceOnly, help="Target(s) - single host or comma-separated list (e.g., 192.168.1.1,192.168.1.2)")
-    target.add_argument("--targets-file", help="File with targets, one per line")
+    target.add_argument("-T", "--targets-file", help="File with targets, one per line")
     target.add_argument("--dc-ip", help="Domain controller IP (required when using Kerberos without DNS)")
     target.add_argument(
         "--ns", "--nameserver",
@@ -390,9 +392,9 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument(
         "--threads",
         type=int,
-        default=1,
-        help="Number of parallel worker threads for scanning multiple targets (default: 1 = sequential). "
-        "Recommended: 10-20 for large networks with unique hosts. "
+        default=10,
+        help="Number of parallel worker threads for scanning multiple targets (default: 10). "
+        "Recommended: 10-20 for large networks with unique hosts. Use --threads 1 for sequential mode. "
         "NOTE: Windows limits ~10 concurrent SMB connections per host - use --rate-limit if scanning few hosts repeatedly.",
     )
     target.add_argument(
@@ -401,6 +403,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Maximum targets per second (default: unlimited). Use to avoid triggering security alerts "
         "or hitting Windows SMB connection limits. Example: --rate-limit 5 limits to 5 targets/second.",
+    )
+    target.add_argument(
+        "--jitter",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="Random delay (0 to N seconds) between scanning each host. Useful for OPSEC to avoid "
+        "predictable timing patterns. Only applies to sequential scanning (--threads 1). "
+        "Example: --jitter 5 adds 0-5 second random delay between hosts.",
     )
     target.add_argument(
         "--dns-tcp",
@@ -414,7 +425,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Auto-discover targets by querying for domain computer objects. "
         "Uses BloodHound data if available (via --bloodhound-* options), otherwise falls back to LDAP. "
         "By default, filters out disabled accounts and stale computers (>60 days). "
-        "Can be combined with -t/--targets-file to add additional targets.",
+        "Can be combined with -t/--target or -T/--targets-file to add additional targets.",
     )
     target.add_argument(
         "--ldap-filter",
@@ -542,8 +553,9 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument(
         "--opsec",
         action="store_true",
-        help="OPSEC safe mode: Disables noisy operations. Equivalent to --no-ldap --no-rpc --no-loot --no-credguard --no-validate-creds. "
-        "SID resolution limited to BloodHound data and local cache only.",
+        help="OPSEC safe mode: Disables noisy operations. Equivalent to --no-ldap --no-rpc --no-loot --no-credguard --no-validate-creds --threads 1. "
+        "Forces sequential scanning and limits SID resolution to BloodHound data and local cache only. "
+        "Tip: Combine with --jitter for randomized timing between hosts.",
     )
     scan.add_argument(
         "--no-rpc",
@@ -737,6 +749,9 @@ def validate_args(args):
             args.no_credguard = True
         if not getattr(args, 'no_validate_creds', False):
             args.no_validate_creds = True
+        # Force sequential scanning to reduce network noise
+        if args.threads > 1:
+            args.threads = 1
 
     # Derive enabled flags from the --no-* flags for cleaner logic
     # These are the "effective" settings after processing --opsec and --no-rpc

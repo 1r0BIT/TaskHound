@@ -17,11 +17,11 @@ import requests
 try:
     from neo4j import GraphDatabase
 except ImportError:
-    GraphDatabase = None
+    GraphDatabase = None  # type: ignore[assignment, misc]  # conditional import fallback
+from ..resolver import TrustInfo
 from ..utils.bh_auth import BloodHoundAuthenticator
 from ..utils.helpers import sanitize_json_string
 from ..utils.logging import debug, good, status, warn
-from ..utils.sid_resolver import TrustInfo
 
 
 def _safe_get_sam(data: dict, key: str) -> str:
@@ -74,7 +74,7 @@ class BloodHoundConnector:
         self.api_key = api_key
         self.api_key_id = api_key_id
         self.timeout = timeout
-        self.users_data = {}
+        self.users_data: Dict[str, Any] = {}
 
         # Initialize authenticator for BHCE
         # ip can be a full URI (http://host:port) or just hostname
@@ -140,7 +140,7 @@ class BloodHoundConnector:
 
         try:
             uri = f"bolt://{self.ip}:7687"
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))
+            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
 
             with driver.session() as session:
                 result = session.run(query)
@@ -226,7 +226,7 @@ class BloodHoundConnector:
             # Parse BHCE results - handle the actual BHCE response format
             if "data" in result:
                 response_data = result["data"]
-                users_found = set()  # Track unique users
+                users_found: set[str] = set()  # Track unique users
 
                 # BHCE returns nodes in a different format than expected
                 if "nodes" in response_data:
@@ -306,12 +306,15 @@ class BloodHoundConnector:
         uri = f"bolt://{self.ip}:7687"
 
         try:
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))
+            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
 
             # Test connection
             with driver.session() as session:
                 result = session.run("MATCH (n) RETURN count(n) LIMIT 1")
-                result.single()[0]  # This will raise an exception if connection fails
+                record = result.single()
+                if record is None:
+                    return False
+                record[0]  # This will raise an exception if connection fails
 
             status(f"[+] Connected to Legacy BloodHound at {self.ip}:7687")
             status("[*] Collecting high-value user data from BloodHound (be patient)")
@@ -352,7 +355,7 @@ class BloodHoundConnector:
 
         try:
             with driver.session() as session:
-                users_found = set()
+                users_found: set[str] = set()
 
                 # Single comprehensive query instead of multiple queries
                 try:
@@ -562,7 +565,7 @@ class BloodHoundConnector:
                     return computers
 
                 uri = f"bolt://{self.ip}:7687"
-                driver = GraphDatabase.driver(uri, auth=(self.username, self.password))
+                driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
 
                 with driver.session() as session:
                     result = session.run(query)
@@ -713,7 +716,7 @@ class BloodHoundConnector:
                         result[target_sid] = TrustInfo(
                             fqdn=target_name,
                             is_intra_forest=is_intra_forest,
-                            trust_attributes=None,  # BloodHound doesn't expose this
+                            trust_attributes=0,  # BloodHound doesn't expose this
                         )
                         trust_type = "intra-forest" if is_intra_forest else "external"
                         debug(f"Trust type for {target_name}: {trust_type}")
@@ -778,6 +781,147 @@ class BloodHoundConnector:
 
         except Exception as e:
             warn(f"Error querying user '{upn}': {e}")
+            return None
+
+    def get_user_properties(self, identifier: str) -> Optional[Dict[str, Any]]:
+        """
+        Query BloodHound for a user's properties by SID or UPN.
+
+        IMPORTANT: Always prefer SID lookups to avoid cross-domain ambiguity.
+        sAMAccountName is NOT unique across domains - only SIDs are!
+
+        This is used for on-demand lookups of user properties like pwdLastSet
+        for users not in the pre-loaded high-value data.
+
+        Args:
+            identifier: User identifier - can be:
+                - SID (e.g., "S-1-5-21-123-456-789-1001") - PREFERRED
+                - UPN (e.g., "admin@CORP.LOCAL") - unique across domains
+                - DOMAIN\\user format - will be converted to UPN if possible
+
+        Returns:
+            Dict with user properties including 'pwdlastset', 'lastlogon', 'sid', etc.
+            or None if user not found
+        """
+        if self.bh_type == "bhce":
+            return self._get_user_properties_bhce(identifier)
+        else:
+            return self._get_user_properties_legacy(identifier)
+
+    def _get_user_properties_bhce(self, identifier: str) -> Optional[Dict[str, Any]]:
+        """Get user properties from BloodHound CE API.
+
+        Queries by SID (objectId) when possible, falls back to UPN (name).
+        NEVER queries by sAMAccountName alone due to cross-domain ambiguity.
+        """
+        try:
+            # Determine query type based on identifier format
+            identifier = identifier.strip()
+
+            if identifier.upper().startswith("S-1-5-"):
+                # SID lookup - PREFERRED (globally unique)
+                query = f"MATCH (u:User) WHERE u.objectid = '{identifier.upper()}' RETURN u"
+                debug(f"Querying BloodHound by SID: {identifier}")
+            elif "@" in identifier:
+                # UPN lookup - also unique (user@DOMAIN.FQDN)
+                query = f"MATCH (u:User) WHERE toLower(u.name) = '{identifier.lower()}' RETURN u"
+                debug(f"Querying BloodHound by UPN: {identifier}")
+            elif "\\" in identifier:
+                # DOMAIN\user format - need to convert to query both domain and sam
+                # This is less reliable but better than sam alone
+                parts = identifier.split("\\", 1)
+                domain_part = parts[0].upper()
+                user_part = parts[1].lower()
+                # Query by both domain and samaccountname to reduce ambiguity
+                query = f"MATCH (u:User) WHERE toLower(u.samaccountname) = '{user_part}' AND toUpper(u.domain) CONTAINS '{domain_part}' RETURN u"
+                debug(f"Querying BloodHound by domain+sam: {identifier}")
+            else:
+                # Plain username - DANGEROUS, may match multiple domains!
+                # Log a warning but try anyway
+                debug(f"WARNING: Querying by sAMAccountName alone is ambiguous: {identifier}")
+                query = f"MATCH (u:User) WHERE toLower(u.samaccountname) = '{identifier.lower()}' RETURN u LIMIT 1"
+
+            data = self.run_cypher_query(query)
+
+            if data:
+                nodes = data.get("data", {}).get("nodes", {})
+
+                if nodes:
+                    node_data = list(nodes.values())[0]
+                    properties = node_data.get("properties", {})
+
+                    return {
+                        "samaccountname": properties.get("samaccountname", ""),
+                        "sid": node_data.get("objectId", ""),
+                        "pwdlastset": properties.get("pwdlastset"),
+                        "lastlogon": properties.get("lastlogon"),
+                        "admincount": properties.get("admincount", False),
+                        "enabled": properties.get("enabled", True),
+                        "domain": properties.get("domain", ""),
+                    }
+            return None
+
+        except Exception as e:
+            debug(f"Error querying user properties for '{identifier}': {e}")
+            return None
+
+    def _get_user_properties_legacy(self, identifier: str) -> Optional[Dict[str, Any]]:
+        """Get user properties from Legacy BloodHound via Neo4j.
+
+        Queries by SID (objectid) when possible, falls back to UPN (name).
+        NEVER queries by sAMAccountName alone due to cross-domain ambiguity.
+        """
+        if GraphDatabase is None:
+            debug("neo4j library not installed - cannot query Legacy BloodHound")
+            return None
+
+        uri = f"bolt://{self.ip}:7687"
+
+        try:
+            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
+            identifier = identifier.strip()
+
+            # Determine query type based on identifier format
+            if identifier.upper().startswith("S-1-5-"):
+                # SID lookup - PREFERRED
+                query = f"MATCH (u:User) WHERE u.objectid = '{identifier.upper()}' RETURN u"
+            elif "@" in identifier:
+                # UPN lookup
+                query = f"MATCH (u:User) WHERE toLower(u.name) = '{identifier.lower()}' RETURN u"
+            elif "\\" in identifier:
+                # DOMAIN\user format
+                parts = identifier.split("\\", 1)
+                domain_part = parts[0].upper()
+                user_part = parts[1].lower()
+                query = f"MATCH (u:User) WHERE toLower(u.samaccountname) = '{user_part}' AND toUpper(u.domain) CONTAINS '{domain_part}' RETURN u"
+            else:
+                # Plain username - ambiguous
+                debug(f"WARNING: Querying by sAMAccountName alone is ambiguous: {identifier}")
+                query = f"MATCH (u:User) WHERE toLower(u.samaccountname) = '{identifier.lower()}' RETURN u LIMIT 1"
+
+            with driver.session() as session:
+                result = session.run(query)
+                record = result.single()
+
+                if record:
+                    user_node = record["u"]
+                    properties = dict(user_node)
+
+                    return {
+                        "samaccountname": properties.get("samaccountname", ""),
+                        "sid": properties.get("objectid", ""),
+                        "pwdlastset": properties.get("pwdlastset"),
+                        "lastlogon": properties.get("lastlogon"),
+                        "admincount": properties.get("admincount", False),
+                        "enabled": properties.get("enabled", True),
+                        "domain": properties.get("domain", ""),
+                    }
+
+            driver.close()
+            return None
+
+        except Exception as e:
+            debug(f"Error querying Legacy BH user properties for '{identifier}': {e}")
             return None
 
     def get_user_gmsa_status(self, username: str) -> Optional[Dict[str, Any]]:
@@ -920,7 +1064,7 @@ class BloodHoundConnector:
             query = f"MATCH (u:User) WHERE toLower(u.samaccountname) = '{query_username.lower()}' RETURN u"
 
             uri = f"bolt://{self.ip}:7687"
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))
+            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
 
             with driver.session() as session:
                 result = session.run(query)
@@ -969,7 +1113,7 @@ class BloodHoundConnector:
             debug(f"Error querying Legacy BH gMSA status for '{username}': {e}")
             return None
 
-    def validate_and_resolve_cross_domain_user(self, netbios_domain: str, username: str) -> Optional[Dict[str, str]]:
+    def validate_and_resolve_cross_domain_user(self, netbios_domain: str, username: str) -> Optional[Dict[str, Optional[str]]]:
         """
         Complete cross-domain user resolution workflow:
         1. Resolve NETBIOS domain to FQDN via BloodHound

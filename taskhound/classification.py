@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from .resolver import looks_like_domain_user
 from .utils.logging import warn
-from .utils.sid_resolver import looks_like_domain_user
 
 if TYPE_CHECKING:
     from .models.task import TaskRow
@@ -226,12 +226,16 @@ def classify_task(
     elif tier0_cache:
         # Normalize username for lookup
         # If runas is a SID and we have a resolved username, use that instead
-        from .utils.sid_resolver import is_sid
+        from .resolver import is_sid
         lookup_user = runas
         if is_sid(runas) and resolved_runas:
             lookup_user = resolved_runas
+        # Only query the cache when there is an explicit domain qualifier or the original
+        # runas was a domain SID — bare names resolve to LOCAL accounts first per
+        # LookupAccountName() and must not be matched against domain tier-0 data.
+        has_domain_qualifier = "\\" in lookup_user or "@" in lookup_user or is_sid(runas)
         norm_user = lookup_user.split("\\")[-1].lower() if "\\" in lookup_user else lookup_user.lower()
-        tier0_result = tier0_cache.get(norm_user)
+        tier0_result = tier0_cache.get(norm_user) if has_domain_qualifier else None
 
         if tier0_result:
             is_tier0, groups = tier0_result

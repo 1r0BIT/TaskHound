@@ -72,7 +72,7 @@ def _handle_opengraph(
         debug("LDAP fallback enabled for objectId resolution")
 
     # Query NetBIOS domain name for accurate cross-domain detection
-    from .utils.sid_resolver import get_netbios_cache
+    from .resolver import get_netbios_cache
 
     netbios_name = None
     netbios_cache = get_netbios_cache()
@@ -116,9 +116,9 @@ def _handle_opengraph(
     opengraph_output_dir = os.path.join(args.output_dir, "opengraph")
 
     # Generate OpenGraph files
-    opengraph_file = generate_opengraph_files(
+    generate_opengraph_files(
         output_dir=opengraph_output_dir,
-        tasks=all_rows,
+        tasks=list(all_rows),
         bh_connector=bh_connector,
         ldap_config=ldap_config,
         allow_orphans=getattr(args, "bh_allow_orphans", False),
@@ -127,7 +127,7 @@ def _handle_opengraph(
     )
 
     # Upload to BloodHound if not disabled and we have credentials
-    _upload_opengraph(bh_config, opengraph_file, opengraph_json_path)
+    _upload_opengraph(bh_config, None, opengraph_json_path)
 
 
 def _upload_opengraph(bh_config: Any, opengraph_file: Optional[str], json_data_path: Optional[str] = None) -> None:
@@ -344,7 +344,7 @@ def _auto_discover_targets(args: Any, bh_config: Any) -> List[str]:
     filter_msg = f" ({', '.join(filter_parts)})" if filter_parts else ""
 
     # Try BloodHound first
-    computers = []
+    computers: list[str] = []
     source = None
 
     if bh_config and bh_config.has_credentials():
@@ -436,7 +436,7 @@ def _enumerate_from_bloodhound(
         info(f"BloodHound data is {data_age_days} days old", verbose_only=True)
 
     # Apply filters
-    filtered = []
+    filtered: list[str] = []
     stats = {"total": len(all_computers), "disabled": 0, "stale": 0, "dc": 0, "os_filter": 0}
     now_ts = int(time.time())
 
@@ -502,6 +502,8 @@ def _enumerate_from_ldap(
     """
     Enumerate computers from LDAP with filtering.
 
+    Uses LDAP-specific credentials if provided, otherwise falls back to main auth.
+
     Returns:
         Tuple of (list of hostnames, source string)
     """
@@ -511,12 +513,18 @@ def _enumerate_from_ldap(
 
     kerberos_enabled = args.kerberos or getattr(args, "aes_key", None) is not None
 
+    # Use LDAP-specific credentials if provided, otherwise fall back to main auth
+    effective_domain = args.ldap_domain if args.ldap_domain else args.domain
+    effective_user = args.ldap_user if args.ldap_user else args.username
+    effective_password = args.ldap_password if args.ldap_password else args.password
+    effective_hashes = args.ldap_hashes if args.ldap_hashes else args.hashes
+
     computers = enumerate_domain_computers_filtered(
         dc_ip=args.dc_ip,
-        domain=args.domain,
-        username=args.username,
-        password=args.password,
-        hashes=args.hashes,
+        domain=effective_domain,
+        username=effective_user,
+        password=effective_password,
+        hashes=effective_hashes,
         kerberos=kerberos_enabled,
         aes_key=getattr(args, "aes_key", None),
         ldap_filter=ldap_filter_raw,
@@ -660,7 +668,7 @@ This operation involves:
     # LDAP is the fallback when no BloodHound connection is available
     has_bh_domain_sids = hv is not None and hv.hv_domain_sids
     if not has_bh_domain_sids and not args.no_ldap and args.domain and args.username:
-        from .utils.sid_resolver import fetch_known_domain_sids_via_ldap
+        from .resolver import fetch_known_domain_sids_via_ldap
 
         ldap_domain = args.ldap_domain if args.ldap_domain else args.domain
         ldap_user = args.ldap_user if args.ldap_user else args.username
@@ -689,7 +697,7 @@ This operation involves:
     # Store LDAP credentials for lazy NETBIOS resolution (used when NETBIOS\user format encountered)
     # This enables resolving trusted domain NETBIOS names (e.g., TRUSTEDDOM\user → TRUSTEDDOM.LOCAL\user)
     if not args.no_ldap and args.domain and args.username:
-        from .utils.sid_resolver import set_netbios_ldap_credentials
+        from .resolver import set_netbios_ldap_credentials
 
         ldap_domain = args.ldap_domain if args.ldap_domain else args.domain
         ldap_user = args.ldap_user if args.ldap_user else args.username
@@ -713,12 +721,18 @@ This operation involves:
     if getattr(args, "laps", False) and not args.offline:
         info("LAPS mode enabled - querying Active Directory for LAPS passwords...")
         try:
+            # Use LDAP-specific credentials if provided, otherwise fall back to main auth
+            laps_domain = args.ldap_domain if args.ldap_domain else args.domain
+            laps_user = args.ldap_user if args.ldap_user else args.username
+            laps_password = args.ldap_password if args.ldap_password else args.password
+            laps_hashes = args.ldap_hashes if args.ldap_hashes else args.hashes
+
             laps_cache = get_laps_passwords(
                 dc_ip=args.dc_ip,
-                domain=args.domain,
-                username=args.username,
-                password=args.password,
-                hashes=args.hashes,
+                domain=laps_domain,
+                username=laps_user,
+                password=laps_password,
+                hashes=laps_hashes,
                 kerberos=args.kerberos,
                 laps_user_override=getattr(args, "laps_user", None),
                 use_cache=not args.no_cache,
@@ -835,7 +849,7 @@ This operation involves:
         # Pre-fetch computer SIDs from BloodHound data (if available) before scan starts
         # This populates the cache so workers don't each need to make LDAP calls
         if targets and (hv or args.domain):
-            from .utils.sid_resolver import prefetch_computer_sids
+            from .resolver import prefetch_computer_sids
 
             prefetch_computer_sids(
                 targets=targets,
@@ -846,6 +860,10 @@ This operation involves:
                 password=args.password,
                 hashes=args.hashes,
                 kerberos=args.kerberos,
+                ldap_domain=args.ldap_domain,
+                ldap_user=args.ldap_user,
+                ldap_password=args.ldap_password,
+                ldap_hashes=args.ldap_hashes,
             )
 
         # Build AuthContext from args
@@ -894,13 +912,14 @@ This operation involves:
             "ldap_tier0": args.ldap_tier0,
         }
 
-        # Parallel mode (--threads > 1)
-        if args.threads > 1:
+        # Parallel mode (--threads > 1) or sequential with jitter
+        if args.threads > 1 or getattr(args, 'jitter', None):
             async_config = AsyncConfig(
                 workers=args.threads,
                 rate_limit=args.rate_limit,
                 timeout=args.timeout,
                 show_progress=True,
+                jitter=getattr(args, 'jitter', None),
             )
             async_engine = AsyncTaskHound(async_config)
 

@@ -1,6 +1,9 @@
 # =============================================================================
 # SENSITIVE FILES - DO NOT COMMIT!
 # =============================================================================
+# Local-only Claude Code skills (contain lab credentials)
+.claude/skills/
+
 # Configuration files with credentials
 config/*.bak
 .env
@@ -16,6 +19,7 @@ targets_*.txt
 
 # Internal planning documents
 planning/
+.planning/
 
 # Real/production test data
 tests/live_test_config.json
@@ -25,6 +29,10 @@ tests/test_data/*_live.json
 
 # Copilot instructions (may contain sensitive context)
 .github/copilot-instructions.md
+
+# Claude Code
+CLAUDE.md
+.claude/
 
 # =============================================================================
 # TOOL OUTPUT & TEMPORARY FILES

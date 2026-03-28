@@ -11,6 +11,7 @@
 # - LAPS cache is read-only during parallel phase (pre-populated in CLI)
 # - SID resolution is dynamic with benign race conditions (same value written)
 
+import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,6 +23,7 @@ from rich.progress import (
     MofNCompleteColumn,
     Progress,
     SpinnerColumn,
+    TaskID,
     TaskProgressColumn,
     TextColumn,
     TimeElapsedColumn,
@@ -55,6 +57,9 @@ class AsyncConfig:
 
     show_progress: bool = True
     """Show progress bar during processing."""
+
+    jitter: Optional[float] = None
+    """Random delay (0 to N seconds) between hosts. Only for sequential mode."""
 
 
 @dataclass
@@ -121,7 +126,7 @@ class AsyncTaskHound:
 
         # Rich progress bar
         self._progress: Optional[Progress] = None
-        self._task_id: Optional[int] = None
+        self._task_id: Optional[TaskID] = None
 
     def _start_rate_limiter(self) -> None:
         """Start background thread that releases rate limiter tokens."""
@@ -178,7 +183,7 @@ class AsyncTaskHound:
         result = TargetResult(target=target, success=False)
 
         # Each worker gets its own row collector
-        target_rows: List[Dict[str, Any]] = []
+        target_rows: List[TaskRow] = []
 
         try:
             # Call the actual processing function
@@ -376,7 +381,8 @@ class AsyncTaskHound:
         results: List[TargetResult] = []
         start_time = time.perf_counter()
 
-        info(f"Sequential scan: {len(targets)} targets")
+        jitter_msg = f" (jitter: 0-{self.config.jitter}s)" if self.config.jitter else ""
+        info(f"Sequential scan: {len(targets)} targets{jitter_msg}")
 
         # Create Rich progress bar for sequential mode too
         progress = Progress(
@@ -397,8 +403,14 @@ class AsyncTaskHound:
             task_id = progress.add_task("Scanning", total=len(targets), status="")
 
             for target in targets:
+                # Apply jitter delay before scanning (skip first target)
+                if self.config.jitter and results:  # Skip delay for first target
+                    jitter_delay = random.uniform(0, self.config.jitter)
+                    progress.update(task_id, status=f"[dim]Waiting {jitter_delay:.1f}s...[/]")
+                    time.sleep(jitter_delay)
+
                 result = TargetResult(target=target, success=False)
-                target_rows: List[Dict[str, Any]] = []
+                target_rows: List[TaskRow] = []
                 target_start = time.perf_counter()
 
                 try:
@@ -477,7 +489,7 @@ class AsyncTaskHound:
             print_fn(lines)
 
 
-def aggregate_results(results: List[TargetResult]) -> Tuple[List[Dict[str, Any]], List[LAPSFailure], int]:
+def aggregate_results(results: List[TargetResult]) -> Tuple[List[TaskRow], List[LAPSFailure], int]:
     """
     Aggregate results from parallel processing.
 
@@ -487,7 +499,7 @@ def aggregate_results(results: List[TargetResult]) -> Tuple[List[Dict[str, Any]]
     Returns:
         Tuple of (all_rows, laps_failures, laps_successes)
     """
-    all_rows: List[Dict[str, Any]] = []
+    all_rows: List[TaskRow] = []
     laps_failures: List[LAPSFailure] = []
     laps_successes = 0
 

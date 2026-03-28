@@ -372,13 +372,13 @@ class TestGetBloodhoundDataAge:
 
     def test_calculates_age_from_lastseen(self):
         """Should calculate age from lastseen timestamp"""
-        from datetime import datetime, timezone
+        from datetime import datetime, timedelta, timezone
 
         from taskhound.utils.bh_api import get_bloodhound_data_age
 
         # Create a timestamp from 5 days ago
         now = datetime.now(timezone.utc)
-        five_days_ago = now.replace(day=now.day - 5) if now.day > 5 else now
+        five_days_ago = now - timedelta(days=5)
         ts_str = five_days_ago.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
         computers = [

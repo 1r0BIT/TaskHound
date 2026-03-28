@@ -21,8 +21,9 @@
 # target = "10.0.0.1"
 # targets_file = "targets.txt"
 # timeout = 60
-# threads = 10  # Parallel workers for multi-target scans (default: 1)
+# threads = 10  # Parallel workers for multi-target scans (default: 10)
 # rate_limit = 5.0  # Max targets per second (default: unlimited)
+# jitter = 5.0  # Random delay (0-N seconds) between hosts (OPSEC, sequential only)
 # dns_tcp = false  # Force DNS over TCP (required for SOCKS proxies/proxychains)
 
 [scanning]
@@ -39,7 +40,7 @@
 # OPSEC (Operational Security) settings
 # Controls which network protocols are used during scans
 # enabled = false  # Enable full OPSEC mode (equivalent to --opsec CLI flag)
-                   # Sets both no_ldap and no_rpc to true
+                   # Sets no_ldap, no_rpc to true and threads to 1 (sequential)
 # no_ldap = false  # Disable LDAP operations (SID resolution, GC queries, domain SID prefetch)
 # no_rpc = false   # Disable RPC operations (LSARPC SID lookup, CredGuard detection, credential validation)
 #

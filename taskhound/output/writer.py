@@ -2,7 +2,7 @@ import csv
 import json
 import os
 from io import StringIO
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from rich import box
 from rich.console import Console
@@ -18,7 +18,7 @@ def _rows_to_dicts(rows: List[Any]) -> List[Dict]:
     return [row.to_dict() if hasattr(row, "to_dict") else row for row in rows]
 
 
-def _format_task_table(row_dict: Dict[str, Any], hostname: str = None) -> Table:
+def _format_task_table(row_dict: Dict[str, Any], hostname: Optional[str] = None) -> Table:
     """
     Format a single task as a Rich table matching README demo format.
 
@@ -110,13 +110,36 @@ def _format_task_table(row_dict: Dict[str, Any], hostname: str = None) -> Table:
         add_field("Pwd Analysis", row_dict["password_analysis"])
 
     if row_dict.get("cred_status"):
-        cred_val = row_dict.get("cred_detail", row_dict["cred_status"])
-        if row_dict.get("cred_password_valid"):
-            add_field("Cred Validation", f"[green]{cred_val}[/]")
-        elif row_dict["cred_status"] == "invalid":
-            add_field("Cred Validation", f"[red]{cred_val}[/]")
+        cred_status = row_dict["cred_status"]
+        cred_valid = row_dict.get("cred_password_valid")
+        cred_hijackable = row_dict.get("cred_hijackable")
+        cred_code = row_dict.get("cred_return_code")
+        password_analysis = row_dict.get("password_analysis")
+
+        # Build status display matching printer.py verbose output format
+        if cred_status == "unknown":
+            if password_analysis and "GOOD" in password_analysis.upper():
+                status_display = "LIKELY VALID (password newer than pwdLastSet)"
+            elif password_analysis and "BAD" in password_analysis.upper():
+                status_display = "LIKELY INVALID (password older than pwdLastSet)"
+            else:
+                status_display = "UNKNOWN"
+        elif cred_valid is True:
+            status_display = "VALID" if cred_hijackable else f"VALID (restricted: {cred_status})"
+        elif cred_status == "invalid":
+            status_display = "INVALID (wrong password)"
+        elif cred_status == "blocked":
+            status_display = "BLOCKED (account disabled/expired)"
         else:
-            add_field("Cred Validation", f"[yellow]{cred_val}[/]")
+            status_display = f"{cred_status} ({cred_code})"
+
+        # Color based on status
+        if cred_valid:
+            add_field("Cred Validation", f"[green]{status_display}[/]")
+        elif cred_status == "invalid":
+            add_field("Cred Validation", f"[red]{status_display}[/]")
+        else:
+            add_field("Cred Validation", f"[yellow]{status_display}[/]")
 
         # Show last run time if available
         if row_dict.get("cred_last_run"):
@@ -131,7 +154,7 @@ def _format_task_table(row_dict: Dict[str, Any], hostname: str = None) -> Table:
     # Credential Guard status - show both enabled and disabled states
     if row_dict.get("credential_guard") is not None:
         if row_dict["credential_guard"]:
-            add_field("Cred Guard", "[red]ENABLED - DPAPI extraction will fail[/]")
+            add_field("Cred Guard", "[red]ENABLED[/]")
         else:
             add_field("Cred Guard", "[green]DISABLED - DPAPI extraction possible[/]")
 
