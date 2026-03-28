@@ -328,7 +328,9 @@ def process_target(
 
         # Credential Guard detection (EXPERIMENTAL, only if enabled)
         # Skipped when RPC is disabled (remote registry requires RPC)
-        if credguard_detect and not no_rpc:
+        # Skipped when --loot + --no-lsa is NOT set: LSA extraction via regsecrets
+        # will start RemoteRegistry anyway, so doing it twice is wasteful and noisy
+        if credguard_detect and not no_rpc and not (loot and not no_lsa):
             credguard_status = check_credential_guard(smb, target)
             if credguard_status is True:
                 warn(f"{target}: Credential Guard detected - DPAPI credential extraction will fail")
@@ -517,8 +519,10 @@ def process_target(
             debug=debug,
         )
 
-    # Create backup directory structure if backup is requested
-    backup_target_dir = setup_backup_directory(target, backup_dir, debug=debug)
+    # Create backup directory structure if backup is requested (skip for --services-only)
+    backup_target_dir = None
+    if not services_only:
+        backup_target_dir = setup_backup_directory(target, backup_dir, debug=debug)
 
     # LSA extraction via registry-only approach (if --loot and not --no-lsa)
     # This extracts DPAPI system keys AND service credentials in one pass
@@ -537,11 +541,12 @@ def process_target(
         # Auto-feed DPAPI userkey for task credential decryption
         if lsa_result.dpapi_userkey and not dpapi_key:
             effective_dpapi_key = lsa_result.dpapi_userkey
-            info(f"{target}: Using DPAPI key from LSA extraction for task credential decryption")
+            if not services_only:
+                info(f"{target}: Using DPAPI key from LSA extraction for task credential decryption")
 
-    # Perform automatic credential looting if requested
+    # Perform DPAPI credential looting (skip for --services-only — no tasks to decrypt)
     decrypted_creds: List[Any] = []
-    if loot:
+    if loot and not services_only:
         decrypted_creds, loot_lines = perform_dpapi_looting(
             target,
             smb,
@@ -864,7 +869,11 @@ def process_target(
         if svc_rows and lsa_result and lsa_result.service_credentials:
             from .helpers import _map_lsa_creds_to_service_rows
 
-            _map_lsa_creds_to_service_rows(svc_rows, lsa_result.service_credentials, target)
+            _map_lsa_creds_to_service_rows(
+                svc_rows, lsa_result.service_credentials, target,
+                gmsa_credentials=lsa_result.gmsa_credentials,
+                domain=domain,
+            )
 
         if svc_rows and all_service_rows is not None:
             all_service_rows.extend(svc_rows)

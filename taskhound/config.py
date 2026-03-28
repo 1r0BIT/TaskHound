@@ -1043,16 +1043,18 @@ def validate_args(args):
         print("       Then decrypt offline:    --offline dpapi_loot/<target> --dpapi-key <target_key>")
         sys.exit(1)
 
-    # DPAPI messaging for online mode
+    # Loot messaging for online mode
     if args.loot and not args.offline:
+        no_lsa = getattr(args, "no_lsa", False)
         if args.dpapi_key:
-            # Single target with key: will collect and decrypt
-            print("[*] DPAPI key provided - credentials will be collected and decrypted immediately")
+            print("[*] DPAPI key provided — credentials will be decrypted immediately")
+        elif not no_lsa:
+            print("[*] Credential extraction enabled: LSA secrets (registry-only) + DPAPI collection")
+            print("[*] DPAPI system key will be extracted automatically from LSA — no manual step needed")
+            print("[*] Use --no-loot to disable all extraction, --no-lsa to disable just LSA")
         else:
-            # Multi-target or no key: collect for offline decryption
-            print("[*] DPAPI credential collection enabled (use --no-loot to disable)")
-            print("[*] Credentials will be saved for offline decryption")
-            print("[!] To decrypt immediately, provide --dpapi-key (single target only)")
+            print("[*] DPAPI credential collection enabled (LSA extraction disabled via --no-lsa)")
+            print("[!] Without LSA extraction, provide --dpapi-key manually for decryption")
             print("[!] Obtain dpapi_userkey with: nxc smb <target> -u <user> -p <pass> --lsa")
         print()
 
