@@ -1868,6 +1868,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 detail.classList.toggle('visible');
             }
         }
+        function toggleCredSummary() {
+            const body = document.getElementById('cred-summary-body');
+            const icon = document.getElementById('cred-summary-icon');
+            if (body) {
+                const visible = body.style.display !== 'none';
+                body.style.display = visible ? 'none' : 'block';
+                if (icon) icon.style.transform = visible ? 'rotate(-90deg)' : 'rotate(0deg)';
+            }
+        }
     </script>
 </body>
 </html>"""
@@ -2505,9 +2514,9 @@ def _generate_credential_summary(
 
     summary_html = f"""
         <div class="credential-summary">
-            <div class="host-header" onclick="toggleHost('cred-summary-body')" style="cursor: pointer;">
+            <div class="host-header" onclick="toggleCredSummary()" style="cursor: pointer;">
                 <h2 style="display: inline;">Credential Summary ({len(cred_rows)})</h2>
-                <span class="expand-icon">&#9660;</span>
+                <span class="expand-icon" id="cred-summary-icon">&#9660;</span>
             </div>
     """
 
