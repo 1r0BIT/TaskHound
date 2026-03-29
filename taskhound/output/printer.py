@@ -725,7 +725,7 @@ def format_service_block(
     print_service_table(kind, service_name, rows, hostname=hostname)
 
     # Return a summary line for the text output stream
-    tag = f"[{kind}]"
+    tag = f"[{kind} SERVICE]" if kind in ("TIER-0", "PRIV") else "[SERVICE]"
     account = start_name or "?"
     if is_gmsa:
         account += " [gMSA]"
@@ -743,15 +743,15 @@ def print_service_table(
     if not (log_utils._VERBOSE or log_utils._DEBUG):
         return
 
-    # Select colors based on classification
+    # Select colors based on classification — always include SERVICE in the tag
     if kind == "TIER-0":
         header_style = COLORS["tier0_header"]
         border_style = COLORS["tier0_border"]
-        tag = "[TIER-0]"
+        tag = "[TIER-0 SERVICE]"
     elif kind == "PRIV":
         header_style = COLORS["priv_header"]
         border_style = COLORS["priv_border"]
-        tag = "[PRIV]"
+        tag = "[PRIV SERVICE]"
     else:
         header_style = COLORS["service_header"]
         border_style = COLORS["service_border"]
