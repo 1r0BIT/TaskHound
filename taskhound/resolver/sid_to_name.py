@@ -235,10 +235,11 @@ def resolve_sid(
     # =========================================================================
     # Tier 4: LDAP (domain controller)
     # =========================================================================
-    ldap_auth_domain: str | None = ldap_domain or domain
-    ldap_auth_user: str | None = ldap_user or username
-    ldap_auth_password: str | None = ldap_password or password
-    ldap_auth_hashes: str | None = ldap_hashes or hashes
+    from ..auth.context import effective_ldap_creds
+
+    ldap_auth_domain, ldap_auth_user, ldap_auth_password, ldap_auth_hashes = effective_ldap_creds(
+        domain, username, password, hashes, ldap_domain, ldap_user, ldap_password, ldap_hashes
+    )
     use_kerberos_for_ldap = kerberos and not (ldap_password or ldap_hashes)
 
     if not no_ldap and ldap_auth_domain and ldap_auth_user:
@@ -382,10 +383,11 @@ def _resolve_foreign_sid(
             return f"{resolved} ({sid})", resolved
 
     # Try Global Catalog
-    ldap_auth_domain: str | None = ldap_domain or domain
-    ldap_auth_user: str | None = ldap_user or username
-    ldap_auth_password: str | None = ldap_password or password
-    ldap_auth_hashes: str | None = ldap_hashes or hashes
+    from ..auth.context import effective_ldap_creds
+
+    ldap_auth_domain, ldap_auth_user, ldap_auth_password, ldap_auth_hashes = effective_ldap_creds(
+        domain, username, password, hashes, ldap_domain, ldap_user, ldap_password, ldap_hashes
+    )
     use_kerberos_for_ldap = kerberos and not (ldap_password or ldap_hashes)
 
     if not no_ldap and ldap_auth_domain and ldap_auth_user:

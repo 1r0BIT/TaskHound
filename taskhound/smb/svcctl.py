@@ -98,7 +98,7 @@ def enumerate_services(
         resp = scmr.hREnumServicesStatusW(
             dce,
             sc_handle,
-            dwServiceType=scmr.SERVICE_WIN32_OWN_PROCESS | scmr.SERVICE_WIN32_SHARE_PROCESS,
+            dwServiceType=_WIN32_SERVICE_TYPES,
             dwServiceState=scmr.SERVICE_STATE_ALL,
         )
 

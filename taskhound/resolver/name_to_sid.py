@@ -211,10 +211,11 @@ def prefetch_computer_sids(
 
     # Step 3: Batch LDAP query for remaining (if credentials available)
     # Use LDAP-specific credentials if provided, otherwise fall back to main credentials
-    effective_domain = ldap_domain or domain
-    effective_user = ldap_user or username
-    effective_password = ldap_password or password
-    effective_hashes = ldap_hashes or hashes
+    from ..auth.context import effective_ldap_creds
+
+    effective_domain, effective_user, effective_password, effective_hashes = effective_ldap_creds(
+        domain, username, password, hashes, ldap_domain, ldap_user, ldap_password, ldap_hashes
+    )
 
     # Only proceed with LDAP if we have valid credentials and a proper FQDN domain
     # FQDN must have at least two non-empty parts (e.g., "domain.local", not just ".")

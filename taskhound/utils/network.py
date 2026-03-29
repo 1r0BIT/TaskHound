@@ -96,10 +96,11 @@ def preflight_credential_check(
     if not has_dedicated_ldap:
         return  # LDAP uses same creds as main — already validated above
 
-    eff_ldap_domain = ldap_domain or domain
-    eff_ldap_user = ldap_user or username
-    eff_ldap_pass = ldap_password or password
-    eff_ldap_hashes = ldap_hashes or hashes
+    from ..auth.context import effective_ldap_creds
+
+    eff_ldap_domain, eff_ldap_user, eff_ldap_pass, eff_ldap_hashes = effective_ldap_creds(
+        domain, username, password, hashes, ldap_domain, ldap_user, ldap_password, ldap_hashes
+    )
 
     if not eff_ldap_pass and not eff_ldap_hashes:
         return  # nothing to test
@@ -163,10 +164,11 @@ def verify_ldap_connection(
 
     # Determine which credentials to use for LDAP test
     # Priority: dedicated LDAP credentials > main auth credentials
-    test_domain = ldap_domain if ldap_domain else domain
-    test_username = ldap_user if ldap_user else username
-    test_password = ldap_password if ldap_password else password
-    test_hashes = ldap_hashes if ldap_hashes else hashes
+    from ..auth.context import effective_ldap_creds
+
+    test_domain, test_username, test_password, test_hashes = effective_ldap_creds(
+        domain, username, password, hashes, ldap_domain, ldap_user, ldap_password, ldap_hashes
+    )
 
     # LDAP SID resolution now supports both passwords and NTLM hashes!
     if not test_password and not test_hashes:

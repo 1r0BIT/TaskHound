@@ -111,3 +111,17 @@ class AuthContext:
             f"has_hashes={self.hashes is not None}, "
             f"has_aes_key={self.aes_key is not None})"
         )
+
+
+def effective_ldap_creds(
+    domain: str | None,
+    username: str | None,
+    password: str | None,
+    hashes: str | None,
+    ldap_domain: str | None,
+    ldap_user: str | None,
+    ldap_password: str | None,
+    ldap_hashes: str | None,
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Return effective LDAP credentials (dedicated overrides falling back to main auth)."""
+    return (ldap_domain or domain, ldap_user or username, ldap_password or password, ldap_hashes or hashes)

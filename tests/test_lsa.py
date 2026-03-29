@@ -206,11 +206,11 @@ class TestMapLsaCredsToServiceRows:
         assert rows[0].decrypted_password is None
 
 
-class TestPerformLsaServiceLooting:
-    """Test legacy perform_lsa_service_looting (still used by tests)."""
+class TestMapLsaCredsToServiceRows:
+    """Test _map_lsa_creds_to_service_rows credential mapping."""
 
     def test_maps_credentials_to_rows(self):
-        from taskhound.engine.helpers import perform_lsa_service_looting
+        from taskhound.engine.helpers import _map_lsa_creds_to_service_rows
 
         rows = [
             ServiceRow(host="dc01", service_name="MSSQLSERVER", start_name="CORP\\sqladmin"),
@@ -226,8 +226,7 @@ class TestPerformLsaServiceLooting:
             ),
         ]
 
-        with patch("taskhound.lsa.extractor.extract_service_credentials", return_value=mock_creds):
-            perform_lsa_service_looting("dc01", MagicMock(), "dc01.corp.local", rows)
+        _map_lsa_creds_to_service_rows(rows, mock_creds, "dc01")
 
         assert rows[0].decrypted_password == "Secret123!"
         assert rows[1].decrypted_password is None

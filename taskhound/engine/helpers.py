@@ -119,15 +119,9 @@ def perform_credential_validation(
     info(f"{target}: Querying Task Scheduler RPC for credential validation...")
 
     try:
-        # Parse hashes for RPC auth
-        lm_hash = ""
-        nt_hash = ""
-        if hashes:
-            hash_parts = hashes.split(":")
-            if len(hash_parts) == 2:
-                lm_hash, nt_hash = hash_parts
-            elif len(hash_parts) == 1 and len(hash_parts[0]) == 32:
-                nt_hash = hash_parts[0]
+        from ..utils.helpers import parse_ntlm_hashes
+
+        lm_hash, nt_hash = parse_ntlm_hashes(hashes)
 
         rpc_client = TaskSchedulerRPC(
             target=target,
@@ -340,12 +334,12 @@ def prefetch_pwd_last_set(
     info(f"{target}: Querying LDAP for password age data ({len(unique_users)} users)...")
 
     try:
+        from ..auth.context import effective_ldap_creds
         from ..resolver import batch_get_user_attributes
 
-        ldap_auth_domain = ldap_domain or domain
-        ldap_auth_user = ldap_user or username
-        ldap_auth_pass = ldap_password or password
-        ldap_auth_hashes = ldap_hashes or hashes
+        ldap_auth_domain, ldap_auth_user, ldap_auth_pass, ldap_auth_hashes = effective_ldap_creds(
+            domain, username, password, hashes, ldap_domain, ldap_user, ldap_password, ldap_hashes
+        )
 
         results = batch_get_user_attributes(
             usernames=list(unique_users),
@@ -429,12 +423,12 @@ def prefetch_tier0_members(
     info(f"{target}: Fetching Tier-0 group members via LDAP (pre-flight)...")
 
     try:
+        from ..auth.context import effective_ldap_creds
         from ..resolver import fetch_tier0_members
 
-        ldap_auth_domain = ldap_domain or domain
-        ldap_auth_user = ldap_user or username
-        ldap_auth_pass = ldap_password or password
-        ldap_auth_hashes = ldap_hashes or hashes
+        ldap_auth_domain, ldap_auth_user, ldap_auth_pass, ldap_auth_hashes = effective_ldap_creds(
+            domain, username, password, hashes, ldap_domain, ldap_user, ldap_password, ldap_hashes
+        )
 
         tier0_cache = fetch_tier0_members(
             domain=ldap_auth_domain,
@@ -594,80 +588,6 @@ def perform_service_enumeration(
         good(f"{target}: Services classified — {tier0_count} TIER-0, {priv_count} PRIV, {len(rows) - tier0_count - priv_count} SERVICE")
 
     return rows
-
-
-def perform_lsa_service_looting(
-    target: str,
-    smb: Any,
-    host: str,
-    service_rows: list[Any],
-    *,
-    kerberos: bool = False,
-    dc_ip: str | None = None,
-    debug: bool = False,
-) -> list[str]:
-    """
-    Extract plaintext passwords from _SC_* LSA secrets for discovered services.
-
-    Maps extracted credentials back to ServiceRow objects, populating
-    decrypted_password fields.
-
-    Args:
-        target: Target identifier (for logging)
-        smb: Authenticated SMB connection
-        host: Server FQDN
-        service_rows: List of ServiceRow instances to match credentials against
-        kerberos: Kerberos auth being used
-        dc_ip: DC hostname for Kerberos
-        debug: Enable debug output
-
-    Returns:
-        Output lines for credential display
-    """
-    from ..lsa.extractor import extract_service_credentials
-
-    out_lines: list[str] = []
-
-    # Collect service names for targeted extraction
-    service_names = {row.service_name for row in service_rows if row.service_name}
-
-    try:
-        credentials = extract_service_credentials(
-            smb, host,
-            service_names=service_names,
-            kerberos=kerberos,
-            dc_host=dc_ip,
-        )
-    except Exception as e:
-        warn(f"{target}: LSA service credential extraction failed: {e}")
-        if debug:
-            traceback.print_exc()
-        return out_lines
-
-    if not credentials:
-        return out_lines
-
-    # Map credentials back to service rows
-    matched = 0
-    for cred in credentials:
-        for row in service_rows:
-            if cred.service_name and cred.service_name == row.service_name:
-                row.decrypted_password = cred.password
-                matched += 1
-                break
-            elif cred.account and row.start_name:
-                # Fall back to account name matching
-                cred_user = cred.account.split("\\")[-1].lower() if "\\" in cred.account else cred.account.lower()
-                row_user = row.start_name.split("\\")[-1].lower() if "\\" in row.start_name else row.start_name.lower()
-                if cred_user == row_user:
-                    row.decrypted_password = cred.password
-                    matched += 1
-                    break
-
-    if matched:
-        good(f"{target}: Matched {matched} LSA credential(s) to service accounts")
-
-    return out_lines
 
 
 def _compute_gmsa_hmac(domain_netbios: str, account: str) -> str | None:

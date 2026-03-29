@@ -55,9 +55,9 @@ def _handle_opengraph(
     bh_config = BloodHoundConfig.from_args_and_config(args)
 
     # Build LDAP config for fallback resolution
-    ldap_domain = getattr(args, "ldap_domain", None) or args.domain
-    ldap_user = getattr(args, "ldap_user", None) or args.username
-    ldap_password = getattr(args, "ldap_password", None) or args.password
+    ldap_domain = args.ldap_domain or args.domain
+    ldap_user = args.ldap_user or args.username
+    ldap_password = args.ldap_password or args.password
 
     ldap_config = None
     if ldap_domain and ldap_user and (ldap_password or args.hashes):
@@ -121,7 +121,7 @@ def _handle_opengraph(
         tasks=list(all_rows),
         bh_connector=bh_connector,
         ldap_config=ldap_config,
-        allow_orphans=getattr(args, "bh_allow_orphans", False),
+        allow_orphans=args.bh_allow_orphans,
         computer_sids=computer_sids if computer_sids else None,
         netbios_name=netbios_name,
     )
@@ -144,7 +144,7 @@ def _handle_opengraph(
             services=list(service_rows),
             bh_connector=bh_connector,
             ldap_config=ldap_config,
-            allow_orphans=getattr(args, "bh_allow_orphans", False),
+            allow_orphans=args.bh_allow_orphans,
             computer_sids=computer_sids if computer_sids else None,
             netbios_name=netbios_name,
         )
@@ -329,7 +329,7 @@ def _handle_exports(
             print_laps_summary(laps_cache, laps_successes, laps_failures)
 
     # Print backup section (if backup was enabled and we have backups)
-    if args.backup and not getattr(args, "services_only", False):
+    if args.backup and not args.services_only:
         backup_dir = os.path.join(output_dir, "raw_backups")
         if os.path.exists(backup_dir):
             print_backup_section(backup_dir)
@@ -356,10 +356,10 @@ def _auto_discover_targets(args: Any, bh_config: Any) -> list[str]:
         List of computer hostnames (FQDNs)
     """
 
-    include_dcs = getattr(args, "include_dcs", False)
-    include_disabled = getattr(args, "include_disabled", False)
-    stale_threshold = getattr(args, "stale_threshold", 60)
-    ldap_filter = getattr(args, "ldap_filter", None)
+    include_dcs = args.include_dcs
+    include_disabled = args.include_disabled
+    stale_threshold = args.stale_threshold
+    ldap_filter = args.ldap_filter
 
     # Resolve filter presets
     ldap_filter_raw = None
@@ -562,7 +562,7 @@ def _enumerate_from_ldap(
 
     info("Auto-targets: Querying LDAP...")
 
-    kerberos_enabled = args.kerberos or getattr(args, "aes_key", None) is not None
+    kerberos_enabled = args.kerberos or args.aes_key is not None
 
     # Use LDAP-specific credentials if provided, otherwise fall back to main auth
     effective_domain = args.ldap_domain if args.ldap_domain else args.domain
@@ -577,9 +577,9 @@ def _enumerate_from_ldap(
         password=effective_password,
         hashes=effective_hashes,
         kerberos=kerberos_enabled,
-        aes_key=getattr(args, "aes_key", None),
+        aes_key=args.aes_key,
         ldap_filter=ldap_filter_raw,
-        use_tcp=getattr(args, "dns_tcp", False),
+        use_tcp=args.dns_tcp,
         include_dcs=include_dcs,
         include_disabled=include_disabled,
         stale_threshold=stale_threshold,
@@ -595,7 +595,7 @@ def main():
 
     # Enable debug log recording if --debug-log is set
     debug_log_path = None
-    if getattr(args, "debug_log", None):
+    if args.debug_log:
         import atexit
         from datetime import datetime as dt
 
@@ -632,10 +632,10 @@ def main():
     validate_args(args)
 
     # Adult check for noisy operations (CredGuard + LSA extraction)
-    has_noisy_ops = (args.credguard_detect or (args.loot and not getattr(args, 'no_lsa', False)))
-    if has_noisy_ops and not getattr(args, 'no_confirm', False):
+    has_noisy_ops = (args.credguard_detect or (args.loot and not args.no_lsa))
+    if has_noisy_ops and not args.no_confirm:
         noisy_items = []
-        if args.loot and not getattr(args, 'no_lsa', False):
+        if args.loot and not args.no_lsa:
             noisy_items.append("  [dim]•[/] [bold]LSA secret extraction[/] via Remote Registry ([cyan]\\pipe\\winreg[/]) — reads SECURITY hive keys")
         if args.credguard_detect:
             noisy_items.append("  [dim]•[/] Credential Guard detection via Remote Registry ([cyan]\\pipe\\winreg[/])")
@@ -672,7 +672,7 @@ This scan involves:
     # Pre-flight credential validation (online mode only)
     # Validates creds with a single auth attempt BEFORE scanning to prevent
     # account lockout from repeated bad-password attempts across N targets.
-    if not args.offline and not getattr(args, "offline_disk", None) and hasattr(args, "username") and args.username:
+    if not args.offline and not args.offline_disk and hasattr(args, "username") and args.username:
         # Build a quick target list for fallback if no --dc-ip
         quick_targets = []
         if args.target:
@@ -683,10 +683,10 @@ This scan involves:
             username=args.username,
             password=args.password,
             hashes=args.hashes,
-            kerberos=args.kerberos or getattr(args, "aes_key", None) is not None,
+            kerberos=args.kerberos or args.aes_key is not None,
             dc_ip=args.dc_ip,
             timeout=args.timeout,
-            aes_key=getattr(args, "aes_key", None),
+            aes_key=args.aes_key,
             ldap_domain=args.ldap_domain,
             ldap_user=args.ldap_user,
             ldap_password=args.ldap_password,
@@ -838,7 +838,7 @@ This scan involves:
     laps_failures: list[LAPSFailure] = []
     laps_successes: int = 0
 
-    if getattr(args, "laps", False) and not args.offline:
+    if args.laps and not args.offline:
         info("LAPS mode enabled - querying Active Directory for LAPS passwords...")
         try:
             # Use LDAP-specific credentials if provided, otherwise fall back to main auth
@@ -854,7 +854,7 @@ This scan involves:
                 password=laps_password,
                 hashes=laps_hashes,
                 kerberos=args.kerberos,
-                laps_user_override=getattr(args, "laps_user", None),
+                laps_user_override=args.laps_user,
                 use_cache=not args.no_cache,
             )
             stats = laps_cache.get_statistics()
@@ -881,7 +881,7 @@ This scan involves:
     all_rows: list[dict] = []
     all_service_rows: list = []
 
-    if getattr(args, "offline_disk", None):
+    if args.offline_disk:
         # Offline disk mode: extract from mounted Windows filesystem, then process
         from .engine.disk_loader import extract_dpapi_key_from_registry, find_windows_root, load_from_disk
 
@@ -891,7 +891,7 @@ This scan involves:
         hostname, backup_path = load_from_disk(
             mount_path=args.offline_disk,
             backup_dir=disk_backup_dir,
-            hostname=getattr(args, "disk_hostname", None),
+            hostname=args.disk_hostname,
             no_backup=args.no_backup,
             verbose=args.verbose,
             debug=args.debug,
@@ -950,7 +950,7 @@ This scan involves:
         targets = []
 
         # Auto-discover targets if requested
-        if getattr(args, "auto_targets", False):
+        if args.auto_targets:
             targets.extend(_auto_discover_targets(args, bh_config))
 
         # Add explicit targets from CLI
@@ -989,23 +989,23 @@ This scan involves:
 
         # Build AuthContext from args
         # AES key implies Kerberos authentication
-        kerberos_enabled = args.kerberos or getattr(args, "aes_key", None) is not None
+        kerberos_enabled = args.kerberos or args.aes_key is not None
         auth = AuthContext(
             username=args.username,
             password=args.password,
             domain=args.domain,
             hashes=args.hashes,
-            aes_key=getattr(args, "aes_key", None),
+            aes_key=args.aes_key,
             kerberos=kerberos_enabled,
             dc_ip=args.dc_ip,
             timeout=args.timeout,
-            dns_tcp=getattr(args, "dns_tcp", False),
-            nameserver=getattr(args, "nameserver", None),
+            dns_tcp=args.dns_tcp,
+            nameserver=args.nameserver,
             ldap_domain=args.ldap_domain,
             ldap_user=args.ldap_user,
             ldap_password=args.ldap_password,
             ldap_hashes=args.ldap_hashes,
-            gc_server=getattr(args, "gc_server", None),
+            gc_server=args.gc_server,
         )
 
         # Compute backup directory path for online scanning
@@ -1025,7 +1025,7 @@ This scan involves:
             "backup_dir": online_backup_dir,
             "credguard_detect": args.credguard_detect,
             "no_ldap": args.no_ldap,
-            "no_rpc": getattr(args, 'no_rpc', False),
+            "no_rpc": args.no_rpc,
             "loot": args.loot,
             "dpapi_key": args.dpapi_key,
             "bh_connector": bh_connector,
@@ -1034,20 +1034,20 @@ This scan involves:
             "laps_cache": laps_cache,
             "validate_creds": args.validate_creds,
             "ldap_tier0": args.ldap_tier0,
-            "no_lsa": getattr(args, "no_lsa", False),
-            "services": getattr(args, "services", False),
-            "services_only": getattr(args, "services_only", False),
+            "no_lsa": args.no_lsa,
+            "services": args.services,
+            "services_only": args.services_only,
             "all_service_rows": all_service_rows,
         }
 
         # Parallel mode (--threads > 1) or sequential with jitter
-        if args.threads > 1 or getattr(args, 'jitter', None):
+        if args.threads > 1 or args.jitter:
             async_config = AsyncConfig(
                 workers=args.threads,
                 rate_limit=args.rate_limit,
                 timeout=args.timeout,
                 show_progress=True,
-                jitter=getattr(args, 'jitter', None),
+                jitter=args.jitter,
             )
             async_engine = AsyncTaskHound(async_config)
 

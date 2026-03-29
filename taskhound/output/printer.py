@@ -611,17 +611,22 @@ def format_block(
     # gMSA hint - uses multi-tier detection: Cache → BloodHound → LDAP → Heuristic
     # Suppress if we already extracted the NTLM hash (hint is redundant)
     if not decrypted_password:
+        from ..auth.context import effective_ldap_creds
+
+        eff_domain, eff_user, eff_pass, eff_hashes = effective_ldap_creds(
+            domain, username, password, hashes, ldap_domain, ldap_user, ldap_password, ldap_hashes
+        )
         gmsa_hint = _check_gmsa_account(
             display_runas,
             resolved_username,
             bh_connector=bh_connector,
             cache_manager=cache_manager,
             no_ldap=no_ldap,
-            domain=ldap_domain or domain,
+            domain=eff_domain,
             dc_ip=dc_ip,
-            ldap_user=ldap_user or username,
-            ldap_password=ldap_password or password,
-            ldap_hashes=ldap_hashes or hashes,
+            ldap_user=eff_user,
+            ldap_password=eff_pass,
+            ldap_hashes=eff_hashes,
         )
         if gmsa_hint:
             rows.append(("gMSA Hint", gmsa_hint))

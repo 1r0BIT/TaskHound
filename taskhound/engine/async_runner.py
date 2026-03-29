@@ -269,7 +269,6 @@ class AsyncTaskHound:
                 status_text = f"[yellow][~][/] {target} [dim](skipped)[/]"
             elif result.success:
                 task_count = len([r for r in result.rows if r.type not in ("FAILURE", None)])
-                len([r for r in result.rows if r.type in ("TIER-0", "PRIV")])
                 status_text = f"[green][+][/] {target} ({task_count} tasks)"
             else:
                 error_short = (result.error or "Error")[:30]
