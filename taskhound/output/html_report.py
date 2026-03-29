@@ -2216,9 +2216,8 @@ def _generate_unified_findings(findings: list[tuple[SeverityScore, Any, str]]) -
 
     finding_counter = 0
 
-    for i, (host, data) in enumerate(sorted_hosts):
+    for _i, (host, data) in enumerate(sorted_hosts):
         host_id = f"host-{re.sub(r'[^a-zA-Z0-9]', '-', host.lower())}"
-        expanded_class = " expanded" if i == 0 else ""
 
         # Generate badges
         badges_html = ""
@@ -2232,7 +2231,7 @@ def _generate_unified_findings(findings: list[tuple[SeverityScore, Any, str]]) -
             badges_html += f'<span class="host-badge decrypted">{data["decrypted_count"]} Decrypted</span>'
 
         html_output += f"""
-                <div class="host-block{expanded_class}" id="{host_id}">
+                <div class="host-block" id="{host_id}">
                     <div class="host-header" onclick="toggleHost('{host_id}')">
                         <div class="host-header-left">
                             <h4>{html.escape(host)}</h4>
@@ -2522,7 +2521,7 @@ def _generate_credential_summary(
     for host_idx, (host_name, host_creds) in enumerate(hosts_creds.items()):
         cred_host_id = f"cred-host-{host_idx}"
         summary_html += f"""
-            <div class="host-block expanded" id="{cred_host_id}" style="margin-bottom: 0.75rem;">
+            <div class="host-block" id="{cred_host_id}" style="margin-bottom: 0.75rem;">
                 <div class="host-header" onclick="toggleHost('{cred_host_id}')" style="cursor: pointer; padding: 0.6rem 1rem;">
                     <div class="host-header-left">
                         <h4 style="margin: 0; font-size: 0.9rem;">{html.escape(host_name)}</h4>
