@@ -553,14 +553,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
-            line-height: 1.6;
+            line-height: 1.65;
+            font-weight: 300;
+            font-feature-settings: 'tnum';
             min-height: 100vh;
         }
 
         .container {
             max-width: 1400px;
             margin: 0 auto;
-            padding: 2rem;
+            padding: 2.5rem;
         }
 
         /* Header */
@@ -569,7 +571,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             margin-bottom: 2rem;
             padding: 2rem;
             background: var(--bg-secondary);
-            border-radius: 8px;
+            border-radius: 10px;
             border: 1px solid var(--border);
         }
 
@@ -626,7 +628,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         /* Summary */
         .executive-summary {
             background: var(--bg-secondary);
-            border-radius: 8px;
+            border-radius: 10px;
             padding: 1.5rem;
             margin-bottom: 1.5rem;
             border: 1px solid var(--border);
@@ -1031,10 +1033,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         /* Sections */
         .section {
             background: var(--bg-secondary);
-            border-radius: 8px;
+            border-radius: 10px;
             padding: 1.5rem;
             margin-bottom: 1.5rem;
             border: 1px solid var(--border);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
         }
 
         .section h2 {
@@ -1201,9 +1204,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         .host-block {
             background: var(--bg-card);
-            border-radius: 6px;
+            border-radius: 10px;
             border: 1px solid var(--border);
             overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
         }
 
         .host-header {
@@ -1679,18 +1683,87 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         /* Print styles */
         @media print {
-            body {
-                background: white;
-                color: black;
+            body, .container, .section, .host-block, .finding-row, .finding-detail {
+                background: white !important;
+                color: #1a1a1a !important;
             }
 
-            .section, .executive-summary, .header {
-                background: white;
-                border: 1px solid #ddd;
+            .executive-summary, .header, .attack-path, .credential-summary,
+            .risk-matrix-section, .classification-reference, .disclaimer,
+            .failures-section {
+                background: white !important;
+                color: #1a1a1a !important;
+            }
+
+            .section, .host-block, .executive-summary, .header, .attack-path,
+            .credential-summary, .risk-matrix-section, .classification-reference,
+            .disclaimer, .failures-section, .stat-card, .severity-badge,
+            .finding-detail, .finding-row {
+                border-color: #ddd !important;
             }
 
             .stat-card {
-                background: #f5f5f5;
+                background: #f5f5f5 !important;
+            }
+
+            .stat-card .value, .stat-card.critical .value, .stat-card.high .value,
+            .stat-card.medium .value, .stat-card.low .value, .stat-card.success .value {
+                color: #1a1a1a !important;
+            }
+
+            .host-tasks, .host-block .host-tasks,
+            .finding-detail, .failures-content {
+                display: block !important;
+            }
+
+            .expand-icon {
+                display: none !important;
+            }
+
+            .host-block {
+                page-break-inside: avoid;
+            }
+
+            .finding-detail {
+                page-break-inside: avoid;
+            }
+
+            .password-inline {
+                background: transparent !important;
+                border: 1px solid #999 !important;
+                color: #1a1a1a !important;
+                padding: 0.1rem 0.3rem;
+            }
+
+            .password-cell {
+                background: transparent !important;
+                color: #1a1a1a !important;
+            }
+
+            .bg-card, .host-tasks {
+                background: #fafafa !important;
+            }
+
+            .text-primary, .text-secondary, .text-muted,
+            .finding-name, .finding-factors, .finding-account,
+            .host-header h4, .detail-key, .detail-value,
+            .tier0-warning strong, .tier0-accounts-list li,
+            .failure-item .host, .failure-item .error,
+            .disclaimer p, .attack-path p,
+            .meta-label, .meta-value, .header .subtitle, .header .meta {
+                color: #1a1a1a !important;
+            }
+
+            .section, .host-block, .executive-summary {
+                box-shadow: none !important;
+            }
+
+            .container {
+                padding: 0.5rem !important;
+            }
+
+            .footer a {
+                color: #1a1a1a !important;
             }
         }
     </style>
@@ -1739,6 +1812,25 @@ def _generate_header(stats: AuditStatistics, timestamp: str) -> str:
                     <span class="meta-label">Services Found</span>
                 </div>"""
 
+    credentials_item = ""
+    if stats.decrypted_count > 0:
+        credentials_item = f"""
+                <div class="meta-item">
+                    <span class="meta-value failure">{stats.decrypted_count}</span>
+                    <span class="meta-label">Credentials Extracted</span>
+                </div>"""
+
+    # Overall risk badge color
+    risk_level = stats.overall_risk
+    risk_colors = {
+        "CRITICAL": "var(--failure-light)",
+        "HIGH": "#ea580c",
+        "MEDIUM": "#ca8a04",
+        "LOW": "var(--accent-light)",
+        "INFO": "var(--text-muted)",
+    }
+    risk_color = risk_colors.get(risk_level, "var(--text-muted)")
+
     return f"""
         <div class="header">
             <h1>TaskHound Security Audit Report</h1>
@@ -1750,13 +1842,13 @@ def _generate_header(stats: AuditStatistics, timestamp: str) -> str:
                     <span class="meta-label">Hosts Scanned</span>
                 </div>
                 <div class="meta-item">
-                    <span class="meta-value failure">{stats.failure_count}</span>
-                    <span class="meta-label">Hosts Failed</span>
-                </div>
-                <div class="meta-item">
                     <span class="meta-value">{stats.total_tasks}</span>
                     <span class="meta-label">Tasks Found</span>
-                </div>{services_item}
+                </div>{services_item}{credentials_item}
+                <div class="meta-item">
+                    <span class="meta-value" style="color: {risk_color};">{risk_level}</span>
+                    <span class="meta-label">Overall Risk</span>
+                </div>
             </div>
         </div>
     """
