@@ -2427,33 +2427,41 @@ def _generate_attack_path_summary(
             tier0_text += " Plaintext credentials were successfully recovered during the assessment."
         paragraphs.append(tier0_text)
 
-    # --- PRIV paragraph (Lateral Movement / Privilege Escalation risk) ---
-    priv_accounts: set[str] = set()
-    priv_multi_host: set[str] = set()
-    priv_account_hosts: dict[str, set[str]] = {}
+    # --- Lateral Movement / Privilege Escalation paragraph ---
+    # Covers both PRIV accounts and TIER-0 accounts spanning multiple hosts
+    privileged_account_hosts: dict[str, set[str]] = {}
+    priv_only_accounts: set[str] = set()
     for _severity, row, kind in findings:
         task_type = str(_get_row_value(row, "type", "")).upper()
-        if task_type == "PRIV":
+        if task_type in ("TIER-0", "PRIV"):
             account = _normalize_account_display(_get_finding_account(row, kind))
-            priv_accounts.add(account)
             host = str(_get_row_value(row, "host", "Unknown"))
-            priv_account_hosts.setdefault(account, set()).add(host)
+            privileged_account_hosts.setdefault(account, set()).add(host)
+            if task_type == "PRIV":
+                priv_only_accounts.add(account)
 
-    priv_multi_host = {a for a, h in priv_account_hosts.items() if len(h) > 1}
+    multi_host_accounts = {a for a, h in privileged_account_hosts.items() if len(h) > 1}
 
-    if priv_accounts:
-        names = ", ".join(html.escape(a) for a in sorted(priv_accounts))
+    # Show PRIV-specific text if any PRIV accounts exist
+    if priv_only_accounts:
+        names = ", ".join(html.escape(a) for a in sorted(priv_only_accounts))
         priv_text = (
             f"<strong>Lateral Movement &amp; Privilege Escalation:</strong>"
-            f" Privileged account{'s' if len(priv_accounts) != 1 else ''}"
-            f" ({names}) {'were' if len(priv_accounts) != 1 else 'was'} found with stored credentials."
+            f" Privileged account{'s' if len(priv_only_accounts) != 1 else ''}"
+            f" ({names}) {'were' if len(priv_only_accounts) != 1 else 'was'} found with stored credentials."
+            " Compromise could enable privilege escalation toward full domain takeover."
         )
-        if priv_multi_host:
-            priv_text += (
-                f" {len(priv_multi_host)} of these span{'s' if len(priv_multi_host) == 1 else ''}"
-                " multiple hosts, enabling lateral movement via credential reuse."
-            )
         paragraphs.append(priv_text)
+
+    # Show lateral movement note if ANY privileged accounts span multiple hosts
+    if multi_host_accounts:
+        paragraphs.append(
+            f"<strong>Lateral Movement:</strong>"
+            f" {len(multi_host_accounts)} privileged account{'s' if len(multi_host_accounts) != 1 else ''}"
+            f" {'span' if len(multi_host_accounts) != 1 else 'spans'} multiple hosts,"
+            " enabling lateral movement via credential reuse."
+            " Extracting stored credentials from any single host grants access to the others."
+        )
 
     # --- Credential Guard note ---
     cred_guard_hosts = len({
