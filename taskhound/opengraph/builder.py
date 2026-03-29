@@ -680,9 +680,8 @@ def resolve_object_ids_chunked(
                 return {}
         except Exception as e:
             warn(f"Error querying BloodHound with SID validation: {e}")
-            if debug:  # type: ignore[truthy-function]  # intentional: guard debug-only traceback
-                import traceback
-                traceback.print_exc()
+            import traceback
+            debug(traceback.format_exc())
             return {}
 
     def _query_bloodhound_chunk(names: List[str], node_type: str) -> Dict[str, Tuple[str, str, str]]:

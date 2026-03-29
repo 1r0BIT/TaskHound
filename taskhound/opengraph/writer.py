@@ -209,9 +209,8 @@ def generate_opengraph_files(
             continue
         except Exception as e:
             warn(f"Error processing task {task.get('path', 'unknown')}: {e}")
-            if debug:  # type: ignore[truthy-function]  # intentional: guard debug-only traceback
-                import traceback
-                debug(traceback.format_exc())
+            import traceback
+            debug(traceback.format_exc())
             continue
 
     # Report skipped edges
@@ -251,9 +250,8 @@ def generate_opengraph_files(
 
     except Exception as e:
         error(f"Failed to write OpenGraph files: {e}")
-        if debug:  # type: ignore[truthy-function]  # intentional: guard debug-only traceback
-            import traceback
-            debug(traceback.format_exc())
+        import traceback
+        debug(traceback.format_exc())
         return None
 
 

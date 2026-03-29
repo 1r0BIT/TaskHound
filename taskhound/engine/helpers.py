@@ -557,7 +557,7 @@ def perform_service_enumeration(
         if account and is_sid(account):
             resolved = format_runas_with_sid_resolution(
                 account,
-                hv=hv,
+                hv_loader=hv,
                 bh_connector=bh_connector,
                 smb_connection=None if no_rpc else smb,
                 no_ldap=no_ldap,

@@ -879,6 +879,7 @@ This scan involves:
 
     # Process based on mode
     all_rows: List[Dict] = []
+    all_service_rows: list = []
 
     if getattr(args, "offline_disk", None):
         # Offline disk mode: extract from mounted Windows filesystem, then process
