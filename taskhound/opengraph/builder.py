@@ -1145,6 +1145,8 @@ def _create_service_edges(
 
     service_id = _create_service_object_id(hostname, service_name)
 
+    debug(f"Creating service edges for {service_name} on {hostname}. Allow orphans: {allow_orphans}")
+
     # Helper to extract domain from FQDN
     def _extract_domain(fqdn: str) -> str:
         if "." in fqdn:
@@ -1158,6 +1160,7 @@ def _create_service_edges(
     if computer_info:
         _, computer_sid, *_ = computer_info
         if computer_sid:
+            debug(f"Using id (objectid) for Computer: {hostname} → {computer_sid}")
             edges.append(Edge(
                 start_node=computer_sid,
                 end_node=service_id,
@@ -1165,7 +1168,9 @@ def _create_service_edges(
                 start_match_by="id",
                 end_match_by="id",
             ))
+            debug(f"Created HasServiceWithStoredCreds edge: {hostname} → {service_name} (match_by=id)")
     elif allow_orphans:
+        debug(f"Creating orphaned edge for missing computer: {hostname}")
         edges.append(Edge(
             start_node=hostname,
             end_node=service_id,
@@ -1174,6 +1179,7 @@ def _create_service_edges(
             end_match_by="id",
         ))
     else:
+        debug(f"Computer {hostname} NOT in map — skipping HasServiceWithStoredCreds edge for {service_name}")
         skipped["computers"] += 1
 
     # Edge: WindowsService → User (RunsAs)
@@ -1186,6 +1192,7 @@ def _create_service_edges(
             if user_info:
                 _, user_sid, *_ = user_info
                 if user_sid:
+                    debug(f"Using id (objectid) for User: {principal_id} → {user_sid}")
                     edges.append(Edge(
                         start_node=service_id,
                         end_node=user_sid,
@@ -1193,6 +1200,7 @@ def _create_service_edges(
                         start_match_by="id",
                         end_match_by="id",
                     ))
+                    debug(f"Created RunsAs edge: {service_name} → {principal_id} (match_by=id)")
                 elif allow_orphans:
                     edges.append(Edge(
                         start_node=service_id,
@@ -1202,6 +1210,7 @@ def _create_service_edges(
                         end_match_by="name",
                     ))
                 else:
+                    debug(f"User {principal_id} has no objectid — skipping RunsAs edge for {service_name}")
                     skipped["users"] += 1
             elif allow_orphans:
                 edges.append(Edge(
@@ -1212,6 +1221,7 @@ def _create_service_edges(
                     end_match_by="name",
                 ))
             else:
+                debug(f"User {principal_id} NOT in map — skipping RunsAs edge for {service_name}")
                 skipped["users"] += 1
 
     return edges, skipped
