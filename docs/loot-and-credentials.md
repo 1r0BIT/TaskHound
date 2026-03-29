@@ -146,6 +146,6 @@ confidence assessment.
 ## Limitations
 
 - LSA extraction requires admin access (same as secretsdump -- there's no magic here)
-- gMSA passwords ARE stored in LSA secrets, but under a different key format (`_SC_GMSA_{GUID}_<HMAC>` instead of `_SC_<ServiceName>`). They can be extracted via LSA dump (nxc `--lsa`, secretsdump, regsecrets), but mapping the HMAC-based key back to the account name requires additional computation. TaskHound currently skips gMSA credential matching because the key format differs -- this is a known limitation, not an impossibility. The easier path for gMSA password retrieval is via LDAP (`msDS-ManagedPassword` attribute), planned for future implementation
+- gMSA NTLM hashes are extracted from LSA secrets and matched back to service accounts via HMAC-SHA256 key computation. This works when the gMSA password has been fetched by the host (the service was started at least once). If a gMSA service was configured but never started on a particular host, the password won't be in that host's LSA secrets
 - DPAPI decryption only works for SYSTEM-context credential blobs (user-context blobs need the user's master key, which is a different problem)
 - Credential validation via RPC has a blind spot: Windows doesn't record failed authentication as task runs, so the absence of recent runs is ambiguous

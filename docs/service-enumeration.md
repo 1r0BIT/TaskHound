@@ -55,11 +55,15 @@ the label: SERVICE instead of TASK.
 
 Accounts ending in `$` get flagged as `[gMSA]` -- Group Managed Service Accounts. These
 use automatically rotated passwords managed by AD. Their passwords are stored in LSA
-secrets, but under a different key format (`_SC_GMSA_{GUID}_<HMAC>`) that makes matching
-them back to the account name non-trivial. gMSA credential extraction via LSA is not yet
-implemented in TaskHound -- the easier path is LDAP retrieval of the `msDS-ManagedPassword`
-attribute, which is planned for a future release. Still worth knowing about (they tell you
-what's running where).
+secrets under a different key format (`_SC_GMSA_{GUID}_<HMAC>`) that makes matching
+them back to the account name non-trivial.
+
+TaskHound extracts gMSA NTLM hashes from LSA secrets by computing the HMAC-SHA256 key
+from the account name and matching it against the `_SC_GMSA_` entries. When a match is
+found, the hash is associated with the corresponding service and displayed alongside it.
+This works for gMSA accounts whose password has been fetched by the host (i.e., the
+service has been started at least once -- Windows retrieves the gMSA password from AD
+via GKDI at service start time and caches it in LSA).
 
 ## CLI flags
 
@@ -94,5 +98,5 @@ graph relationships. Jamming them into one file felt wrong.
 
 - Requires admin access to the target (SCM queries need it)
 - Only enumerates Win32 services, not kernel/filesystem drivers (those don't run as user accounts)
-- gMSA password extraction is not yet implemented (LSA secrets use a different key format for gMSA; LDAP-based retrieval via `msDS-ManagedPassword` is planned)
+- gMSA NTLM extraction only works if the host has fetched the gMSA password from AD at least once (i.e., the service was started). If a gMSA service was configured but never started, the password won't be in LSA secrets on that host
 - Service binary path analysis is informational only -- TaskHound doesn't check for DLL hijacking or unquoted paths (yet)

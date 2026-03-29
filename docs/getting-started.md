@@ -52,6 +52,8 @@ taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local --dc-ip 10.0.0.1 -
 
 ## Common First-Run Issues
 
+**"CREDENTIAL CHECK FAILED"**: TaskHound validates your credentials with a single authentication attempt before scanning any targets. If this fails, the tool aborts immediately to prevent account lockout. Double-check your password (quote special characters!), domain, and DC reachability. See [authentication.md](authentication.md#pre-flight-credential-validation) for details.
+
 **"Connection refused" / timeouts**: SMB (port 445) needs to be reachable. Check firewalls, check that the host is actually up. TaskHound can't help you if packets don't arrive.
 
 **"Access denied"**: You need local admin on the target to read task XMLs from the `C$` share. A regular domain user won't cut it. This is where [LAPS integration](authentication.md#laps-integration) comes in handy for multi-host scans.

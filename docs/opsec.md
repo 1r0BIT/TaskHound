@@ -7,12 +7,21 @@ registry access, credential validation, DPAPI collection, and LSA extraction. Th
 make any decent SOC light up like a Christmas tree. If you're in a red team engagement
 with monitoring, read this page before you run anything.
 
+## Pre-flight credential check
+
+Before any targets are scanned, TaskHound makes one SMB authentication attempt against
+the DC (or first target) to validate credentials. This prevents account lockout from
+bad passwords hitting N targets simultaneously. It adds one SMB connection at startup.
+If you're using separate LDAP credentials (`--ldap-user`), one additional LDAP bind is
+also performed. See [authentication.md](authentication.md#pre-flight-credential-validation).
+
 ## Protocol impact
 
 Every feature maps to specific network traffic. Here's what lights up and how to turn it off:
 
 | Protocol | Used for | Named pipe / port | Disable flag |
 |----------|----------|-------------------|-------------|
+| SMB | Pre-flight credential validation | 445 | Skipped for `-d '.'` (local auth) |
 | SMB | Task XML enumeration (share crawl) | 445 (IPC$, C$) | Cannot disable (core function) |
 | SVCCTL RPC | Service enumeration | `\pipe\svcctl` | `--services` not set (off by default) |
 | LSARPC | SID-to-name resolution | `\pipe\lsarpc` | `--no-rpc` |
