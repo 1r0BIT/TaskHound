@@ -730,6 +730,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip confirmation prompts for noisy operations (useful for automation/CI)",
     )
+    misc.add_argument(
+        "--no-preflight",
+        action="store_true",
+        help="Skip pre-flight credential validation (for CI/automation with known-good creds)",
+    )
     # Load defaults from config file
     defaults = load_config()
     if defaults:

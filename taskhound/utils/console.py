@@ -389,6 +389,10 @@ def print_scan_complete(
     total_time: float,
     avg_time_ms: float,
     skipped: int = 0,
+    task_count: int = 0,
+    service_count: int = 0,
+    tier0_count: int = 0,
+    creds_count: int = 0,
 ):
     """Print scan completion summary."""
     console.print()
@@ -406,6 +410,19 @@ def print_scan_complete(
         f"  [dim]Total time: {total_time:.2f}s[/]",
         f"  [dim]Avg per target: {avg_time_ms:.0f}ms[/]",
     ])
+
+    # Add scan statistics if available
+    if task_count or service_count:
+        stats_parts = []
+        if task_count:
+            stats_parts.append(f"{task_count} tasks")
+        if service_count:
+            stats_parts.append(f"{service_count} services")
+        content_lines.append(f"  [dim]Found: {', '.join(stats_parts)}[/]")
+    if tier0_count:
+        content_lines.append(f"  [bold red]  TIER-0: {tier0_count}[/]")
+    if creds_count:
+        content_lines.append(f"  [bold green]  Decrypted credentials: {creds_count}[/]")
 
     console.print(
         Panel(

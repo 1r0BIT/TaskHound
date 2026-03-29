@@ -672,7 +672,7 @@ This scan involves:
     # Pre-flight credential validation (online mode only)
     # Validates creds with a single auth attempt BEFORE scanning to prevent
     # account lockout from repeated bad-password attempts across N targets.
-    if not args.offline and not args.offline_disk and hasattr(args, "username") and args.username:
+    if not args.offline and not args.offline_disk and not args.no_preflight and hasattr(args, "username") and args.username:
         # Build a quick target list for fallback if no --dc-ip
         quick_targets = []
         if args.target:

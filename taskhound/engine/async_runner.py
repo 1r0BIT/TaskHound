@@ -365,10 +365,10 @@ class AsyncTaskHound:
             self._task_id = None
             self._stop_rate_limiter_thread()
 
-        # Print completion summary
+        # Print completion summary with scan statistics
         total_time = time.perf_counter() - start_time
         avg_time = (total_time / len(targets)) * 1000 if targets else 0
-        print_scan_complete(self._succeeded, self._failed, total_time, avg_time, self._skipped)
+        _print_scan_stats(results, self._succeeded, self._failed, total_time, avg_time, self._skipped)
 
         return results
 
@@ -486,10 +486,10 @@ class AsyncTaskHound:
 
                 progress.update(task_id, advance=1, status=status_text)
 
-        # Print completion summary
+        # Print completion summary with scan statistics
         total_time = time.perf_counter() - start_time
         avg_time = (total_time / len(targets)) * 1000 if targets else 0
-        print_scan_complete(self._succeeded, self._failed, total_time, avg_time, self._skipped)
+        _print_scan_stats(results, self._succeeded, self._failed, total_time, avg_time, self._skipped)
 
         return results
 
@@ -531,6 +531,29 @@ def aggregate_results(results: list[TargetResult]) -> tuple[list[TaskRow], list[
                 laps_failures.append(result.laps_result)
 
     return all_rows, all_service_rows, laps_failures, laps_successes
+
+
+def _print_scan_stats(
+    results: list[TargetResult],
+    succeeded: int,
+    failed: int,
+    total_time: float,
+    avg_time: float,
+    skipped: int,
+) -> None:
+    """Print scan completion summary with task/service statistics."""
+    task_rows = [r for result in results for r in result.rows if r.type not in ("FAILURE", "SKIPPED")]
+    svc_rows = [r for result in results for r in result.service_rows]
+    tier0 = sum(1 for r in task_rows if r.type == "TIER-0") + sum(1 for r in svc_rows if getattr(r, "type", "") == "TIER-0")
+    creds = sum(1 for r in task_rows if r.decrypted_password) + sum(1 for r in svc_rows if getattr(r, "decrypted_password", None))
+
+    print_scan_complete(
+        succeeded, failed, total_time, avg_time, skipped,
+        task_count=len(task_rows),
+        service_count=len(svc_rows),
+        tier0_count=tier0,
+        creds_count=creds,
+    )
 
 
 def print_summary(
