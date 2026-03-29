@@ -1849,7 +1849,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {{EXECUTIVE_SUMMARY}}
         {{ATTACK_PATH_SUMMARY}}
         {{CREDENTIAL_SUMMARY}}
-        {{ACCOUNT_RISK_MATRIX}}
         {{CLASSIFICATION_REFERENCE}}
         {{UNIFIED_FINDINGS}}
         {{FAILURES}}
@@ -2040,27 +2039,7 @@ def _generate_classification_reference() -> str:
                 </tbody>
             </table>
 
-            <h3>Potential Impact When Abused</h3>
-            <ul class="impact-list">
-                <li class="tier0">
-                    <strong>Tier-0 Credential Compromise</strong>
-                    <p>Attackers obtaining Domain Admin or equivalent credentials can achieve full domain control,
-                    including the ability to create persistence mechanisms, access all domain resources,
-                    modify security policies, and potentially compromise connected forests or cloud tenants.</p>
-                </li>
-                <li class="priv">
-                    <strong>Privileged Account Abuse</strong>
-                    <p>Compromised privileged accounts (local admin, service accounts with elevated rights)
-                    enable lateral movement across systems, access to sensitive data, deployment of malware,
-                    and potential escalation paths toward Tier-0 assets.</p>
-                </li>
-                <li class="stored">
-                    <strong>Stored Credential Extraction</strong>
-                    <p>Credentials stored via DPAPI can be extracted by attackers with local administrator
-                    access to the host. Successful decryption yields plaintext passwords that may be reused
-                    across systems or services, enabling credential stuffing and password spraying attacks.</p>
-                </li>
-            </ul>
+            <!-- Impact descriptions moved to Attack Path Summary -->
         </div>
     """
 
@@ -2077,17 +2056,18 @@ def _get_finding_display_name(row: Any, kind: str) -> str:
 
 
 def _get_finding_account(row: Any, kind: str) -> str:
-    """Get the display account for a finding."""
+    """Get the display account for a finding, normalized to NETBIOS\\Sam."""
     if kind == "service":
         runas_raw = _get_row_value(row, "start_name", "") or _get_row_value(row, "runas", "") or ""
     else:
         runas_raw = _get_row_value(row, "runas", "") or ""
     resolved_runas = _get_row_value(row, "resolved_runas", "") or ""
-    if resolved_runas and runas_raw.startswith("S-1-"):
-        return f"{resolved_runas} ({runas_raw})"
-    elif resolved_runas:
-        return resolved_runas
-    return runas_raw or "N/A"
+
+    # Prefer resolved name, fall back to raw
+    account = resolved_runas or runas_raw or "N/A"
+
+    # Normalize to NETBIOS\Sam (strips SID suffixes, normalizes UPN/downlevel)
+    return _normalize_account_display(account)
 
 
 def _generate_finding_detail(row: Any, kind: str, finding_id: str) -> str:
@@ -2520,12 +2500,15 @@ def _generate_credential_summary(
             "class_rank": str({"TIER-0": 3, "PRIV": 2}.get(task_type, 1)),
         })
 
-    # Sort by classification severity (TIER-0 first), then by finding severity
-    cred_rows.sort(key=lambda r: (-int(r["class_rank"]), -int(r["severity_rank"])))
+    # Sort by host first (for grouping), then by classification severity
+    cred_rows.sort(key=lambda r: (r["host"], -int(r["class_rank"]), -int(r["severity_rank"])))
 
-    summary_html = """
+    summary_html = f"""
         <div class="credential-summary">
-            <h2>Credential Summary</h2>
+            <div class="host-header" onclick="toggleHost('cred-summary-body')" style="cursor: pointer;">
+                <h2 style="display: inline;">Credential Summary ({len(cred_rows)})</h2>
+                <span class="expand-icon">&#9660;</span>
+            </div>
     """
 
     if not cred_rows:
@@ -2534,21 +2517,22 @@ def _generate_credential_summary(
         return summary_html
 
     summary_html += """
+            <div id="cred-summary-body" class="host-tasks" style="display: block;">
             <table class="credential-table">
                 <thead>
                     <tr>
+                        <th>Host</th>
                         <th>Account</th>
                         <th>Password / Hash</th>
                         <th>Source</th>
-                        <th>Host</th>
-                        <th>Finding Name</th>
+                        <th>Task / Service</th>
                         <th>Classification</th>
-                        <th>Credential Guard</th>
                     </tr>
                 </thead>
                 <tbody>
     """
 
+    current_host = None
     for cr in cred_rows:
         account_class = ""
         if cr["classification"] == "TIER-0":
@@ -2556,21 +2540,27 @@ def _generate_credential_summary(
         elif cr["classification"] == "PRIV":
             account_class = " priv"
 
+        # Host separator row for visual grouping
+        host_cell = ""
+        if cr["host"] != current_host:
+            current_host = cr["host"]
+            host_cell = html.escape(cr["host"])
+
         summary_html += f"""
                     <tr>
+                        <td style="font-size: 0.8rem; color: var(--text-muted);">{host_cell}</td>
                         <td><span class="finding-account{account_class}">{html.escape(cr['account'])}</span></td>
                         <td class="password-cell">{html.escape(cr['password'])}</td>
                         <td>{html.escape(cr['source'])}</td>
-                        <td>{html.escape(cr['host'])}</td>
                         <td style="font-family: 'Consolas', 'Monaco', monospace; font-size: 0.8rem;">{html.escape(cr['name'])}</td>
                         <td>{html.escape(cr['classification'])}</td>
-                        <td>{html.escape(cr['cred_guard'])}</td>
                     </tr>
         """
 
     summary_html += """
                 </tbody>
             </table>
+            </div>
         </div>
     """
 
@@ -2716,7 +2706,6 @@ def generate_html_report(
     executive_summary = _generate_executive_summary(stats)
     attack_path_summary = _generate_attack_path_summary(stats, findings, service_rows)
     credential_summary = _generate_credential_summary(findings, service_rows)
-    account_risk_matrix = _generate_account_risk_matrix(findings, service_rows)
     classification_reference = _generate_classification_reference()
     unified_findings = _generate_unified_findings(findings)
     failures = _generate_failures(stats)
@@ -2729,7 +2718,6 @@ def generate_html_report(
         .replace("{{EXECUTIVE_SUMMARY}}", executive_summary)
         .replace("{{ATTACK_PATH_SUMMARY}}", attack_path_summary)
         .replace("{{CREDENTIAL_SUMMARY}}", credential_summary)
-        .replace("{{ACCOUNT_RISK_MATRIX}}", account_risk_matrix)
         .replace("{{CLASSIFICATION_REFERENCE}}", classification_reference)
         .replace("{{UNIFIED_FINDINGS}}", unified_findings)
         .replace("{{FAILURES}}", failures)
