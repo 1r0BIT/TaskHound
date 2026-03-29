@@ -2522,7 +2522,7 @@ def _generate_credential_summary(
     for host_idx, (host_name, host_creds) in enumerate(hosts_creds.items()):
         cred_host_id = f"cred-host-{host_idx}"
         summary_html += f"""
-            <div class="host-block" style="margin-bottom: 0.75rem;">
+            <div class="host-block expanded" id="{cred_host_id}" style="margin-bottom: 0.75rem;">
                 <div class="host-header" onclick="toggleHost('{cred_host_id}')" style="cursor: pointer; padding: 0.6rem 1rem;">
                     <div class="host-header-left">
                         <h4 style="margin: 0; font-size: 0.9rem;">{html.escape(host_name)}</h4>
@@ -2530,7 +2530,7 @@ def _generate_credential_summary(
                     </div>
                     <span class="expand-icon">&#9660;</span>
                 </div>
-                <div class="host-tasks" id="{cred_host_id}">
+                <div class="host-tasks">
                     <table class="credential-table" style="margin: 0;">
                         <thead>
                             <tr>
