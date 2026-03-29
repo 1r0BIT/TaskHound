@@ -134,10 +134,10 @@ class TestHtmlReportWithServices:
             with open(path) as f:
                 html = f.read()
 
-            assert "Windows Service Findings" in html
+            # Services appear in unified findings (not a separate section)
             assert "MSSQLSERVER" in html
-            assert "CORP\\sqladmin" in html
-            assert "[gMSA]" in html
+            assert "CORP\\sqladmin" in html or "CORP&#x5C;sqladmin" in html
+            assert "gMSA" in html
 
     def test_html_report_no_services(self):
         from taskhound.output.html_report import generate_html_report
@@ -152,4 +152,5 @@ class TestHtmlReportWithServices:
             with open(path) as f:
                 html = f.read()
 
-            assert "Windows Service Findings" not in html
+            # With no services, service count shouldn't appear in header
+            assert "Services Found" not in html

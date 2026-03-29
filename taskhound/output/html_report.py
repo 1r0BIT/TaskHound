@@ -146,18 +146,34 @@ def calculate_severity(row: Any) -> SeverityScore:
     if task_type == "FAILURE":
         return SeverityScore(level="INFO", score=0, factors=["Connection failed"])
 
+    # Detect service rows (service_name only exists on ServiceRow)
+    is_service = bool(_get_row_value(row, "service_name", ""))
+
     # Check for stored credentials
-    creds_hint = str(_get_row_value(row, "credentials_hint", "")).lower()
-    has_stored_creds = "stored" in creds_hint or "password" in creds_hint
+    if is_service:
+        # Services always store credentials as LSA secrets
+        has_stored_creds = True
+    else:
+        creds_hint = str(_get_row_value(row, "credentials_hint", "")).lower()
+        has_stored_creds = "stored" in creds_hint or "password" in creds_hint
 
     # Check credential status
     cred_valid = _get_row_value(row, "cred_password_valid", None)
     cred_status = str(_get_row_value(row, "cred_status", "")).lower()
     cred_guard = _get_row_value(row, "credential_guard", None)
 
+    # For services, use decrypted_password presence as proxy for credential validation
+    if is_service and cred_valid is None:
+        decrypted_pw = _get_row_value(row, "decrypted_password", "")
+        if decrypted_pw and decrypted_pw not in ("N/A", "", "-"):
+            cred_valid = True
+
     # Check if account is disabled (indicated in reason field)
     reason = str(_get_row_value(row, "reason", ""))
     account_disabled = "[ACCOUNT DISABLED]" in reason
+    # Also check is_disabled_account flag (ServiceRow)
+    if _get_row_value(row, "is_disabled_account", False):
+        account_disabled = True
 
     # Determine credential state
     is_valid = cred_valid is True
@@ -169,6 +185,8 @@ def calculate_severity(row: Any) -> SeverityScore:
         factors.append("Tier-0 privileged account")
     elif task_type == "PRIV":
         factors.append("Privileged account")
+    elif task_type == "SERVICE":
+        factors.append("Standard service")
     elif task_type == "TASK":
         factors.append("Standard task")
 
@@ -177,7 +195,10 @@ def calculate_severity(row: Any) -> SeverityScore:
         factors.append("Account currently disabled in AD")
 
     if has_stored_creds:
-        factors.append("Credentials stored (DPAPI)")
+        if is_service:
+            factors.append("LSA secret stored")
+        else:
+            factors.append("Credentials stored (DPAPI)")
     if is_valid:
         factors.append("Password confirmed valid")
     if is_outdated:
@@ -208,7 +229,7 @@ def calculate_severity(row: Any) -> SeverityScore:
         else:
             level = "LOW"
 
-    elif task_type == "TASK":
+    elif task_type in ("TASK", "SERVICE"):
         level = "LOW" if has_stored_creds else "INFO"
 
     else:
@@ -237,6 +258,11 @@ class AuditStatistics:
     tier0_count: int = 0
     priv_count: int = 0
     task_count: int = 0
+
+    # Service counts
+    total_services: int = 0
+    service_tier0_count: int = 0
+    service_priv_count: int = 0
 
     # Credential counts
     stored_creds_count: int = 0
@@ -270,12 +296,13 @@ class AuditStatistics:
         return len(self.failures)
 
 
-def calculate_statistics(rows: list[Any]) -> AuditStatistics:
+def calculate_statistics(rows: list[Any], service_rows: list[Any] | None = None) -> AuditStatistics:
     """
     Calculate aggregated statistics from scan results.
 
     Args:
         rows: List of task dictionaries or TaskRow objects from scan results
+        service_rows: Optional list of ServiceRow objects for service findings
 
     Returns:
         AuditStatistics with calculated values
@@ -298,6 +325,11 @@ def calculate_statistics(rows: list[Any]) -> AuditStatistics:
     stored_creds_count = 0
     decrypted_count = 0
     valid_creds_count = 0
+
+    # Service counters
+    total_services = 0
+    service_tier0_count = 0
+    service_priv_count = 0
 
     for row in rows:
         host = _get_row_value(row, "host", "")
@@ -360,6 +392,56 @@ def calculate_statistics(rows: list[Any]) -> AuditStatistics:
         else:
             info_count += 1
 
+    # Process service rows
+    for svc_row in service_rows or []:
+        svc_type = str(_get_row_value(svc_row, "type", "")).upper()
+
+        if svc_type in ("FAILURE", "SKIPPED"):
+            continue
+
+        total_services += 1
+
+        host = _get_row_value(svc_row, "host", "")
+        if host:
+            hosts_seen.add(host)
+            hosts_with_findings.add(host)
+
+        # Track service accounts — use start_name (ServiceRow) or runas
+        runas_raw = _get_row_value(svc_row, "start_name", "") or _get_row_value(svc_row, "runas", "")
+        resolved_runas = _get_row_value(svc_row, "resolved_runas", "")
+        runas = resolved_runas if resolved_runas else runas_raw
+        if runas and not runas.startswith("S-1-"):
+            _get_canonical_username(runas, unique_accounts_seen)
+
+        # Service type counts
+        if svc_type == "TIER-0":
+            service_tier0_count += 1
+            if runas and not runas.startswith("S-1-"):
+                _get_canonical_username(runas, tier0_accounts_seen)
+        elif svc_type == "PRIV":
+            service_priv_count += 1
+
+        # Services always have stored credentials (LSA secrets)
+        stored_creds_count += 1
+
+        # Decrypted passwords
+        decrypted = _get_row_value(svc_row, "decrypted_password", "")
+        if decrypted and decrypted not in ("N/A", "", "-"):
+            decrypted_count += 1
+
+        # Calculate severity and count
+        severity = calculate_severity(svc_row)
+        if severity.level == "CRITICAL":
+            critical_count += 1
+        elif severity.level == "HIGH":
+            high_count += 1
+        elif severity.level == "MEDIUM":
+            medium_count += 1
+        elif severity.level == "LOW":
+            low_count += 1
+        else:
+            info_count += 1
+
     total_tasks = tier0_count + priv_count + task_count
 
     return AuditStatistics(
@@ -374,6 +456,9 @@ def calculate_statistics(rows: list[Any]) -> AuditStatistics:
         tier0_count=tier0_count,
         priv_count=priv_count,
         task_count=task_count,
+        total_services=total_services,
+        service_tier0_count=service_tier0_count,
+        service_priv_count=service_priv_count,
         stored_creds_count=stored_creds_count,
         decrypted_count=decrypted_count,
         valid_creds_count=valid_creds_count,
@@ -383,29 +468,43 @@ def calculate_statistics(rows: list[Any]) -> AuditStatistics:
     )
 
 
-def generate_audit_summary(rows: list[Any]) -> tuple[AuditStatistics, list[tuple[SeverityScore, Any]]]:
+def generate_audit_summary(
+    rows: list[Any],
+    service_rows: list[Any] | None = None,
+) -> tuple[AuditStatistics, list[tuple[SeverityScore, Any, str]]]:
     """
     Generate audit summary with statistics and sorted findings.
 
     Args:
         rows: List of task dictionaries or TaskRow objects
+        service_rows: Optional list of ServiceRow objects for service findings
 
     Returns:
-        Tuple of (AuditStatistics, list of (SeverityScore, row) tuples sorted by severity)
+        Tuple of (AuditStatistics, list of (SeverityScore, row, kind) tuples sorted by severity)
+        where kind is "task" or "service"
     """
-    stats = calculate_statistics(rows)
+    stats = calculate_statistics(rows, service_rows=service_rows)
 
     # Calculate severity for each non-failure row and sort
-    findings = []
+    severity_order = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
+    findings: list[tuple[SeverityScore, Any, str]] = []
+
     for row in rows:
         task_type = str(_get_row_value(row, "type", "")).upper()
         if task_type == "FAILURE":
             continue
         severity = calculate_severity(row)
-        findings.append((severity, row))
+        findings.append((severity, row, "task"))
 
-    # Sort by severity score descending
-    findings.sort(key=lambda x: x[0].score, reverse=True)
+    for svc_row in service_rows or []:
+        svc_type = str(_get_row_value(svc_row, "type", "")).upper()
+        if svc_type in ("FAILURE", "SKIPPED"):
+            continue
+        severity = calculate_severity(svc_row)
+        findings.append((severity, svc_row, "service"))
+
+    # Sort by severity level descending
+    findings.sort(key=lambda x: -severity_order.get(x[0].level, 0))
 
     return stats, findings
 
@@ -1235,6 +1334,147 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
         }
 
+        /* Finding rows - unified findings */
+        .finding-row {
+            display: grid;
+            grid-template-columns: 80px 65px 1fr 200px 1fr 30px;
+            gap: 0.75rem;
+            padding: 0.6rem 1rem;
+            border-bottom: 1px solid var(--border);
+            align-items: center;
+            font-size: 0.85rem;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .finding-row:last-child {
+            border-bottom: none;
+        }
+
+        .finding-row:hover {
+            background: rgba(99, 102, 241, 0.05);
+        }
+
+        .finding-row .severity-pill {
+            text-align: center;
+            min-width: 60px;
+        }
+
+        .finding-name {
+            font-family: 'Consolas', 'Monaco', monospace;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            word-break: break-all;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .finding-account {
+            font-weight: 500;
+            font-size: 0.85rem;
+        }
+
+        .finding-account.tier0 { color: #fca5a5; }
+        .finding-account.priv { color: #fdba74; }
+
+        .finding-factors {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .expand-icon {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            transition: transform 0.2s;
+            text-align: center;
+        }
+
+        .finding-row.expanded .expand-icon {
+            transform: rotate(180deg);
+        }
+
+        .kind-badge {
+            padding: 0.15rem 0.35rem;
+            border-radius: 3px;
+            font-size: 0.6rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            text-align: center;
+            display: inline-block;
+        }
+
+        .kind-badge.kind-task {
+            background: rgba(99, 102, 241, 0.15);
+            color: var(--accent-light);
+            border: 1px solid var(--accent);
+        }
+
+        .kind-badge.kind-service {
+            background: rgba(20, 184, 166, 0.15);
+            color: #5eead4;
+            border: 1px solid #0d9488;
+        }
+
+        .host-badge.services {
+            background: rgba(20, 184, 166, 0.15);
+            color: #5eead4;
+            border: 1px solid #0d9488;
+        }
+
+        /* Finding detail panel */
+        .finding-detail {
+            display: none;
+            padding: 0.75rem 1rem 0.75rem 1.5rem;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .finding-detail.visible {
+            display: block;
+        }
+
+        .finding-detail-grid {
+            display: grid;
+            grid-template-columns: 160px 1fr;
+            gap: 0.3rem 1rem;
+            font-size: 0.82rem;
+        }
+
+        .finding-detail-grid .detail-key {
+            color: var(--text-muted);
+            font-weight: 500;
+            text-align: right;
+            padding: 0.15rem 0;
+        }
+
+        .finding-detail-grid .detail-value {
+            color: var(--text-secondary);
+            padding: 0.15rem 0;
+            word-break: break-all;
+        }
+
+        .password-inline {
+            font-family: 'Consolas', 'Monaco', monospace;
+            background: rgba(22, 101, 52, 0.2);
+            padding: 0.15rem 0.4rem;
+            border-radius: 3px;
+            color: var(--success-light);
+            font-size: 0.82rem;
+        }
+
+        .tag-gmsa {
+            color: var(--accent-light);
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .tag-disabled {
+            color: var(--failure-light);
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
         /* Print styles */
         @media print {
             body {
@@ -1259,8 +1499,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {{DISCLAIMER}}
         {{EXECUTIVE_SUMMARY}}
         {{CLASSIFICATION_REFERENCE}}
-        {{DETAILED_FINDINGS}}
-        {{SERVICE_FINDINGS}}
+        {{UNIFIED_FINDINGS}}
         {{FAILURES}}
         {{FOOTER}}
     </div>
@@ -1270,6 +1509,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const hostBlock = document.getElementById(hostId);
             hostBlock.classList.toggle('expanded');
         }
+        function toggleFinding(findingId) {
+            const row = document.getElementById('row-' + findingId);
+            const detail = document.getElementById('detail-' + findingId);
+            if (row && detail) {
+                row.classList.toggle('expanded');
+                detail.classList.toggle('visible');
+            }
+        }
     </script>
 </body>
 </html>"""
@@ -1277,10 +1524,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
 def _generate_header(stats: AuditStatistics, timestamp: str) -> str:
     """Generate the header section HTML."""
+    subtitle = "Scheduled Task &amp; Service Privilege Analysis" if stats.total_services > 0 else "Scheduled Task Privilege Analysis"
+
+    services_item = ""
+    if stats.total_services > 0:
+        services_item = f"""
+                <div class="meta-item">
+                    <span class="meta-value">{stats.total_services}</span>
+                    <span class="meta-label">Services Found</span>
+                </div>"""
+
     return f"""
         <div class="header">
             <h1>TaskHound Security Audit Report</h1>
-            <p class="subtitle">Scheduled Task Privilege Analysis</p>
+            <p class="subtitle">{subtitle}</p>
             <p class="meta" style="margin-bottom: 1rem;">Generated: {html.escape(timestamp)}</p>
             <div class="meta-grid">
                 <div class="meta-item">
@@ -1294,7 +1551,7 @@ def _generate_header(stats: AuditStatistics, timestamp: str) -> str:
                 <div class="meta-item">
                     <span class="meta-value">{stats.total_tasks}</span>
                     <span class="meta-label">Tasks Found</span>
-                </div>
+                </div>{services_item}
             </div>
         </div>
     """
@@ -1437,8 +1694,117 @@ def _generate_classification_reference() -> str:
     """
 
 
-def _generate_detailed_findings(rows: list[Any], findings: list[tuple[SeverityScore, Any]]) -> str:
-    """Generate the detailed findings section with collapsible host blocks."""
+def _get_finding_display_name(row: Any, kind: str) -> str:
+    """Get display name for a finding (task path or service name)."""
+    if kind == "service":
+        name = _get_row_value(row, "service_name", "") or ""
+        display = _get_row_value(row, "display_name", "") or ""
+        if display and name:
+            return name
+        return name or display or "Unknown"
+    return _get_row_value(row, "path", "Unknown") or "Unknown"
+
+
+def _get_finding_account(row: Any, kind: str) -> str:
+    """Get the display account for a finding."""
+    if kind == "service":
+        runas_raw = _get_row_value(row, "start_name", "") or _get_row_value(row, "runas", "") or ""
+    else:
+        runas_raw = _get_row_value(row, "runas", "") or ""
+    resolved_runas = _get_row_value(row, "resolved_runas", "") or ""
+    if resolved_runas and runas_raw.startswith("S-1-"):
+        return f"{resolved_runas} ({runas_raw})"
+    elif resolved_runas:
+        return resolved_runas
+    return runas_raw or "N/A"
+
+
+def _generate_finding_detail(row: Any, kind: str, finding_id: str) -> str:
+    """Generate the expandable detail panel for a finding."""
+    detail_html = f'<div class="finding-detail" id="detail-{finding_id}">'
+    detail_html += '<div class="finding-detail-grid">'
+
+    def _kv(key: str, value: str) -> str:
+        if not value or value in ("N/A", "-", "None"):
+            return ""
+        return f'<span class="detail-key">{html.escape(key)}</span><span class="detail-value">{value}</span>'
+
+    if kind == "task":
+        # Task-specific details
+        command = _get_row_value(row, "command", "") or ""
+        trigger = _get_row_value(row, "triggers", "") or _get_row_value(row, "trigger", "") or ""
+        author = _get_row_value(row, "author", "") or ""
+        date = _get_row_value(row, "date", "") or ""
+        last_run = _get_row_value(row, "last_run", "") or ""
+        return_code = _get_row_value(row, "return_code", "") or ""
+        cred_status = _get_row_value(row, "cred_status", "") or ""
+        cred_valid = _get_row_value(row, "cred_password_valid", None)
+        reason = _get_row_value(row, "reason", "") or ""
+
+        if command:
+            detail_html += _kv("Command", html.escape(str(command)))
+        if trigger:
+            detail_html += _kv("Trigger", html.escape(str(trigger)))
+        if author:
+            detail_html += _kv("Author", html.escape(str(author)))
+        if date:
+            detail_html += _kv("Date", html.escape(str(date)))
+        if last_run:
+            detail_html += _kv("Last Run", html.escape(str(last_run)))
+        if return_code:
+            detail_html += _kv("Return Code", html.escape(str(return_code)))
+        if cred_valid is True:
+            detail_html += _kv("Cred Validation", '<span style="color: var(--success-light);">Valid</span>')
+        elif cred_valid is False:
+            detail_html += _kv("Cred Validation", '<span style="color: var(--failure-light);">Invalid</span>')
+        elif cred_status:
+            detail_html += _kv("Cred Validation", html.escape(str(cred_status)))
+        if reason:
+            detail_html += _kv("Reason", html.escape(str(reason)))
+
+    else:
+        # Service-specific details
+        display_name = _get_row_value(row, "display_name", "") or ""
+        binary_path = _get_row_value(row, "binary_path", "") or ""
+        start_type = _get_row_value(row, "start_type", "") or ""
+        state = _get_row_value(row, "state", "") or ""
+        lsa_secret = _get_row_value(row, "lsa_secret_name", "") or ""
+        reason = _get_row_value(row, "reason", "") or ""
+
+        if display_name:
+            detail_html += _kv("Display Name", html.escape(str(display_name)))
+        if binary_path:
+            detail_html += _kv("Binary Path", html.escape(str(binary_path)))
+        if start_type:
+            detail_html += _kv("Start Type", html.escape(str(start_type)))
+        if state:
+            detail_html += _kv("State", html.escape(str(state)))
+        if lsa_secret:
+            detail_html += _kv("LSA Secret", html.escape(str(lsa_secret)))
+        if reason:
+            detail_html += _kv("Reason", html.escape(str(reason)))
+
+    # Common fields for both kinds
+    decrypted = _get_row_value(row, "decrypted_password", "") or ""
+    is_gmsa = _get_row_value(row, "is_gmsa", False)
+    is_disabled = _get_row_value(row, "is_disabled_account", False)
+    cred_guard = _get_row_value(row, "credential_guard", None)
+
+    if decrypted and decrypted not in ("N/A", "", "-"):
+        detail_html += f'<span class="detail-key">Password</span><span class="detail-value"><span class="password-inline">{html.escape(decrypted)}</span></span>'
+    if is_gmsa:
+        detail_html += '<span class="detail-key">gMSA</span><span class="detail-value"><span class="tag-gmsa">[gMSA]</span></span>'
+    if is_disabled:
+        detail_html += '<span class="detail-key">Account</span><span class="detail-value"><span class="tag-disabled">[DISABLED]</span></span>'
+    if cred_guard is True:
+        detail_html += '<span class="detail-key">Credential Guard</span><span class="detail-value"><span style="color: var(--accent-light);">Enabled</span></span>'
+
+    detail_html += "</div></div>"
+    return detail_html
+
+
+def _generate_unified_findings(findings: list[tuple[SeverityScore, Any, str]]) -> str:
+    """Generate unified findings section with collapsible host blocks containing tasks and services."""
     if not findings:
         return """
         <div class="section">
@@ -1447,61 +1813,72 @@ def _generate_detailed_findings(rows: list[Any], findings: list[tuple[SeveritySc
         </div>
         """
 
-    # Group tasks by host
+    # Group findings by host
     from collections import defaultdict
 
+    severity_order = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
+
     hosts_data: dict[str, dict] = defaultdict(
-        lambda: {"tasks": [], "tier0_count": 0, "stored_count": 0, "decrypted_count": 0}
+        lambda: {
+            "findings": [],
+            "tier0_count": 0,
+            "task_count": 0,
+            "service_count": 0,
+            "decrypted_count": 0,
+            "max_severity": 0,
+        }
     )
 
-    for severity, row in findings:
+    for severity, row, kind in findings:
         host = _get_row_value(row, "host", "Unknown")
-        hosts_data[host]["tasks"].append({"row": row, "severity": severity})
+        hosts_data[host]["findings"].append({"row": row, "severity": severity, "kind": kind})
 
         task_type = str(_get_row_value(row, "type", "")).upper()
         if task_type == "TIER-0":
             hosts_data[host]["tier0_count"] += 1
 
-        creds_hint = str(_get_row_value(row, "credentials_hint", "")).lower()
-        if "stored" in creds_hint:
-            hosts_data[host]["stored_count"] += 1
+        if kind == "task":
+            hosts_data[host]["task_count"] += 1
+        else:
+            hosts_data[host]["service_count"] += 1
 
         decrypted = _get_row_value(row, "decrypted_password", "")
         if decrypted and decrypted not in ("N/A", "", "-"):
             hosts_data[host]["decrypted_count"] += 1
 
-    # Sort hosts by highest severity first
-    def host_sort_key(item):
-        host, data = item
-        max_score = max((t["severity"].score for t in data["tasks"]), default=0)
-        return (-max_score, host.lower())
+        sev_val = severity_order.get(severity.level, 0)
+        if sev_val > hosts_data[host]["max_severity"]:
+            hosts_data[host]["max_severity"] = sev_val
 
-    sorted_hosts = sorted(hosts_data.items(), key=host_sort_key)
+    # Sort hosts by highest severity first, then alphabetically
+    sorted_hosts = sorted(
+        hosts_data.items(),
+        key=lambda item: (-item[1]["max_severity"], item[0].lower()),
+    )
 
     html_output = """
         <div class="section">
             <h2>Detailed Findings</h2>
-            <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.85rem;">Click on a host to expand and view task details.</p>
+            <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.85rem;">Click on a host to expand, then click a finding for full details.</p>
             <div class="host-findings-container">
     """
 
-    for i, (host, data) in enumerate(sorted_hosts):
-        # Create safe ID for HTML
-        host_id = f"host-{re.sub(r'[^a-zA-Z0-9]', '-', host.lower())}"
+    finding_counter = 0
 
-        # First host expanded by default
+    for i, (host, data) in enumerate(sorted_hosts):
+        host_id = f"host-{re.sub(r'[^a-zA-Z0-9]', '-', host.lower())}"
         expanded_class = " expanded" if i == 0 else ""
 
         # Generate badges
         badges_html = ""
         if data["tier0_count"] > 0:
             badges_html += f'<span class="host-badge tier0">{data["tier0_count"]} Tier-0</span>'
-        if data["stored_count"] > 0:
-            badges_html += f'<span class="host-badge stored">{data["stored_count"]} Stored</span>'
+        if data["task_count"] > 0:
+            badges_html += f'<span class="host-badge tasks">{data["task_count"]} Tasks</span>'
+        if data["service_count"] > 0:
+            badges_html += f'<span class="host-badge services">{data["service_count"]} Services</span>'
         if data["decrypted_count"] > 0:
             badges_html += f'<span class="host-badge decrypted">{data["decrypted_count"]} Decrypted</span>'
-        if not badges_html and len(data["tasks"]) > 0:
-            badges_html = f'<span class="host-badge tasks">{len(data["tasks"])} Tasks</span>'
 
         html_output += f"""
                 <div class="host-block{expanded_class}" id="{host_id}">
@@ -1517,57 +1894,50 @@ def _generate_detailed_findings(rows: list[Any], findings: list[tuple[SeveritySc
                     <div class="host-tasks">
         """
 
-        # Sort tasks by severity
-        sorted_tasks = sorted(data["tasks"], key=lambda t: -t["severity"].score)
+        # Sort findings within host by severity descending
+        sorted_findings = sorted(
+            data["findings"],
+            key=lambda f: -severity_order.get(f["severity"].level, 0),
+        )
 
-        for task_data in sorted_tasks:
-            row = task_data["row"]
-            severity = task_data["severity"]
+        for finding_data in sorted_findings:
+            row = finding_data["row"]
+            severity = finding_data["severity"]
+            kind = finding_data["kind"]
+            finding_id = f"finding-{finding_counter}"
+            finding_counter += 1
 
-            task_path = _get_row_value(row, "path", "Unknown") or "Unknown"
-            # Prefer resolved username, show "username (SID)" when available
-            runas_raw = _get_row_value(row, "runas", "") or ""
-            resolved_runas = _get_row_value(row, "resolved_runas", "") or ""
-            if resolved_runas and runas_raw.startswith("S-1-"):
-                runas = f"{resolved_runas} ({runas_raw})"
-            elif resolved_runas:
-                runas = resolved_runas
-            else:
-                runas = runas_raw or "N/A"
+            name = _get_finding_display_name(row, kind)
+            account = _get_finding_account(row, kind)
             task_type = str(_get_row_value(row, "type", "") or "").upper()
-            decrypted = _get_row_value(row, "decrypted_password", "") or ""
 
-            # RunAs styling
-            runas_class = ""
+            # Account styling
+            account_class = ""
             if task_type == "TIER-0":
-                runas_class = " tier0"
+                account_class = " tier0"
             elif task_type == "PRIV":
-                runas_class = " priv"
+                account_class = " priv"
 
-            # Factors list
-            factors_html = "<ul class='factors-list'>"
-            for factor in severity.factors:
-                factors_html += f"<li>{html.escape(factor)}</li>"
-            factors_html += "</ul>"
+            # Factors inline
+            factors_text = ", ".join(severity.factors) if severity.factors else ""
 
-            # Add decrypted password if present
-            password_html = ""
-            if decrypted and decrypted not in ("N/A", "", "-"):
-                password_html = f'<span class="password-reveal">{html.escape(decrypted)}</span>'
+            # Kind badge
+            kind_label = "Task" if kind == "task" else "Service"
 
+            # Finding row
             html_output += f"""
-                        <div class="host-task-row">
+                        <div class="finding-row" id="row-{finding_id}" onclick="toggleFinding('{finding_id}')">
                             <span class="severity-pill {severity.css_class}">{severity.level}</span>
-                            <div>
-                                <div class="task-path">{html.escape(task_path)}</div>
-                                {password_html}
-                            </div>
-                            <span class="runas-account{runas_class}">{html.escape(runas)}</span>
-                            <div>
-                                {factors_html}
-                            </div>
+                            <span class="kind-badge kind-{kind}">{kind_label}</span>
+                            <span class="finding-name">{html.escape(name)}</span>
+                            <span class="finding-account{account_class}">{html.escape(account)}</span>
+                            <span class="finding-factors">{html.escape(factors_text)}</span>
+                            <span class="expand-icon">&#9660;</span>
                         </div>
             """
+
+            # Detail panel
+            html_output += _generate_finding_detail(row, kind, finding_id)
 
         html_output += """
                     </div>
@@ -1626,75 +1996,6 @@ def _generate_footer() -> str:
     """
 
 
-def _generate_service_findings(service_rows: list[Any]) -> str:
-    """Generate HTML section for Windows service findings."""
-    if not service_rows:
-        return ""
-
-    rows_html = []
-    for row in service_rows:
-        row_dict = row.to_dict() if hasattr(row, "to_dict") else row
-        svc_type = row_dict.get("type", "SERVICE")
-        if svc_type in ("FAILURE", "SKIPPED"):
-            continue
-
-        severity_class = {
-            "TIER-0": "severity-critical",
-            "PRIV": "severity-high",
-        }.get(svc_type, "severity-medium")
-
-        account = row_dict.get("start_name", "")
-        resolved = row_dict.get("resolved_runas")
-        display_account = f"{resolved} ({account})" if resolved and account.startswith("S-1-5-") else account
-        gmsa_tag = ' <span style="color: var(--accent-light);">[gMSA]</span>' if row_dict.get("is_gmsa") else ""
-        disabled_tag = ' <span style="color: var(--failure-light);">[DISABLED]</span>' if row_dict.get("is_disabled_account") else ""
-
-        rows_html.append(f"""
-            <tr>
-                <td><span class="{severity_class}" style="padding: 2px 8px; border-radius: 4px;">{html.escape(svc_type)}</span></td>
-                <td>{html.escape(row_dict.get('host', ''))}</td>
-                <td>{html.escape(row_dict.get('service_name', ''))}</td>
-                <td>{html.escape(display_account)}{gmsa_tag}{disabled_tag}</td>
-                <td>{html.escape(row_dict.get('binary_path', '') or '')}</td>
-                <td>{html.escape(row_dict.get('start_type', '') or '')}</td>
-                <td>{html.escape(row_dict.get('state', '') or '')}</td>
-                <td>{html.escape(row_dict.get('reason', '') or '')}</td>
-            </tr>""")
-
-    if not rows_html:
-        return ""
-
-    tier0_count = sum(1 for r in service_rows if (r.to_dict() if hasattr(r, "to_dict") else r).get("type") == "TIER-0")
-    priv_count = sum(1 for r in service_rows if (r.to_dict() if hasattr(r, "to_dict") else r).get("type") == "PRIV")
-    total = len(rows_html)
-
-    return f"""
-    <div class="section">
-        <h2>Windows Service Findings ({total} services)</h2>
-        <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-            Services running as domain accounts with stored credentials (LSA secrets).
-            {f'<strong style="color: var(--failure-light);">{tier0_count} TIER-0</strong>, ' if tier0_count else ''}
-            {f'<strong style="color: orange;">{priv_count} PRIV</strong>, ' if priv_count else ''}
-            {total - tier0_count - priv_count} SERVICE.
-        </p>
-        <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-                <tr style="border-bottom: 1px solid var(--border);">
-                    <th style="padding: 8px; text-align: left;">Type</th>
-                    <th style="padding: 8px; text-align: left;">Host</th>
-                    <th style="padding: 8px; text-align: left;">Service</th>
-                    <th style="padding: 8px; text-align: left;">Run As</th>
-                    <th style="padding: 8px; text-align: left;">Binary Path</th>
-                    <th style="padding: 8px; text-align: left;">Start Type</th>
-                    <th style="padding: 8px; text-align: left;">State</th>
-                    <th style="padding: 8px; text-align: left;">Reason</th>
-                </tr>
-            </thead>
-            <tbody>
-                {''.join(rows_html)}
-            </tbody>
-        </table>
-    </div>"""
 
 
 def generate_html_report(
@@ -1718,16 +2019,15 @@ def generate_html_report(
     if scan_time is None:
         scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Calculate statistics and findings
-    stats, findings = generate_audit_summary(rows)
+    # Calculate statistics and findings (unified tasks + services)
+    stats, findings = generate_audit_summary(rows, service_rows=service_rows)
 
     # Generate sections
     header = _generate_header(stats, scan_time)
     disclaimer = _generate_disclaimer()
     executive_summary = _generate_executive_summary(stats)
     classification_reference = _generate_classification_reference()
-    detailed_findings = _generate_detailed_findings(rows, findings)
-    service_findings = _generate_service_findings(service_rows or [])
+    unified_findings = _generate_unified_findings(findings)
     failures = _generate_failures(stats)
     footer = _generate_footer()
 
@@ -1737,8 +2037,7 @@ def generate_html_report(
         .replace("{{DISCLAIMER}}", disclaimer)
         .replace("{{EXECUTIVE_SUMMARY}}", executive_summary)
         .replace("{{CLASSIFICATION_REFERENCE}}", classification_reference)
-        .replace("{{DETAILED_FINDINGS}}", detailed_findings)
-        .replace("{{SERVICE_FINDINGS}}", service_findings)
+        .replace("{{UNIFIED_FINDINGS}}", unified_findings)
         .replace("{{FAILURES}}", failures)
         .replace("{{FOOTER}}", footer)
     )
