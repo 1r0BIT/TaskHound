@@ -14,11 +14,10 @@ help:
 	@echo ""
 
 install:
-	pip install -r requirements.txt
+	pip install -e .
 
 install-dev:
-	pip install -r requirements.txt
-	pip install -r requirements-dev.txt
+	pip install -e ".[dev]"
 
 test:
 	pytest
@@ -31,7 +30,6 @@ lint:
 
 format:
 	ruff format taskhound/ tests/
-	ruff check --fix taskhound/ tests/
 
 type-check:
 	mypy taskhound/ --ignore-missing-imports

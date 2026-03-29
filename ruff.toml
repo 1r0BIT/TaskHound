@@ -1,8 +1,8 @@
 # Ruff configuration for TaskHound
 # https://docs.astral.sh/ruff/
 
-# Target Python 3.11+ (project minimum)
-target-version = "py311"
+# Target Python 3.12+ (project minimum)
+target-version = "py312"
 
 # Line length
 line-length = 120

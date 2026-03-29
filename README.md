@@ -14,7 +14,7 @@
     <img src="https://img.shields.io/badge/BloodHound-OpenGraph-red.svg?style=flat-square&logo=neo4j" alt="BloodHound OpenGraph">
   </a>
   <a href="https://www.python.org/">
-    <img src="https://img.shields.io/badge/python-3.11+-blue.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+">
+    <img src="https://img.shields.io/badge/python-3.12+-blue.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.12+">
   </a>
   <br>
   <a href="https://deepwiki.com/1r0BIT/TaskHound">
@@ -40,7 +40,7 @@ For the full backstory (and the questionable life choices that led here): [Part 
 git clone https://github.com/1r0BIT/TaskHound.git
 cd TaskHound
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt && pip install .
+pip install -e ".[dev]"
 
 # Basic scan — tasks only
 taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinra.local

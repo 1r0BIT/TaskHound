@@ -10,10 +10,10 @@ TaskHound connects to Windows machines over SMB, pulls scheduled task XMLs, figu
 git clone https://github.com/1r0BIT/TaskHound.git
 cd TaskHound
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt && pip install .
+pip install -e .
 ```
 
-Requires Python 3.11+. If you're on an older version, I'm sorry but you'll need to upgrade. The f-strings alone demand it.
+Requires Python 3.12+. If you're on an older version, you'll need to upgrade.
 
 ## Your First Scan
 
