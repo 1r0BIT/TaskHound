@@ -11,6 +11,7 @@ from taskhound.engine.async_runner import (
     aggregate_results,
 )
 from taskhound.laps import LAPSFailure
+from taskhound.models.service import ServiceRow
 from taskhound.models.task import TaskRow
 
 
@@ -480,3 +481,57 @@ class TestRealisticScenarios:
         # Allow some variance
         assert elapsed >= 0.7, f"Rate limiting too fast: {elapsed}s"
         assert elapsed < 2.0, f"Rate limiting too slow: {elapsed}s"
+
+
+class TestSequentialServiceRows:
+    """Test that _run_sequential populates result.service_rows."""
+
+    def test_sequential_populates_service_rows(self):
+        """Workers=1 (sequential mode) should collect service_rows per target."""
+        config = AsyncConfig(workers=1, show_progress=False)
+        engine = AsyncTaskHound(config)
+
+        def process_with_services(target, all_rows, all_service_rows=None, **kwargs):
+            """Fake process function that appends a ServiceRow."""
+            all_rows.append(TaskRow(host=target, path=f"\\Tasks\\{target}_task"))
+            if all_service_rows is not None:
+                all_service_rows.append(
+                    ServiceRow(host=target, service_name=f"Svc_{target}", start_name="CORP\\svcuser")
+                )
+            return [f"OK: {target}"], None
+
+        results = engine.run(
+            ["host1"],
+            process_with_services,
+            all_service_rows=[],  # This will be overridden per-target by the engine
+        )
+
+        assert len(results) == 1
+        assert results[0].success
+        assert len(results[0].service_rows) == 1, (
+            "Sequential mode should populate result.service_rows"
+        )
+        assert results[0].service_rows[0].service_name == "Svc_host1"
+
+    def test_sequential_service_rows_aggregation(self):
+        """Verify aggregate_results collects service_rows from sequential results."""
+        config = AsyncConfig(workers=1, show_progress=False)
+        engine = AsyncTaskHound(config)
+
+        def process_with_services(target, all_rows, all_service_rows=None, **kwargs):
+            if all_service_rows is not None:
+                all_service_rows.append(
+                    ServiceRow(host=target, service_name=f"Svc_{target}", start_name="CORP\\svc")
+                )
+            return [f"OK: {target}"], None
+
+        results = engine.run(
+            ["host1", "host2", "host3"],
+            process_with_services,
+            all_service_rows=[],
+        )
+
+        all_rows, all_svc_rows, _, _ = aggregate_results(results)
+        assert len(all_svc_rows) == 3, (
+            "aggregate_results should collect all service_rows across targets"
+        )

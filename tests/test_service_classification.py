@@ -1,6 +1,6 @@
 # Tests for service classification and shared privilege detection.
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from taskhound.classification import (
     _check_account_disabled,
@@ -214,3 +214,50 @@ class TestClassifyService:
 
         assert result.task_type == "SERVICE"
         assert row.type == "SERVICE"
+
+
+class TestServiceEnumerationSIDResolution:
+    """Test that perform_service_enumeration passes hv_loader= (not hv=) to format_runas_with_sid_resolution."""
+
+    @patch("taskhound.smb.svcctl.enumerate_services")
+    @patch("taskhound.parsers.service_filter.filter_domain_services")
+    @patch("taskhound.resolver.format_runas_with_sid_resolution")
+    @patch("taskhound.resolver.is_sid", return_value=True)
+    @patch("taskhound.classification.classify_service")
+    def test_passes_hv_loader_kwarg(
+        self, mock_classify, mock_is_sid, mock_format_runas, mock_filter, mock_enum
+    ):
+        """Verify hv_loader= keyword (not hv=) is passed to format_runas_with_sid_resolution."""
+        from taskhound.engine.helpers import perform_service_enumeration
+
+        # Set up mock chain: enumerate -> filter -> one service with a SID account
+        mock_enum.return_value = [{"ServiceName": "TestSvc", "StartName": "S-1-5-21-1234-1001"}]
+        mock_svc = MagicMock()
+        mock_svc.__getitem__ = lambda self, k: {"ServiceName": "TestSvc", "StartName": "S-1-5-21-1234-1001"}[k]
+        mock_filter.return_value = [mock_svc]
+
+        # ServiceRow.from_svcctl returns a row with a SID start_name
+        mock_row = ServiceRow(host="dc01.corp.local", service_name="TestSvc", start_name="S-1-5-21-1234-1001")
+
+        mock_format_runas.return_value = "CORP\\resolved_user"
+        mock_classify.return_value = MagicMock(task_type="SERVICE", should_include=True)
+
+        fake_hv = MagicMock()
+        fake_smb = MagicMock()
+
+        with patch("taskhound.models.service.ServiceRow.from_svcctl", return_value=mock_row):
+            perform_service_enumeration(
+                target="dc01",
+                smb=fake_smb,
+                host="dc01.corp.local",
+                hv=fake_hv,
+                domain="corp.local",
+            )
+
+        # The critical assertion: format_runas_with_sid_resolution must receive hv_loader=, not hv=
+        mock_format_runas.assert_called_once()
+        call_kwargs = mock_format_runas.call_args
+        assert "hv_loader" in call_kwargs.kwargs, (
+            "format_runas_with_sid_resolution should be called with hv_loader= keyword"
+        )
+        assert call_kwargs.kwargs["hv_loader"] is fake_hv
