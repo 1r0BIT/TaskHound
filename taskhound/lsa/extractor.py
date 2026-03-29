@@ -221,6 +221,10 @@ def extract_lsa_secrets(
                 continue
 
             # Parse _SC_GMSA_ secrets (gMSA managed passwords)
+            if "_SC_GMSA_" in secret_str and "_SC_GMSA_DPAPI_" not in secret_str:
+                # Log every _SC_GMSA_ entry for visibility
+                key_prefix = secret_str.split(":")[0] if ":" in secret_str else secret_str[:80]
+                log_debug(f"{host}: Found gMSA LSA entry: {key_prefix}")
             if f"_SC_GMSA_{{{_GMSA_LSA_GUID}}}" in secret_str:
                 gmsa_result = _parse_gmsa_ntlm_from_lsa(secret_str)
                 if gmsa_result:
