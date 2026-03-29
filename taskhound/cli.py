@@ -24,7 +24,6 @@ from .laps import (
     print_laps_summary,
 )
 from .opengraph import generate_opengraph_files
-from .output.bloodhound import upload_opengraph_to_bloodhound
 from .output.summary import print_decrypted_credentials, print_summary_table
 from .output.writer import write_csv, write_json, write_rich_plain
 from .parsers.highvalue import HighValueLoader
@@ -150,66 +149,73 @@ def _handle_opengraph(
             netbios_name=netbios_name,
         )
 
-    # Upload to BloodHound if not disabled and we have credentials
-    if task_og_path:
-        _upload_opengraph(bh_config, task_og_path, opengraph_json_path)
-    if svc_og_path:
-        _upload_opengraph(bh_config, svc_og_path, None)
+    # Upload to BloodHound — single auth session for all files
+    og_files = [f for f in [task_og_path, svc_og_path] if f]
+    _upload_opengraph_batch(bh_config, og_files, opengraph_json_path)
 
 
-def _upload_opengraph(bh_config: Any, opengraph_file: Optional[str], json_data_path: Optional[str] = None) -> None:
-    """Upload OpenGraph data to BloodHound if configured."""
+def _upload_opengraph_batch(
+    bh_config: Any,
+    opengraph_files: list,
+    json_data_path: Optional[str] = None,
+) -> None:
+    """Upload one or more OpenGraph files to BloodHound with a single auth session."""
     import json
 
-    # Read graph stats first
-    node_count = 0
-    edge_count = 0
-    if opengraph_file:
+    from .output.bloodhound import upload_opengraph_batch
+
+    # Gather total stats across all files
+    total_nodes = 0
+    total_edges = 0
+    uploadable = []
+    for og_file in opengraph_files:
         try:
-            with open(opengraph_file) as f:
+            with open(og_file) as f:
                 graph_data = json.load(f)
-            inner_graph = graph_data.get("graph", graph_data)
-            node_count = len(inner_graph.get("nodes", []))
-            edge_count = len(inner_graph.get("edges", []))
+            inner = graph_data.get("graph", graph_data)
+            n = len(inner.get("nodes", []))
+            e = len(inner.get("edges", []))
+            total_nodes += n
+            total_edges += e
+            if n > 0 or e > 0:
+                uploadable.append(og_file)
         except (OSError, json.JSONDecodeError):
-            pass
+            uploadable.append(og_file)  # try anyway
 
-    # Handle no-upload case
-    if bh_config.bh_no_upload:
+    if not uploadable:
+        if opengraph_files:
+            info("Skipping BloodHound upload - no data (0 nodes, 0 edges)")
         print_opengraph_section(
-            json_path=json_data_path or opengraph_file or "",
-            uploaded=False,
-            node_count=node_count,
-            edge_count=edge_count,
-        )
-        return
-
-    if not bh_config.has_credentials():
-        warn("No BloodHound credentials available - skipping upload")
-        print_opengraph_section(
-            json_path=json_data_path or opengraph_file or "",
-            uploaded=False,
-            node_count=node_count,
-            edge_count=edge_count,
-        )
-        return
-
-    if not opengraph_file:
-        warn("No OpenGraph file generated - skipping upload")
-        return
-
-    if node_count == 0 and edge_count == 0:
-        info("Skipping BloodHound upload - no data (0 nodes, 0 edges)")
-        print_opengraph_section(
-            json_path=json_data_path or opengraph_file or "",
+            json_path=json_data_path or (opengraph_files[0] if opengraph_files else ""),
             uploaded=False,
             node_count=0,
             edge_count=0,
         )
         return
 
-    success = upload_opengraph_to_bloodhound(
-        opengraph_file=opengraph_file,
+    # Handle no-upload case
+    if bh_config.bh_no_upload:
+        print_opengraph_section(
+            json_path=json_data_path or uploadable[0],
+            uploaded=False,
+            node_count=total_nodes,
+            edge_count=total_edges,
+        )
+        return
+
+    if not bh_config.has_credentials():
+        warn("No BloodHound credentials available - skipping upload")
+        print_opengraph_section(
+            json_path=json_data_path or uploadable[0],
+            uploaded=False,
+            node_count=total_nodes,
+            edge_count=total_edges,
+        )
+        return
+
+    # Single auth, single icon set, upload all files
+    results = upload_opengraph_batch(
+        files=uploadable,
         bloodhound_url=bh_config.bh_connector,
         username=bh_config.bh_username,
         password=bh_config.bh_password,
@@ -221,14 +227,15 @@ def _upload_opengraph(bh_config: Any, opengraph_file: Optional[str], json_data_p
         icon_color=bh_config.bh_color,
     )
 
+    all_success = all(results)
     print_opengraph_section(
-        json_path=json_data_path or opengraph_file or "",
-        uploaded=success,
-        node_count=node_count,
-        edge_count=edge_count,
+        json_path=json_data_path or uploadable[0],
+        uploaded=all_success,
+        node_count=total_nodes,
+        edge_count=total_edges,
     )
 
-    if not success:
+    if not all_success:
         warn("OpenGraph upload failed - files are still saved locally")
         warn("You can upload manually via BloodHound UI")
 

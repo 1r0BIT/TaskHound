@@ -211,6 +211,46 @@ def upload_opengraph_to_bloodhound(
     return success
 
 
+def upload_opengraph_batch(
+    files: list[str],
+    bloodhound_url: str,
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+    api_key: Optional[str] = None,
+    api_key_id: Optional[str] = None,
+    set_icon: bool = False,
+    force_icon: bool = False,
+    icon_name: str = "clock",
+    icon_color: str = "#8B5CF6",
+) -> list[bool]:
+    """Upload multiple OpenGraph files with a single auth session.
+
+    Authenticates once, sets icons once, then uploads each file sequentially.
+    Returns a list of success booleans, one per file.
+    """
+    bloodhound_url = normalize_bloodhound_connector(bloodhound_url, is_legacy=False)
+
+    if not HAS_REQUESTS:
+        warn("ERROR: 'requests' library not installed")
+        return [False] * len(files)
+
+    authenticator = _authenticate_with_fallback(
+        bloodhound_url, username, password, api_key, api_key_id
+    )
+    if not authenticator:
+        return [False] * len(files)
+
+    if set_icon:
+        _set_custom_icon(authenticator, icon_name, icon_color, force_icon)
+
+    results = []
+    for og_file in files:
+        status("[*] Starting upload, be patient")
+        results.append(_upload_file(authenticator, og_file, "OpenGraph"))
+
+    return results
+
+
 def _authenticate_with_fallback(
     bloodhound_url: str,
     username: Optional[str] = None,
@@ -512,16 +552,20 @@ def _set_custom_icon(
     force: bool,
 ) -> None:
     """
-    Set custom icon for ScheduledTask nodes in BloodHound CE.
+    Set custom icons for ScheduledTask and WindowsService nodes in BloodHound CE.
 
     Args:
         authenticator: Authenticated BloodHound connection helper
-        icon_name: Font Awesome icon name
-        icon_color: Hex color code
+        icon_name: Font Awesome icon name (for ScheduledTask)
+        icon_color: Hex color code (for ScheduledTask)
         force: If True, delete existing icon before creating new one
     """
+    # WindowsService icon settings (cyan gear)
+    svc_icon_name = "gears"
+    svc_icon_color = "#06B6D4"
+
     try:
-        # First, check if icon already exists
+        # First, check if icons already exist
         check_response = authenticator.request("GET", "/api/v2/custom-nodes")
 
         if check_response and check_response.status_code == 200:
@@ -529,47 +573,63 @@ def _set_custom_icon(
             existing = response_data.get("data") if response_data else None
 
             if existing:
+                found_task = False
+                found_svc = False
+                task_matches = False
+                svc_matches = False
+                task_node_id = None
+
                 for node in existing:
-                    # Case-insensitive check for scheduledtask kind
                     kind_name = node.get("kindName", "").lower()
+                    existing_icon = node.get("config", {}).get("icon", {})
+
                     if kind_name == "scheduledtask":
-                        node_id = node.get("id")
-                        existing_icon = node.get("config", {}).get("icon", {})
+                        found_task = True
+                        task_node_id = node.get("id")
+                        task_matches = (
+                            existing_icon.get("name") == icon_name
+                            and existing_icon.get("color") == icon_color
+                        )
+                    elif kind_name == "windowsservice":
+                        found_svc = True
+                        svc_matches = (
+                            existing_icon.get("name") == svc_icon_name
+                            and existing_icon.get("color") == svc_icon_color
+                        )
 
-                        # Check if icon matches what we want
-                        if existing_icon.get("name") == icon_name and existing_icon.get("color") == icon_color:
-                            info(f"scheduledtask icon already configured ({icon_name}, {icon_color})")
-                            return
+                # Both icons exist and match — nothing to do
+                if found_task and task_matches and found_svc and svc_matches:
+                    info(f"Custom icons already configured: ScheduledTask ({icon_name}, {icon_color}), WindowsService ({svc_icon_name}, {svc_icon_color})")
+                    return
 
-                        # Icon exists but is different
-                        if force:
-                            # Delete existing icon configuration
-                            info("scheduledtask icon exists with different settings - forcing update")
-                            info(f"Current: {existing_icon.get('name')} {existing_icon.get('color')}")
-                            info(f"Requested: {icon_name} {icon_color}")
-                            info("Deleting existing icon configuration...")
+                # Log what we found
+                if found_task and task_matches:
+                    info(f"ScheduledTask icon already configured ({icon_name}, {icon_color})")
+                if found_svc and svc_matches:
+                    info(f"WindowsService icon already configured ({svc_icon_name}, {svc_icon_color})")
 
-                            try:
-                                delete_response = authenticator.request("DELETE", f"/api/v2/custom-nodes/{node_id}")
-
-                                if delete_response and delete_response.status_code in [200, 204]:
-                                    good("Deleted existing icon configuration")
-                                else:
-                                    status_code = delete_response.status_code if delete_response else "Unknown"
-                                    warn(f"Failed to delete icon (status {status_code})")
-                                    warn("Will attempt to create new icon anyway...")
-                            except requests.Timeout:
-                                warn(f"Timeout deleting icon (request took longer than {TIMEOUT}s)")
-                                warn("Will attempt to create new icon anyway...")
-                            except Exception as e:
-                                warn(f"Error deleting icon: {e}")
-                                warn("Will attempt to create new icon anyway...")
-                        else:
-                            info("ScheduledTask icon exists but with different settings")
-                            info(f"Current: {existing_icon.get('name')} {existing_icon.get('color')}")
-                            info(f"Requested: {icon_name} {icon_color}")
-                            info("Keeping existing configuration (use --bh-force-icon to override)")
-                            return
+                # If ScheduledTask icon exists but doesn't match, handle force/skip
+                if found_task and not task_matches:
+                    if force:
+                        info("ScheduledTask icon exists with different settings - forcing update")
+                        try:
+                            delete_response = authenticator.request("DELETE", f"/api/v2/custom-nodes/{task_node_id}")
+                            if delete_response and delete_response.status_code in [200, 204]:
+                                good("Deleted existing icon configuration")
+                            else:
+                                status_code = delete_response.status_code if delete_response else "Unknown"
+                                warn(f"Failed to delete icon (status {status_code})")
+                        except requests.Timeout:
+                            warn(f"Timeout deleting icon (request took longer than {TIMEOUT}s)")
+                        except Exception as e:
+                            warn(f"Error deleting icon: {e}")
+                    elif found_svc and svc_matches:
+                        # Task icon different but no force, service already fine
+                        info("ScheduledTask icon has different settings (use --bh-force-icon to override)")
+                        return
+                    else:
+                        info("ScheduledTask icon has different settings (use --bh-force-icon to override)")
+                        # Still need to create WindowsService if missing, so don't return
 
         # Icon doesn't exist (or was just deleted), upload model.json file
         # Find model.json in standard locations
@@ -594,8 +654,9 @@ def _set_custom_icon(
 
         if response and response.status_code in [200, 201]:
             good(f"Custom icon set for 'ScheduledTask': {icon_name} ({icon_color})")
+            good(f"Custom icon set for 'WindowsService': {svc_icon_name} ({svc_icon_color})")
         elif response and response.status_code == 409:
-            info("ScheduledTask icon already configured")
+            info("Custom icons already configured")
         else:
             # Non-critical error - print response for debugging
             status_code = response.status_code if response else "Unknown"
