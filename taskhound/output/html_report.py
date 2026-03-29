@@ -1868,15 +1868,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 detail.classList.toggle('visible');
             }
         }
-        function toggleCredSummary() {
-            const body = document.getElementById('cred-summary-body');
-            const icon = document.getElementById('cred-summary-icon');
-            if (body) {
-                const visible = body.style.display !== 'none';
-                body.style.display = visible ? 'none' : 'block';
-                if (icon) icon.style.transform = visible ? 'rotate(-90deg)' : 'rotate(0deg)';
-            }
-        }
     </script>
 </body>
 </html>"""
@@ -2514,10 +2505,7 @@ def _generate_credential_summary(
 
     summary_html = f"""
         <div class="credential-summary">
-            <div class="host-header" onclick="toggleCredSummary()" style="cursor: pointer;">
-                <h2 style="display: inline;">Credential Summary ({len(cred_rows)})</h2>
-                <span class="expand-icon" id="cred-summary-icon">&#9660;</span>
-            </div>
+            <h2>Credential Summary ({len(cred_rows)})</h2>
     """
 
     if not cred_rows:
@@ -2525,54 +2513,62 @@ def _generate_credential_summary(
         summary_html += "</div>"
         return summary_html
 
-    summary_html += """
-            <div id="cred-summary-body" class="host-tasks" style="display: block;">
-            <table class="credential-table">
-                <thead>
-                    <tr>
-                        <th>Host</th>
-                        <th>Account</th>
-                        <th>Password / Hash</th>
-                        <th>Source</th>
-                        <th>Task / Service</th>
-                        <th>Classification</th>
-                    </tr>
-                </thead>
-                <tbody>
-    """
-
-    current_host = None
+    # Group credentials by host
+    from collections import OrderedDict
+    hosts_creds: OrderedDict[str, list[dict]] = OrderedDict()
     for cr in cred_rows:
-        account_class = ""
-        if cr["classification"] == "TIER-0":
-            account_class = " tier0"
-        elif cr["classification"] == "PRIV":
-            account_class = " priv"
+        hosts_creds.setdefault(cr["host"], []).append(cr)
 
-        # Host separator row for visual grouping
-        host_cell = ""
-        if cr["host"] != current_host:
-            current_host = cr["host"]
-            host_cell = html.escape(cr["host"])
-
+    for host_idx, (host_name, host_creds) in enumerate(hosts_creds.items()):
+        cred_host_id = f"cred-host-{host_idx}"
         summary_html += f"""
-                    <tr>
-                        <td style="font-size: 0.8rem; color: var(--text-muted);">{host_cell}</td>
-                        <td><span class="finding-account{account_class}">{html.escape(cr['account'])}</span></td>
-                        <td class="password-cell">{html.escape(cr['password'])}</td>
-                        <td>{html.escape(cr['source'])}</td>
-                        <td style="font-family: 'Consolas', 'Monaco', monospace; font-size: 0.8rem;">{html.escape(cr['name'])}</td>
-                        <td>{html.escape(cr['classification'])}</td>
-                    </tr>
+            <div class="host-block" style="margin-bottom: 0.75rem;">
+                <div class="host-header" onclick="toggleHost('{cred_host_id}')" style="cursor: pointer; padding: 0.6rem 1rem;">
+                    <div class="host-header-left">
+                        <h4 style="margin: 0; font-size: 0.9rem;">{html.escape(host_name)}</h4>
+                        <span class="host-badge stored">{len(host_creds)} credential{'s' if len(host_creds) != 1 else ''}</span>
+                    </div>
+                    <span class="expand-icon">&#9660;</span>
+                </div>
+                <div class="host-tasks" id="{cred_host_id}">
+                    <table class="credential-table" style="margin: 0;">
+                        <thead>
+                            <tr>
+                                <th>Account</th>
+                                <th>Password / Hash</th>
+                                <th>Source</th>
+                                <th>Task / Service</th>
+                                <th>Classification</th>
+                            </tr>
+                        </thead>
+                        <tbody>
         """
 
-    summary_html += """
-                </tbody>
-            </table>
-            </div>
-        </div>
-    """
+        for cr in host_creds:
+            account_class = ""
+            if cr["classification"] == "TIER-0":
+                account_class = " tier0"
+            elif cr["classification"] == "PRIV":
+                account_class = " priv"
 
+            summary_html += f"""
+                            <tr>
+                                <td><span class="finding-account{account_class}">{html.escape(cr['account'])}</span></td>
+                                <td class="password-cell">{html.escape(cr['password'])}</td>
+                                <td>{html.escape(cr['source'])}</td>
+                                <td style="font-family: 'Consolas', 'Monaco', monospace; font-size: 0.8rem;">{html.escape(cr['name'])}</td>
+                                <td>{html.escape(cr['classification'])}</td>
+                            </tr>
+            """
+
+        summary_html += """
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        """
+
+    summary_html += "</div>"
     return summary_html
 
 
