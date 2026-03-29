@@ -413,7 +413,7 @@ def _format_gmsa_hint(is_gmsa: bool, is_msa: bool, heuristic: bool = False) -> s
         account_type = "Service Account"
 
     hint = f"{account_type} - credentials stored in LSA secrets, not DPAPI."
-    hint += " Consider LSA dump if you have SYSTEM access."
+    hint += " Run without --no-lsa to extract NTLM hash automatically."
 
     if heuristic:
         hint += " (detected by $ suffix heuristic)"
@@ -609,20 +609,22 @@ def format_block(
         rows.append(("Decrypted Pwd", decrypted_password))
 
     # gMSA hint - uses multi-tier detection: Cache → BloodHound → LDAP → Heuristic
-    gmsa_hint = _check_gmsa_account(
-        display_runas,
-        resolved_username,
-        bh_connector=bh_connector,
-        cache_manager=cache_manager,
-        no_ldap=no_ldap,
-        domain=ldap_domain or domain,
-        dc_ip=dc_ip,
-        ldap_user=ldap_user or username,
-        ldap_password=ldap_password or password,
-        ldap_hashes=ldap_hashes or hashes,
-    )
-    if gmsa_hint:
-        rows.append(("gMSA Hint", gmsa_hint))
+    # Suppress if we already extracted the NTLM hash (hint is redundant)
+    if not decrypted_password:
+        gmsa_hint = _check_gmsa_account(
+            display_runas,
+            resolved_username,
+            bh_connector=bh_connector,
+            cache_manager=cache_manager,
+            no_ldap=no_ldap,
+            domain=ldap_domain or domain,
+            dc_ip=dc_ip,
+            ldap_user=ldap_user or username,
+            ldap_password=ldap_password or password,
+            ldap_hashes=ldap_hashes or hashes,
+        )
+        if gmsa_hint:
+            rows.append(("gMSA Hint", gmsa_hint))
 
     # Credential Guard status (shown when credguard_detect is enabled, which is default)
     if credential_guard is not None:

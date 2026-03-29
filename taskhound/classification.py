@@ -456,7 +456,7 @@ def classify_service(
         row.is_disabled_account = True
 
     if row.is_gmsa:
-        gmsa_note = "[gMSA] Managed password — check LSA dump results for NTLM hash"
+        gmsa_note = "[gMSA] Managed password — NTLM hash extracted from LSA if available"
         reason = f"{reason} {gmsa_note}" if reason else gmsa_note
 
     password_analysis = _get_password_analysis_from_cache(account, pwd_cache, hv)
