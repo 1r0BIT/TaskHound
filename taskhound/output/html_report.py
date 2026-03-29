@@ -2505,6 +2505,7 @@ def _generate_credential_summary(
     summary_html = f"""
         <div class="credential-summary">
             <h2>Credential Summary ({len(cred_rows)})</h2>
+            <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.85rem;">Click on a host to expand and view extracted credentials.</p>
     """
 
     if not cred_rows:
