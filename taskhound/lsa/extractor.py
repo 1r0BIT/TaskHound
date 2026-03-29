@@ -17,7 +17,7 @@
 import binascii
 import contextlib
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Set
+from typing import Any
 
 from impacket.structure import Structure
 
@@ -67,7 +67,7 @@ class MSDS_MANAGEDPASSWORD_BLOB(Structure):  # noqa: N801 — matches MS-ADTS na
 _GMSA_LSA_GUID = "84A78B8C-56EE-465b-8496-FFB35A1B52A7"
 
 
-def _parse_gmsa_ntlm_from_lsa(secret_str: str) -> Optional[tuple]:
+def _parse_gmsa_ntlm_from_lsa(secret_str: str) -> tuple | None:
     """Parse a _SC_GMSA_ LSA secret string into (gmsa_id, ntlm_hash).
 
     The secret format from regsecrets callback is:
@@ -134,19 +134,19 @@ class GMSACredential:
 class LSAExtractionResult:
     """Complete result from LSA secret extraction."""
 
-    service_credentials: List[ServiceCredential] = field(default_factory=list)
-    gmsa_credentials: List[GMSACredential] = field(default_factory=list)
-    dpapi_userkey: Optional[str] = None  # hex string, e.g. "0x1a2b3c..."
-    dpapi_machinekey: Optional[str] = None  # hex string
-    raw_secrets: List[str] = field(default_factory=list)  # all captured secret strings
+    service_credentials: list[ServiceCredential] = field(default_factory=list)
+    gmsa_credentials: list[GMSACredential] = field(default_factory=list)
+    dpapi_userkey: str | None = None  # hex string, e.g. "0x1a2b3c..."
+    dpapi_machinekey: str | None = None  # hex string
+    raw_secrets: list[str] = field(default_factory=list)  # all captured secret strings
 
 
 def extract_lsa_secrets(
     smb: Any,
     host: str,
-    service_names: Optional[Set[str]] = None,
+    service_names: set[str] | None = None,
     kerberos: bool = False,
-    dc_host: Optional[str] = None,
+    dc_host: str | None = None,
 ) -> LSAExtractionResult:
     """
     Extract LSA secrets via registry-only approach (no disk writes).
@@ -174,7 +174,7 @@ def extract_lsa_secrets(
     remote_ops = None
     lsa_secrets = None
     result = LSAExtractionResult()
-    captured: List[tuple] = []
+    captured: list[tuple] = []
 
     def _callback(secret_type, secret: str) -> None:
         """Capture all LSA secrets via callback."""
@@ -261,7 +261,7 @@ def extract_lsa_secrets(
 
         # Match credentials to service names via SCM lookup
         if service_names and hasattr(remote_ops, "getServiceAccount"):
-            matched: List[ServiceCredential] = []
+            matched: list[ServiceCredential] = []
             for svc_name in service_names:
                 try:
                     svc_account = remote_ops.getServiceAccount(svc_name)
@@ -315,10 +315,10 @@ def extract_lsa_secrets(
 def extract_service_credentials(
     smb: Any,
     host: str,
-    service_names: Optional[Set[str]] = None,
+    service_names: set[str] | None = None,
     kerberos: bool = False,
-    dc_host: Optional[str] = None,
-) -> List[ServiceCredential]:
+    dc_host: str | None = None,
+) -> list[ServiceCredential]:
     """Extract service credentials only (legacy wrapper)."""
     result = extract_lsa_secrets(smb, host, service_names, kerberos, dc_host)
     return result.service_credentials

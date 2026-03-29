@@ -7,7 +7,7 @@
 
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class ServiceType(str, Enum):
@@ -85,33 +85,33 @@ class ServiceRow:
     service_name: str
 
     # Connection info
-    target_ip: Optional[str] = None
-    computer_sid: Optional[str] = None
+    target_ip: str | None = None
+    computer_sid: str | None = None
 
     # Classification
     type: str = field(default=ServiceType.SERVICE.value)
-    reason: Optional[str] = None
-    password_analysis: Optional[str] = None
+    reason: str | None = None
+    password_analysis: str | None = None
 
     # Service identity
-    start_name: Optional[str] = None
-    resolved_runas: Optional[str] = None
-    display_name: Optional[str] = None
-    binary_path: Optional[str] = None
-    start_type: Optional[str] = None
-    service_type: Optional[str] = None
-    state: Optional[str] = None
+    start_name: str | None = None
+    resolved_runas: str | None = None
+    display_name: str | None = None
+    binary_path: str | None = None
+    start_type: str | None = None
+    service_type: str | None = None
+    state: str | None = None
 
     # Account flags
     is_gmsa: bool = False
     is_disabled_account: bool = False
 
     # Credential state
-    credential_guard: Optional[bool] = None
-    decrypted_password: Optional[str] = None
-    lsa_secret_name: Optional[str] = None
+    credential_guard: bool | None = None
+    decrypted_password: str | None = None
+    lsa_secret_name: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON/CSV export."""
         return asdict(self)
 
@@ -119,9 +119,9 @@ class ServiceRow:
     def from_svcctl(
         cls,
         host: str,
-        svc: Dict[str, Any],
-        target_ip: Optional[str] = None,
-        computer_sid: Optional[str] = None,
+        svc: dict[str, Any],
+        target_ip: str | None = None,
+        computer_sid: str | None = None,
     ) -> "ServiceRow":
         """
         Create a ServiceRow from SVCCTL RPC enumeration data.
@@ -157,7 +157,7 @@ class ServiceRow:
         cls,
         host: str,
         reason: str,
-        target_ip: Optional[str] = None,
+        target_ip: str | None = None,
     ) -> "ServiceRow":
         """Create a FAILURE row for hosts that couldn't be processed."""
         return cls(
@@ -173,7 +173,7 @@ class ServiceRow:
         cls,
         host: str,
         reason: str,
-        target_ip: Optional[str] = None,
+        target_ip: str | None = None,
     ) -> "ServiceRow":
         """Create a SKIPPED row for dual-homed hosts already processed."""
         return cls(

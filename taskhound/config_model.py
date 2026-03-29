@@ -1,7 +1,6 @@
 """Configuration model for TaskHound BloodHound integration."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -20,12 +19,12 @@ class BloodHoundConfig:
     bh_no_upload: bool = False
 
     # BloodHound connection
-    bh_connector: Optional[str] = None
-    bh_username: Optional[str] = None
-    bh_password: Optional[str] = None
-    bh_api_key: Optional[str] = None  # API key for BHCE HMAC authentication
-    bh_api_key_id: Optional[str] = None  # API key ID for BHCE HMAC authentication
-    bh_type: Optional[str] = None  # 'bhce' or 'legacy'
+    bh_connector: str | None = None
+    bh_username: str | None = None
+    bh_password: str | None = None
+    bh_api_key: str | None = None  # API key for BHCE HMAC authentication
+    bh_api_key_id: str | None = None  # API key ID for BHCE HMAC authentication
+    bh_type: str | None = None  # 'bhce' or 'legacy'
 
     # Icon configuration (icon is always set on upload, force_icon overrides existing)
     bh_force_icon: bool = False
@@ -34,7 +33,7 @@ class BloodHoundConfig:
 
     # Live connection (legacy)
     bh_live: bool = False
-    bh_save: Optional[str] = None
+    bh_save: str | None = None
 
     @classmethod
     def from_args_and_config(cls, args):

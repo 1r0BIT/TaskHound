@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from rich.table import Table
 
@@ -15,8 +15,8 @@ from . import COLORS
 def print_task_table(
     kind: str,
     rel_path: str,
-    rows: List[tuple],
-    hostname: Optional[str] = None,
+    rows: list[tuple],
+    hostname: str | None = None,
 ) -> None:
     """
     Print a task as a Rich table with colored borders.
@@ -97,7 +97,7 @@ def print_task_table(
     console.print(table)
 
 
-def format_trigger_info(meta: Dict[str, Optional[str]]) -> Optional[str]:
+def format_trigger_info(meta: dict[str, str | None]) -> str | None:
     """Format trigger information for display"""
     trigger_type = meta.get("trigger_type")
     if not trigger_type:
@@ -175,10 +175,10 @@ def _query_gmsa_ldap(
     username: str,
     domain: str,
     dc_ip: str,
-    ldap_user: Optional[str] = None,
-    ldap_password: Optional[str] = None,
-    ldap_hashes: Optional[str] = None,
-) -> Optional[Dict[str, bool]]:
+    ldap_user: str | None = None,
+    ldap_password: str | None = None,
+    ldap_hashes: str | None = None,
+) -> dict[str, bool] | None:
     """
     Query LDAP directly to check if an account is a gMSA or MSA.
 
@@ -260,16 +260,16 @@ def _query_gmsa_ldap(
 
 def _check_gmsa_account(
     display_runas: str,
-    resolved_username: Optional[str] = None,
+    resolved_username: str | None = None,
     bh_connector=None,
     cache_manager=None,
     no_ldap: bool = False,
-    domain: Optional[str] = None,
-    dc_ip: Optional[str] = None,
-    ldap_user: Optional[str] = None,
-    ldap_password: Optional[str] = None,
-    ldap_hashes: Optional[str] = None,
-) -> Optional[str]:
+    domain: str | None = None,
+    dc_ip: str | None = None,
+    ldap_user: str | None = None,
+    ldap_password: str | None = None,
+    ldap_hashes: str | None = None,
+) -> str | None:
     """
     Check if the runas account is a gMSA (Group Managed Service Account).
 
@@ -428,32 +428,32 @@ def format_block(
     what: str,
     author: str,
     date: str,
-    extra_reason: Optional[str] = None,
-    password_analysis: Optional[str] = None,
-    hv: Optional[HighValueLoader] = None,
+    extra_reason: str | None = None,
+    password_analysis: str | None = None,
+    hv: HighValueLoader | None = None,
     bh_connector=None,
     smb_connection=None,
     no_ldap: bool = False,
-    domain: Optional[str] = None,
-    dc_ip: Optional[str] = None,
-    hostname: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    domain: str | None = None,
+    dc_ip: str | None = None,
+    hostname: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    enabled: Optional[str] = None,
-    ldap_domain: Optional[str] = None,
-    ldap_user: Optional[str] = None,
-    ldap_password: Optional[str] = None,
-    ldap_hashes: Optional[str] = None,
-    meta: Optional[Dict[str, Optional[str]]] = None,
-    decrypted_creds: Optional[List] = None,
+    enabled: str | None = None,
+    ldap_domain: str | None = None,
+    ldap_user: str | None = None,
+    ldap_password: str | None = None,
+    ldap_hashes: str | None = None,
+    meta: dict[str, str | None] | None = None,
+    decrypted_creds: list | None = None,
     concise: bool = False,
-    cred_validation: Optional[Dict[str, Any]] = None,
-    resolved_runas: Optional[str] = None,
-    credential_guard: Optional[bool] = None,
+    cred_validation: dict[str, Any] | None = None,
+    resolved_runas: str | None = None,
+    credential_guard: bool | None = None,
     cache_manager=None,
-) -> List[str]:
+) -> list[str]:
     """
     Format a task block for CLI output.
 
@@ -520,7 +520,7 @@ def format_block(
         return [line]
 
     # Build rows for table output: list of (label, value) tuples
-    rows: List[tuple] = []
+    rows: list[tuple] = []
 
     # Add task state information as first field
     if enabled is not None:
@@ -658,11 +658,11 @@ def format_block(
 
 
 def _find_decrypted_password(
-    decrypted_creds: Optional[List],
+    decrypted_creds: list | None,
     runas: str,
     display_runas: str,
-    resolved_username: Optional[str],
-) -> Optional[str]:
+    resolved_username: str | None,
+) -> str | None:
     """Find decrypted password matching the runas user."""
     if not decrypted_creds:
         return None
@@ -675,19 +675,19 @@ def _find_decrypted_password(
 def format_service_block(
     kind: str,
     service_name: str,
-    display_name: Optional[str] = None,
-    start_name: Optional[str] = None,
-    binary_path: Optional[str] = None,
-    start_type: Optional[str] = None,
-    state: Optional[str] = None,
+    display_name: str | None = None,
+    start_name: str | None = None,
+    binary_path: str | None = None,
+    start_type: str | None = None,
+    state: str | None = None,
     is_gmsa: bool = False,
-    hostname: Optional[str] = None,
-    reason: Optional[str] = None,
-    password_analysis: Optional[str] = None,
-    decrypted_password: Optional[str] = None,
-    resolved_runas: Optional[str] = None,
-    credential_guard: Optional[bool] = None,
-) -> List[str]:
+    hostname: str | None = None,
+    reason: str | None = None,
+    password_analysis: str | None = None,
+    decrypted_password: str | None = None,
+    resolved_runas: str | None = None,
+    credential_guard: bool | None = None,
+) -> list[str]:
     """
     Format a Windows service finding for rich console output.
 
@@ -695,7 +695,7 @@ def format_service_block(
     format_block pattern used by process_target).
     """
     # Build row tuples for print_service_table
-    rows: List[tuple] = []
+    rows: list[tuple] = []
 
     if display_name:
         rows.append(("Display Name", display_name))
@@ -736,8 +736,8 @@ def format_service_block(
 def print_service_table(
     kind: str,
     service_name: str,
-    rows: List[tuple],
-    hostname: Optional[str] = None,
+    rows: list[tuple],
+    hostname: str | None = None,
 ) -> None:
     """Print a service finding as a Rich table with colored borders."""
     if not (log_utils._VERBOSE or log_utils._DEBUG):

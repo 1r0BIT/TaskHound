@@ -8,7 +8,6 @@ import contextlib
 import json
 import time
 from pathlib import Path
-from typing import Optional
 
 from ..utils.bh_auth import BloodHoundAuthenticator
 from ..utils.console import spinner
@@ -155,10 +154,10 @@ def find_model_json() -> Path:
 def upload_opengraph_to_bloodhound(
     opengraph_file: str,
     bloodhound_url: str,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    api_key: Optional[str] = None,
-    api_key_id: Optional[str] = None,
+    username: str | None = None,
+    password: str | None = None,
+    api_key: str | None = None,
+    api_key_id: str | None = None,
     set_icon: bool = False,
     force_icon: bool = False,
     icon_name: str = "clock",
@@ -214,10 +213,10 @@ def upload_opengraph_to_bloodhound(
 def upload_opengraph_batch(
     files: list[str],
     bloodhound_url: str,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    api_key: Optional[str] = None,
-    api_key_id: Optional[str] = None,
+    username: str | None = None,
+    password: str | None = None,
+    api_key: str | None = None,
+    api_key_id: str | None = None,
     set_icon: bool = False,
     force_icon: bool = False,
     icon_name: str = "clock",
@@ -253,11 +252,11 @@ def upload_opengraph_batch(
 
 def _authenticate_with_fallback(
     bloodhound_url: str,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    api_key: Optional[str] = None,
-    api_key_id: Optional[str] = None,
-) -> Optional[BloodHoundAuthenticator]:
+    username: str | None = None,
+    password: str | None = None,
+    api_key: str | None = None,
+    api_key_id: str | None = None,
+) -> BloodHoundAuthenticator | None:
     """
     Authenticate to BloodHound with automatic protocol fallback.
 
@@ -295,11 +294,11 @@ def _authenticate_with_fallback(
 
 def _try_authenticate(
     url: str,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    api_key: Optional[str] = None,
-    api_key_id: Optional[str] = None,
-) -> Optional[BloodHoundAuthenticator]:
+    username: str | None = None,
+    password: str | None = None,
+    api_key: str | None = None,
+    api_key_id: str | None = None,
+) -> BloodHoundAuthenticator | None:
     """
     Try to authenticate to BloodHound at a specific URL.
 
@@ -333,7 +332,7 @@ def _try_authenticate(
         return None
 
 
-def _get_alternate_protocol_uri(uri: str) -> Optional[str]:
+def _get_alternate_protocol_uri(uri: str) -> str | None:
     """
     Get the alternate protocol URI (http <-> https).
 

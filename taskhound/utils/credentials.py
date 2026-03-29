@@ -3,7 +3,6 @@
 # This module provides shared credential matching utilities used across
 # TaskHound modules (printer, online engine, etc.)
 
-from typing import List, Optional
 
 from ..dpapi.decryptor import ScheduledTaskCredential
 
@@ -56,9 +55,9 @@ def match_username(username1: str, username2: str) -> bool:
 
 def find_password_for_user(
     username: str,
-    decrypted_creds: List[ScheduledTaskCredential],
-    resolved_username: Optional[str] = None,
-) -> Optional[str]:
+    decrypted_creds: list[ScheduledTaskCredential],
+    resolved_username: str | None = None,
+) -> str | None:
     """
     Find password for a username from list of decrypted credentials.
 

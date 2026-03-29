@@ -1,6 +1,5 @@
 # LAPS LDAP Query Functions
 import contextlib
-from typing import Optional
 
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
@@ -26,11 +25,11 @@ def get_laps_passwords(
     dc_ip: str,
     domain: str,
     username: str,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    laps_user_override: Optional[str] = None,
-    dc_host: Optional[str] = None,
+    laps_user_override: str | None = None,
+    dc_host: str | None = None,
     use_cache: bool = True,
 ) -> LAPSCache:
     """
@@ -90,11 +89,11 @@ def query_laps_passwords(
     dc_ip: str,
     domain: str,
     username: str,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    laps_user_override: Optional[str] = None,
-    dc_host: Optional[str] = None,
+    laps_user_override: str | None = None,
+    dc_host: str | None = None,
     save_to_cache: bool = True,
     decrypt_encrypted: bool = True,
 ) -> LAPSCache:
@@ -251,9 +250,9 @@ def query_laps_passwords(
 
 def _parse_ldap_entry(
     entry: ldapasn1_impacket.SearchResultEntry,
-    laps_user_override: Optional[str],
-    decrypt_ctx: Optional[LAPSDecryptionContext] = None,
-) -> Optional[LAPSCredential]:
+    laps_user_override: str | None,
+    decrypt_ctx: LAPSDecryptionContext | None = None,
+) -> LAPSCredential | None:
     """
     Parse a single LDAP search result entry into a LAPSCredential.
 

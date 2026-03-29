@@ -10,7 +10,7 @@
 #
 
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ..utils.logging import debug, status
 
@@ -19,13 +19,13 @@ def resolve_name_to_sid(
     name: str,
     domain: str,
     is_computer: bool = False,
-    hv_loader: Optional[Any] = None,
-    dc_ip: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    hv_loader: Any | None = None,
+    dc_ip: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-) -> Optional[str]:
+) -> str | None:
     """
     Resolve a username or computer name to its SID.
 
@@ -106,19 +106,19 @@ def resolve_name_to_sid(
 
 
 def prefetch_computer_sids(
-    targets: List[str],
+    targets: list[str],
     domain: str,
-    hv_loader: Optional[Any] = None,
-    dc_ip: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    hv_loader: Any | None = None,
+    dc_ip: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    ldap_domain: Optional[str] = None,
-    ldap_user: Optional[str] = None,
-    ldap_password: Optional[str] = None,
-    ldap_hashes: Optional[str] = None,
-) -> Dict[str, str]:
+    ldap_domain: str | None = None,
+    ldap_user: str | None = None,
+    ldap_password: str | None = None,
+    ldap_hashes: str | None = None,
+) -> dict[str, str]:
     """
     Batch pre-fetch computer SIDs for known targets before scanning begins.
 
@@ -155,8 +155,8 @@ def prefetch_computer_sids(
     if not targets:
         return {}
 
-    resolved: Dict[str, str] = {}
-    remaining: List[str] = []
+    resolved: dict[str, str] = {}
+    remaining: list[str] = []
     cache = get_cache()
 
     # Normalize all target names

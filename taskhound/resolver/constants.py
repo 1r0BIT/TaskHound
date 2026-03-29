@@ -6,7 +6,6 @@
 import re
 import struct
 from functools import lru_cache
-from typing import Optional
 
 from ..utils.logging import debug
 
@@ -89,7 +88,7 @@ def is_sid(value: str) -> bool:
     return bool(_SID_PATTERN.match(value.strip()))
 
 
-def get_domain_sid_prefix(sid: str) -> Optional[str]:
+def get_domain_sid_prefix(sid: str) -> str | None:
     """
     Extract domain SID prefix from a full SID.
 
@@ -114,7 +113,7 @@ def get_domain_sid_prefix(sid: str) -> Optional[str]:
     return "-".join(parts[:-1])
 
 
-def resolve_special_sid_pattern(sid: str) -> Optional[str]:
+def resolve_special_sid_pattern(sid: str) -> str | None:
     """
     Resolve special SID patterns that can't be enumerated statically.
 
@@ -144,7 +143,7 @@ def resolve_special_sid_pattern(sid: str) -> Optional[str]:
     return None
 
 
-def resolve_rid_to_name(sid: str, domain_prefix: Optional[str] = None) -> Optional[str]:
+def resolve_rid_to_name(sid: str, domain_prefix: str | None = None) -> str | None:
     """
     Resolve a SID to a name using well-known RIDs.
 
@@ -195,7 +194,7 @@ def resolve_rid_to_name(sid: str, domain_prefix: Optional[str] = None) -> Option
 # SID Binary Conversion
 # =============================================================================
 
-def sid_to_binary(sid_string: str) -> Optional[bytes]:
+def sid_to_binary(sid_string: str) -> bytes | None:
     """
     Convert a SID string (S-1-5-21-...) to binary format for LDAP queries.
 
@@ -233,7 +232,7 @@ def sid_to_binary(sid_string: str) -> Optional[bytes]:
         return None
 
 
-def binary_to_sid(binary_sid: bytes) -> Optional[str]:
+def binary_to_sid(binary_sid: bytes) -> str | None:
     """
     Convert a binary SID (from LDAP objectSid attribute) to string format.
 

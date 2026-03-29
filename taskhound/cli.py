@@ -2,7 +2,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from rich.panel import Panel
 from rich.prompt import Confirm
@@ -43,10 +43,10 @@ from .utils.network import preflight_credential_check, verify_ldap_connection
 
 def _handle_opengraph(
     args: Any,
-    all_rows: List[Dict],
-    opengraph_json_path: Optional[str],
+    all_rows: list[dict],
+    opengraph_json_path: str | None,
     opengraph_json_overwrites: bool,
-    service_rows: Optional[List] = None,
+    service_rows: list | None = None,
 ) -> None:
     """Handle BloodHound OpenGraph generation and upload."""
     from .config_model import BloodHoundConfig
@@ -157,7 +157,7 @@ def _handle_opengraph(
 def _upload_opengraph_batch(
     bh_config: Any,
     opengraph_files: list,
-    json_data_path: Optional[str] = None,
+    json_data_path: str | None = None,
 ) -> None:
     """Upload one or more OpenGraph files to BloodHound with a single auth session."""
     import json
@@ -242,12 +242,12 @@ def _upload_opengraph_batch(
 
 def _handle_exports(
     args: Any,
-    all_rows: List[Dict],
+    all_rows: list[dict],
     hv_loaded: bool,
-    laps_cache: Optional[LAPSCache],
+    laps_cache: LAPSCache | None,
     laps_successes: int,
-    laps_failures: List[LAPSFailure],
-    service_rows: Optional[List] = None,
+    laps_failures: list[LAPSFailure],
+    service_rows: list | None = None,
 ) -> tuple:
     """Handle all export formats and summary output.
 
@@ -337,7 +337,7 @@ def _handle_exports(
     return opengraph_json_path, opengraph_json_overwrites
 
 
-def _auto_discover_targets(args: Any, bh_config: Any) -> List[str]:
+def _auto_discover_targets(args: Any, bh_config: Any) -> list[str]:
     """
     Auto-discover computer targets from BloodHound or LDAP.
 
@@ -440,9 +440,9 @@ def _enumerate_from_bloodhound(
     include_dcs: bool,
     include_disabled: bool,
     stale_threshold: int,
-    filter_preset: Optional[str],
-    ldap_filter_raw: Optional[str],
-) -> tuple[List[str], Optional[str]]:
+    filter_preset: str | None,
+    ldap_filter_raw: str | None,
+) -> tuple[list[str], str | None]:
     """
     Enumerate computers from BloodHound CE.
 
@@ -548,8 +548,8 @@ def _enumerate_from_ldap(
     include_dcs: bool,
     include_disabled: bool,
     stale_threshold: int,
-    ldap_filter_raw: Optional[str],
-) -> tuple[List[str], Optional[str]]:
+    ldap_filter_raw: str | None,
+) -> tuple[list[str], str | None]:
     """
     Enumerate computers from LDAP with filtering.
 
@@ -834,8 +834,8 @@ This scan involves:
         )
 
     # Initialize LAPS if requested (online mode only)
-    laps_cache: Optional[LAPSCache] = None
-    laps_failures: List[LAPSFailure] = []
+    laps_cache: LAPSCache | None = None
+    laps_failures: list[LAPSFailure] = []
     laps_successes: int = 0
 
     if getattr(args, "laps", False) and not args.offline:
@@ -878,7 +878,7 @@ This scan involves:
             sys.exit(1)
 
     # Process based on mode
-    all_rows: List[Dict] = []
+    all_rows: list[dict] = []
     all_service_rows: list = []
 
     if getattr(args, "offline_disk", None):

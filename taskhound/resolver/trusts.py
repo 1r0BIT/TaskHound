@@ -4,7 +4,7 @@
 # if SIDs are from foreign domains, and classifying trust types.
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Set, Union
+from typing import Union
 
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
@@ -34,7 +34,7 @@ class TrustInfo:
     fqdn: str  # Fully qualified domain name (e.g., "TRUSTEDFOREST.LOCAL")
     is_intra_forest: bool  # True if trust is within the same forest (GC will work)
     trust_attributes: int = 0  # Raw trustAttributes value from AD
-    netbios_name: Optional[str] = None  # NETBIOS domain name (e.g., "YOURCOMPANY")
+    netbios_name: str | None = None  # NETBIOS domain name (e.g., "YOURCOMPANY")
 
     def __str__(self) -> str:
         trust_type = "intra-forest" if self.is_intra_forest else "external"
@@ -48,7 +48,7 @@ TrustData = Union[str, TrustInfo]
 # Track domain prefixes known to be external trusts (different forest)
 # GC lookups are useless for these - they're not in the same forest
 # This is populated at runtime when GC lookups fail for foreign SIDs
-_external_trust_prefixes: Set[str] = set()
+_external_trust_prefixes: set[str] = set()
 
 
 def mark_as_external_trust(sid_prefix: str) -> None:
@@ -80,7 +80,7 @@ def is_known_external_trust(sid_prefix: str) -> bool:
     return sid_prefix in _external_trust_prefixes
 
 
-def is_foreign_domain_sid(sid: str, local_domain_sid_prefix: Optional[str]) -> bool:
+def is_foreign_domain_sid(sid: str, local_domain_sid_prefix: str | None) -> bool:
     """
     Check if a SID belongs to a foreign (trusted) domain.
 
@@ -101,7 +101,7 @@ def is_foreign_domain_sid(sid: str, local_domain_sid_prefix: Optional[str]) -> b
     return sid_prefix != local_domain_sid_prefix
 
 
-def is_unknown_domain_sid(sid: str, known_domain_prefixes: Dict[str, TrustData]) -> bool:
+def is_unknown_domain_sid(sid: str, known_domain_prefixes: dict[str, TrustData]) -> bool:
     """
     Check if a SID is from an unknown domain (not in our known set).
 
@@ -142,7 +142,7 @@ def is_external_trust(trust_data: TrustData) -> bool:
     return False
 
 
-def resolve_unknown_sid_to_local_name(sid: str) -> Optional[str]:
+def resolve_unknown_sid_to_local_name(sid: str) -> str | None:
     """
     Attempt to resolve an unknown domain SID to a local account name.
 
@@ -182,7 +182,7 @@ def resolve_unknown_sid_to_local_name(sid: str) -> Optional[str]:
         return None
 
 
-def resolve_trust_sid_to_name(sid: str, trust_fqdn: str) -> Optional[str]:
+def resolve_trust_sid_to_name(sid: str, trust_fqdn: str) -> str | None:
     """
     Resolve a SID from a known trust domain to a displayable name.
 
@@ -227,12 +227,12 @@ def resolve_trust_sid_to_name(sid: str, trust_fqdn: str) -> Optional[str]:
 
 def fetch_known_domain_sids_via_ldap(
     domain: str,
-    dc_ip: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    dc_ip: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-) -> Dict[str, TrustInfo]:
+) -> dict[str, TrustInfo]:
     """
     Fetch known domain SID prefixes from LDAP (own domain + trusts).
 
@@ -250,7 +250,7 @@ def fetch_known_domain_sids_via_ldap(
     Returns:
         Dict mapping domain SID prefix -> TrustInfo (with FQDN and trust type)
     """
-    result: Dict[str, TrustInfo] = {}
+    result: dict[str, TrustInfo] = {}
 
     # Validate domain
     if not domain or len(domain) < 3 or "." not in domain:

@@ -4,7 +4,7 @@
 # built-in/virtual account or a domain account worth reporting. Used by
 # both online (SVCCTL) and offline (registry hive) enumeration paths.
 
-from typing import Any, Dict, List
+from typing import Any
 
 # Accounts that are built-in to Windows and never represent stored
 # domain credentials. Comparison is case-insensitive.
@@ -94,9 +94,9 @@ def is_domain_account(account: str) -> bool:
 
 
 def filter_domain_services(
-    services: List[Dict[str, Any]],
+    services: list[dict[str, Any]],
     local_accounts: set[str] | None = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Filter a list of services to only those running as domain accounts.
 
     Args:

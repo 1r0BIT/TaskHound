@@ -7,7 +7,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 from .resolver import looks_like_domain_user
 from .utils.logging import warn
@@ -24,19 +24,19 @@ class ClassificationResult:
     """Result of task or service classification."""
 
     task_type: str  # "TIER-0", "PRIV", "TASK", or "SERVICE"
-    reason: Optional[str] = None
-    password_analysis: Optional[str] = None
+    reason: str | None = None
+    password_analysis: str | None = None
     should_include: bool = True  # Whether to include in output
 
 
 # Type alias for pre-fetched password data: username -> pwdLastSet datetime
-PwdLastSetCache = Dict[str, datetime]
+PwdLastSetCache = dict[str, datetime]
 
 # Type alias for pre-fetched Tier-0 membership data: username -> (is_tier0, group_list)
-Tier0Cache = Dict[str, Tuple[bool, List[str]]]
+Tier0Cache = dict[str, tuple[bool, list[str]]]
 
 
-def _get_task_date_for_analysis(meta: Dict) -> Tuple[Optional[str], bool]:
+def _get_task_date_for_analysis(meta: dict) -> tuple[str | None, bool]:
     """
     Get the best available date for password freshness analysis.
     Prefers RegistrationInfo/Date, falls back to StartBoundary from trigger.
@@ -64,10 +64,10 @@ def _get_task_date_for_analysis(meta: Dict) -> Tuple[Optional[str], bool]:
 def _analyze_password_age(
     hv: Any,
     runas: str,
-    meta: Dict,
+    meta: dict,
     rel_path: str,
-    pwd_cache: Optional[PwdLastSetCache] = None,
-) -> Optional[str]:
+    pwd_cache: PwdLastSetCache | None = None,
+) -> str | None:
     """
     Analyze password age for DPAPI dump viability.
 
@@ -120,15 +120,15 @@ def _analyze_password_age(
 
 def classify_task(
     row: "TaskRow",
-    meta: Dict[str, Any],
+    meta: dict[str, Any],
     runas: str,
     rel_path: str,
-    hv: Optional[Any],
+    hv: Any | None,
     show_unsaved_creds: bool,
     include_local: bool,
-    pwd_cache: Optional[PwdLastSetCache] = None,
-    tier0_cache: Optional[Tier0Cache] = None,
-    resolved_runas: Optional[str] = None,
+    pwd_cache: PwdLastSetCache | None = None,
+    tier0_cache: Tier0Cache | None = None,
+    resolved_runas: str | None = None,
 ) -> ClassificationResult:
     """
     Classify a task as TIER-0, PRIV, or TASK based on the runas account.
@@ -302,10 +302,10 @@ def _check_account_disabled(hv: Any, account: str) -> bool:
 
 def _classify_by_privilege(
     account: str,
-    hv: Optional[Any],
-    tier0_cache: Optional[Tier0Cache] = None,
-    resolved_account: Optional[str] = None,
-) -> Optional[Tuple[str, str]]:
+    hv: Any | None,
+    tier0_cache: Tier0Cache | None = None,
+    resolved_account: str | None = None,
+) -> tuple[str, str] | None:
     """
     Check if an account is TIER-0 or PRIV via BloodHound or LDAP cache.
 
@@ -353,9 +353,9 @@ def _classify_by_privilege(
 
 def _get_password_analysis_from_cache(
     account: str,
-    pwd_cache: Optional[PwdLastSetCache],
-    hv: Optional[Any] = None,
-) -> Optional[str]:
+    pwd_cache: PwdLastSetCache | None,
+    hv: Any | None = None,
+) -> str | None:
     """
     Get password age analysis for an account from cache or BloodHound.
 
@@ -394,10 +394,10 @@ def _get_password_analysis_from_cache(
 def classify_service(
     row: "ServiceRow",
     account: str,
-    hv: Optional[Any],
-    pwd_cache: Optional[PwdLastSetCache] = None,
-    tier0_cache: Optional[Tier0Cache] = None,
-    resolved_account: Optional[str] = None,
+    hv: Any | None,
+    pwd_cache: PwdLastSetCache | None = None,
+    tier0_cache: Tier0Cache | None = None,
+    resolved_account: str | None = None,
 ) -> ClassificationResult:
     """
     Classify a service as TIER-0, PRIV, or SERVICE based on the start_name account.

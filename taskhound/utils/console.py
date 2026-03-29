@@ -11,7 +11,6 @@
 
 import threading
 from contextlib import contextmanager
-from typing import Optional
 
 from rich.console import Console
 from rich.live import Live
@@ -34,9 +33,9 @@ console = Console(highlight=False)
 _output_lock = threading.RLock()
 
 # Global progress context for async scanning
-_progress: Optional[Progress] = None
-_progress_task_id: Optional[int] = None
-_live: Optional[Live] = None
+_progress: Progress | None = None
+_progress_task_id: int | None = None
+_live: Live | None = None
 
 
 # =============================================================================
@@ -181,7 +180,7 @@ def scan_progress(total: int, description: str = "Scanning"):
     # Track statistics
     stats = {"success": 0, "failed": 0}
 
-    def update(item: str, success: bool = True, error_msg: Optional[str] = None):
+    def update(item: str, success: bool = True, error_msg: str | None = None):
         """Update progress with current item status."""
         if success:
             stats["success"] += 1
@@ -426,7 +425,7 @@ def format_task_line(
     run_as: str,
     is_tier0: bool = False,
     is_privileged: bool = False,
-    command: Optional[str] = None,
+    command: str | None = None,
 ) -> str:
     """Format a single task line with colors."""
     if is_tier0:

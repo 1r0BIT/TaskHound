@@ -20,7 +20,6 @@ import contextlib
 import logging
 import ntpath
 from binascii import unhexlify
-from typing import Dict, List, Optional
 
 from impacket.dpapi import (
     CREDENTIAL_BLOB,
@@ -43,8 +42,8 @@ class MasterkeyInfo:
         self.guid = guid.lower()
         self.blob = blob
         self.sid = sid
-        self.key: Optional[bytes] = None
-        self._sha1: Optional[str] = None
+        self.key: bytes | None = None
+        self._sha1: str | None = None
 
     def decrypt(self, dpapi_userkey: bytes) -> bool:
         """Decrypt masterkey using SYSTEM dpapi_userkey"""
@@ -71,7 +70,7 @@ class MasterkeyInfo:
             return False
 
     @property
-    def sha1(self) -> Optional[str]:
+    def sha1(self) -> str | None:
         """Return SHA1 hash of decrypted key"""
         return self._sha1
 
@@ -86,9 +85,9 @@ class ScheduledTaskCredential:
         self,
         task_name: str,
         blob_path: str,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
-        target: Optional[str] = None,
+        username: str | None = None,
+        password: str | None = None,
+        target: str | None = None,
     ):
         self.task_name = task_name
         self.blob_path = blob_path
@@ -138,10 +137,10 @@ class DPAPIDecryptor:
             dpapi_userkey = dpapi_userkey[2:]
         self.dpapi_userkey = unhexlify(dpapi_userkey)
 
-        self.masterkeys: Dict[str, MasterkeyInfo] = {}
+        self.masterkeys: dict[str, MasterkeyInfo] = {}
         logging.info(f"Initialized DPAPI decryptor with userkey: {dpapi_userkey[:16]}...")
 
-    def triage_system_masterkeys(self) -> List[MasterkeyInfo]:
+    def triage_system_masterkeys(self) -> list[MasterkeyInfo]:
         """
         Download and decrypt all SYSTEM masterkey files
 
@@ -193,7 +192,7 @@ class DPAPIDecryptor:
         logging.info(f"Decrypted {len(decrypted_keys)} SYSTEM masterkeys")
         return decrypted_keys
 
-    def _read_file(self, share: str, path: str) -> Optional[bytes]:
+    def _read_file(self, share: str, path: str) -> bytes | None:
         """Read a file from SMB share using getFile"""
         try:
             import io
@@ -206,8 +205,8 @@ class DPAPIDecryptor:
             return None
 
     def decrypt_credential_blob(
-        self, blob_bytes: bytes, task_name: str, blob_path: str, target: Optional[str] = None
-    ) -> Optional[ScheduledTaskCredential]:
+        self, blob_bytes: bytes, task_name: str, blob_path: str, target: str | None = None
+    ) -> ScheduledTaskCredential | None:
         """
         Decrypt a DPAPI credential blob
 
@@ -292,8 +291,8 @@ class DPAPIDecryptor:
             return ScheduledTaskCredential(task_name=task_name, blob_path=blob_path, target=target)
 
     def decrypt_scheduled_task_credentials(
-        self, blob_info_list: List[Dict], target: Optional[str] = None
-    ) -> List[ScheduledTaskCredential]:
+        self, blob_info_list: list[dict], target: str | None = None
+    ) -> list[ScheduledTaskCredential]:
         """
         Decrypt all scheduled task credential blobs
 
@@ -327,7 +326,7 @@ class DPAPIDecryptor:
         logging.info(f"Successfully processed {len(credentials)} credentials")
         return credentials
 
-    def _decrypt_blob(self, blob_bytes: bytes, masterkey: MasterkeyInfo) -> Optional[bytes]:
+    def _decrypt_blob(self, blob_bytes: bytes, masterkey: MasterkeyInfo) -> bytes | None:
         """
         Low-level DPAPI blob decryption using masterkey
 

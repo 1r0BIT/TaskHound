@@ -3,7 +3,6 @@
 # Functions for detecting membership in privileged groups (Domain Admins,
 # Enterprise Admins, etc.) via LDAP with transitive group expansion.
 
-from typing import Dict, List, Optional, Tuple
 
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
@@ -40,17 +39,17 @@ TIER0_BUILTIN_SIDS = {
 
 
 # Type alias for Tier-0 cache: normalized_username -> (is_tier0, list_of_group_names)
-Tier0Cache = Dict[str, Tuple[bool, List[str]]]
+Tier0Cache = dict[str, tuple[bool, list[str]]]
 
 
 def fetch_tier0_members(
     domain: str,
-    dc_ip: Optional[str] = None,
-    auth_username: Optional[str] = None,
-    auth_password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    dc_ip: str | None = None,
+    auth_username: str | None = None,
+    auth_password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    aes_key: Optional[str] = None,
+    aes_key: str | None = None,
 ) -> Tier0Cache:
     """
     Pre-flight fetch of all Tier-0 group members via LDAP.
@@ -181,7 +180,7 @@ def fetch_tier0_members(
 
         # Step 3: Query members of each privileged group (using transitive membership)
         # This gets all users who are members (direct or nested) of each group
-        member_groups: Dict[str, List[str]] = {}  # normalized_username -> list of group names
+        member_groups: dict[str, list[str]] = {}  # normalized_username -> list of group names
 
         for group_dn, group_name in privileged_groups:
             # Escape DN for LDAP filter
@@ -268,7 +267,7 @@ def fetch_tier0_members(
 def check_tier0_membership(
     username: str,
     tier0_cache: Tier0Cache,
-) -> Tuple[bool, List[str]]:
+) -> tuple[bool, list[str]]:
     """
     Check if a user is Tier-0 using pre-fetched cache.
 

@@ -13,7 +13,7 @@ import struct
 from binascii import unhexlify
 from datetime import datetime
 from io import BytesIO
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from impacket.smbconnection import SMBConnection as ImpacketSMBConnection
 
@@ -35,10 +35,10 @@ class CredentialLooter:
         """
         self.smb_conn = smb_conn
         self.decryptor = DPAPIDecryptor(smb_conn, dpapi_userkey)
-        self.tasks: Dict[str, Dict] = {}  # task_name -> task_info
-        self.credentials: List[ScheduledTaskCredential] = []
+        self.tasks: dict[str, dict] = {}  # task_name -> task_info
+        self.credentials: list[ScheduledTaskCredential] = []
 
-    def loot_all_credentials(self) -> List[ScheduledTaskCredential]:
+    def loot_all_credentials(self) -> list[ScheduledTaskCredential]:
         """
         Complete credential looting workflow
 
@@ -193,7 +193,7 @@ class OfflineDPAPICollector:
         self.masterkey_count = 0
         self.credential_count = 0
 
-    def collect_all_files(self) -> Dict[str, Any]:
+    def collect_all_files(self) -> dict[str, Any]:
         """
         Collect all DPAPI-related files for offline decryption
 
@@ -377,7 +377,7 @@ NOTES
         logging.debug(f"Created metadata: {metadata_path}")
 
 
-def loot_credentials(smb_conn: ImpacketSMBConnection, dpapi_userkey: str) -> List[ScheduledTaskCredential]:
+def loot_credentials(smb_conn: ImpacketSMBConnection, dpapi_userkey: str) -> list[ScheduledTaskCredential]:
     """
     Convenience function for credential looting
 
@@ -392,7 +392,7 @@ def loot_credentials(smb_conn: ImpacketSMBConnection, dpapi_userkey: str) -> Lis
     return looter.loot_all_credentials()
 
 
-def collect_dpapi_files(smb_conn: ImpacketSMBConnection, output_dir: str) -> Dict[str, Any]:
+def collect_dpapi_files(smb_conn: ImpacketSMBConnection, output_dir: str) -> dict[str, Any]:
     """
     Convenience function for offline DPAPI file collection
 
@@ -407,7 +407,7 @@ def collect_dpapi_files(smb_conn: ImpacketSMBConnection, output_dir: str) -> Dic
     return collector.collect_all_files()
 
 
-def decrypt_offline_dpapi_files(loot_dir: str, dpapi_userkey: str) -> List[ScheduledTaskCredential]:
+def decrypt_offline_dpapi_files(loot_dir: str, dpapi_userkey: str) -> list[ScheduledTaskCredential]:
     """
     Decrypt previously collected DPAPI files from disk
 
@@ -441,7 +441,7 @@ def decrypt_offline_dpapi_files(loot_dir: str, dpapi_userkey: str) -> List[Sched
 
     # Decrypt masterkeys from files
     logging.info("[*] Decrypting masterkeys from disk...")
-    masterkeys: Dict[str, MasterkeyInfo] = {}
+    masterkeys: dict[str, MasterkeyInfo] = {}
 
     try:
         files = os.listdir(masterkey_dir)
@@ -483,7 +483,7 @@ def decrypt_offline_dpapi_files(loot_dir: str, dpapi_userkey: str) -> List[Sched
 
     # Decrypt credentials from files
     logging.info("[*] Decrypting credential blobs from disk...")
-    credentials: List[ScheduledTaskCredential] = []
+    credentials: list[ScheduledTaskCredential] = []
 
     try:
         cred_files = os.listdir(credential_dir)
@@ -521,8 +521,8 @@ def decrypt_offline_dpapi_files(loot_dir: str, dpapi_userkey: str) -> List[Sched
 
 
 def _decrypt_credential_blob_offline(
-    blob_bytes: bytes, blob_path: str, masterkeys: Dict[str, MasterkeyInfo]
-) -> Optional[ScheduledTaskCredential]:
+    blob_bytes: bytes, blob_path: str, masterkeys: dict[str, MasterkeyInfo]
+) -> ScheduledTaskCredential | None:
     """
     Decrypt a credential blob using offline masterkeys
 
@@ -589,7 +589,7 @@ def _decrypt_credential_blob_offline(
         return None
 
 
-def _decrypt_dpapi_blob_data(dpapi_blob_bytes: bytes, mk_info: MasterkeyInfo) -> Optional[bytes]:
+def _decrypt_dpapi_blob_data(dpapi_blob_bytes: bytes, mk_info: MasterkeyInfo) -> bytes | None:
     """Decrypt DPAPI blob data with masterkey (simplified from decryptor.py)"""
     from binascii import unhexlify
 

@@ -2,7 +2,7 @@ import csv
 import json
 import os
 from io import StringIO
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from rich import box
 from rich.console import Console
@@ -14,12 +14,12 @@ from ..utils.logging import good
 from . import COLORS
 
 
-def _rows_to_dicts(rows: List[Any]) -> List[Dict]:
+def _rows_to_dicts(rows: list[Any]) -> list[dict]:
     """Convert TaskRow objects to dicts for serialization."""
     return [row.to_dict() if hasattr(row, "to_dict") else row for row in rows]
 
 
-def _format_task_table(row_dict: Dict[str, Any], hostname: Optional[str] = None) -> Table:
+def _format_task_table(row_dict: dict[str, Any], hostname: str | None = None) -> Table:
     """
     Format a single task as a Rich table matching README demo format.
 
@@ -165,7 +165,7 @@ def _format_task_table(row_dict: Dict[str, Any], hostname: Optional[str] = None)
     return table
 
 
-def _format_trigger_display(row_dict: Dict[str, Any]) -> str:
+def _format_trigger_display(row_dict: dict[str, Any]) -> str:
     """Format trigger information for plain text display."""
     trigger_type = row_dict.get("trigger_type", "")
 
@@ -236,7 +236,7 @@ def _get_return_code_desc(code: str) -> str:
     return code_map.get(code_int, "")
 
 
-def write_rich_plain(outdir: str, all_rows: List[Any], force_color: bool = True):
+def write_rich_plain(outdir: str, all_rows: list[Any], force_color: bool = True):
     """
     Write Rich-formatted output files grouped by host.
 
@@ -258,7 +258,7 @@ def write_rich_plain(outdir: str, all_rows: List[Any], force_color: bool = True)
     os.makedirs(outdir, exist_ok=True)
 
     # Group rows by host
-    hosts: Dict[str, List[Dict]] = {}
+    hosts: dict[str, list[dict]] = {}
     for row in all_rows:
         row_dict = row.to_dict() if hasattr(row, "to_dict") else row
         host = row_dict.get("host", "unknown")
@@ -281,7 +281,7 @@ def write_rich_plain(outdir: str, all_rows: List[Any], force_color: bool = True)
     good(f"Wrote results to {outdir}/ ({len(hosts)} hosts)")
 
 
-def _write_summary_file(outdir: str, hosts: Dict[str, List[Dict]], force_color: bool):
+def _write_summary_file(outdir: str, hosts: dict[str, list[dict]], force_color: bool):
     """Write summary.txt with overall stats and per-host breakdown."""
     summary_path = os.path.join(outdir, "summary.txt")
 
@@ -416,7 +416,7 @@ def _write_summary_file(outdir: str, hosts: Dict[str, List[Dict]], force_color: 
         f.write(buffer.getvalue())
 
 
-def _write_host_tasks_file(path: str, host: str, rows: List[Dict], force_color: bool):
+def _write_host_tasks_file(path: str, host: str, rows: list[dict], force_color: bool):
     """Write tasks.txt for a single host."""
     buffer = StringIO()
     file_console = Console(file=buffer, force_terminal=force_color, width=120)
@@ -450,7 +450,7 @@ def _write_host_tasks_file(path: str, host: str, rows: List[Dict], force_color: 
         f.write(buffer.getvalue())
 
 
-def write_json(path: str, rows: List[Any], silent: bool = False):
+def write_json(path: str, rows: list[Any], silent: bool = False):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(_rows_to_dicts(rows), f, indent=2)
     if not silent:
@@ -459,8 +459,8 @@ def write_json(path: str, rows: List[Any], silent: bool = False):
 
 def write_combined_json(
     path: str,
-    task_rows: List[Any],
-    service_rows: List[Any],
+    task_rows: list[Any],
+    service_rows: list[Any],
     silent: bool = False,
 ):
     """Write combined JSON with separate 'tasks' and 'services' keys."""
@@ -529,7 +529,7 @@ _SERVICE_CSV_FIELDS = [
 ]
 
 
-def write_csv(path: str, rows: List[Any]):
+def write_csv(path: str, rows: list[Any]):
     with open(path, "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=_TASK_CSV_FIELDS)
         w.writeheader()
@@ -537,7 +537,7 @@ def write_csv(path: str, rows: List[Any]):
     good(f"Wrote CSV results to {path}")
 
 
-def write_service_csv(path: str, rows: List[Any]):
+def write_service_csv(path: str, rows: list[Any]):
     """Write service results to a CSV file."""
     with open(path, "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=_SERVICE_CSV_FIELDS, extrasaction="ignore")

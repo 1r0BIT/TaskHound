@@ -19,7 +19,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from ..utils.logging import debug, info, warn
 
@@ -34,7 +34,7 @@ class CacheManager:
     - SQLite uses WAL mode for concurrent access across threads
     """
 
-    def __init__(self, cache_file: Optional[Path] = None, ttl_hours: int = 24, enabled: bool = True):
+    def __init__(self, cache_file: Path | None = None, ttl_hours: int = 24, enabled: bool = True):
         """
         Initialize cache manager.
 
@@ -62,7 +62,7 @@ class CacheManager:
         self.is_new_db = not cache_file.exists() if cache_file else True
 
         # Tier 1: Session cache (in-memory, cleared on exit)
-        self.session: Dict[str, Any] = {}
+        self.session: dict[str, Any] = {}
 
         # Statistics for reporting (also protected by _session_lock)
         self.stats = {
@@ -80,7 +80,7 @@ class CacheManager:
         if self.persistent_enabled:
             self._init_db()
 
-    def _get_conn(self) -> Optional[sqlite3.Connection]:
+    def _get_conn(self) -> sqlite3.Connection | None:
         """
         Get thread-local SQLite connection, creating one if needed.
 
@@ -168,7 +168,7 @@ class CacheManager:
         except Exception as e:
             debug(f"Error pruning cache: {e}")
 
-    def get(self, category: str, key: str) -> Optional[Any]:
+    def get(self, category: str, key: str) -> Any | None:
         """
         Get cached value (checks session first, then persistent).
 
@@ -233,7 +233,7 @@ class CacheManager:
             self.stats["persistent_misses"] += 1
         return None
 
-    def set(self, category: str, key: str, value: Any, ttl_hours: Optional[int] = None):
+    def set(self, category: str, key: str, value: Any, ttl_hours: int | None = None):
         """
         Store value in both session and persistent caches.
 
@@ -348,7 +348,7 @@ class CacheManager:
 
         return new_value
 
-    def get_all(self, category: str) -> Dict[str, Any]:
+    def get_all(self, category: str) -> dict[str, Any]:
         """
         Get all non-expired cached values for a category.
 
@@ -358,7 +358,7 @@ class CacheManager:
         Returns:
             Dictionary of key -> value for all valid entries in the category
         """
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
 
         conn = self._get_conn()
         if not conn:
@@ -400,7 +400,7 @@ class CacheManager:
 
         return result
 
-    def invalidate(self, category: Optional[str] = None, key: Optional[str] = None):
+    def invalidate(self, category: str | None = None, key: str | None = None):
         """
         Invalidate cache entries.
 
@@ -474,7 +474,7 @@ class CacheManager:
     # Used to prevent processing dual-homed hosts twice when
     # multiple IPs resolve to the same FQDN
 
-    def try_mark_host_processed(self, fqdn: str, target: str) -> tuple[bool, Optional[str]]:
+    def try_mark_host_processed(self, fqdn: str, target: str) -> tuple[bool, str | None]:
         """
         Atomically check if host is processed and mark it if not.
 
@@ -527,7 +527,7 @@ class CacheManager:
 
 
 # Global cache instance
-_cache: Optional[CacheManager] = None
+_cache: CacheManager | None = None
 
 
 def _cleanup_cache():
@@ -543,12 +543,12 @@ def _cleanup_cache():
 atexit.register(_cleanup_cache)
 
 
-def get_cache() -> Optional[CacheManager]:
+def get_cache() -> CacheManager | None:
     """Get global cache instance."""
     return _cache
 
 
-def init_cache(ttl_hours: int = 24, enabled: bool = True, cache_file: Optional[Path] = None):
+def init_cache(ttl_hours: int = 24, enabled: bool = True, cache_file: Path | None = None):
     """Initialize global cache instance."""
     global _cache
     _cache = CacheManager(cache_file=cache_file, ttl_hours=ttl_hours, enabled=enabled)

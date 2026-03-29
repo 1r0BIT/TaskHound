@@ -16,7 +16,7 @@
 # shared SMB connection for subsequent RPC operations (SAMR, LSARPC).
 
 import contextlib
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from impacket.dcerpc.v5 import scmr, transport
 from impacket.dcerpc.v5.rpcrt import DCERPCException
@@ -55,7 +55,7 @@ def enumerate_services(
     smb: SMBConnection,
     host: str,
     filter_win32_only: bool = True,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Enumerate all services on a remote host via SVCCTL RPC.
 
@@ -73,8 +73,8 @@ def enumerate_services(
         List of dicts with keys: name, display_name, account,
         binary_path, start_type, service_type, state
     """
-    dce: Optional[Any] = None
-    sc_handle: Optional[bytes] = None
+    dce: Any | None = None
+    sc_handle: bytes | None = None
 
     try:
         # Bind to SVCCTL
@@ -102,7 +102,7 @@ def enumerate_services(
             dwServiceState=scmr.SERVICE_STATE_ALL,
         )
 
-        services: List[Dict[str, Any]] = []
+        services: list[dict[str, Any]] = []
         cache = get_cache()
         cache_hits = 0
         builtin_skips = 0
@@ -171,7 +171,7 @@ def _query_service_config(
     sc_handle: bytes,
     svc_name: str,
     host: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Query full service config (account, binary path, start type).
 
     Opens a service handle, queries config, closes the handle.

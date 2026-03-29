@@ -15,7 +15,6 @@
 #     result = process_target(target, auth=auth, ...)
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -45,24 +44,24 @@ class AuthContext:
 
     # Primary authentication
     username: str = ""
-    password: Optional[str] = None
+    password: str | None = None
     domain: str = ""
-    hashes: Optional[str] = None
-    aes_key: Optional[str] = None  # AES key for Kerberos (128-bit or 256-bit)
+    hashes: str | None = None
+    aes_key: str | None = None  # AES key for Kerberos (128-bit or 256-bit)
     kerberos: bool = False
-    dc_ip: Optional[str] = None
+    dc_ip: str | None = None
     timeout: int = 60
     dns_tcp: bool = False  # Force DNS queries over TCP (for SOCKS proxies)
-    nameserver: Optional[str] = None  # DNS nameserver (defaults to dc_ip or system DNS)
+    nameserver: str | None = None  # DNS nameserver (defaults to dc_ip or system DNS)
 
     # LDAP-specific credentials (optional override)
-    ldap_domain: Optional[str] = None
-    ldap_user: Optional[str] = None
-    ldap_password: Optional[str] = None
-    ldap_hashes: Optional[str] = None
+    ldap_domain: str | None = None
+    ldap_user: str | None = None
+    ldap_password: str | None = None
+    ldap_hashes: str | None = None
 
     # Global Catalog server (optional, auto-discovers if not set)
-    gc_server: Optional[str] = None
+    gc_server: str | None = None
 
     @property
     def has_credentials(self) -> bool:
@@ -80,12 +79,12 @@ class AuthContext:
         return self.ldap_user or self.username
 
     @property
-    def ldap_effective_password(self) -> Optional[str]:
+    def ldap_effective_password(self) -> str | None:
         """Get the effective password for LDAP queries."""
         return self.ldap_password or self.password
 
     @property
-    def ldap_effective_hashes(self) -> Optional[str]:
+    def ldap_effective_hashes(self) -> str | None:
         """Get the effective hashes for LDAP queries."""
         return self.ldap_hashes or self.hashes
 

@@ -8,7 +8,7 @@
 import contextlib
 import os
 import traceback
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 from impacket.smbconnection import SessionError
 
@@ -53,7 +53,7 @@ from .helpers import (
 )
 
 
-def _match_decrypted_password(runas: str, decrypted_creds: List, resolved_runas: Optional[str] = None) -> Optional[str]:
+def _match_decrypted_password(runas: str, decrypted_creds: list, resolved_runas: str | None = None) -> str | None:
     """
     Match a task's runas field to decrypted credentials and return the password.
 
@@ -81,31 +81,31 @@ def _match_decrypted_password(runas: str, decrypted_creds: List, resolved_runas:
 
 def process_target(
     target: str,
-    all_rows: List[TaskRow],
+    all_rows: list[TaskRow],
     *,
     auth: AuthContext,
     include_ms: bool = False,
     include_local: bool = False,
-    hv: Optional[HighValueLoader] = None,
+    hv: HighValueLoader | None = None,
     debug: bool = False,
     show_unsaved_creds: bool = False,
-    backup_dir: Optional[str] = None,
+    backup_dir: str | None = None,
     credguard_detect: bool = False,
     no_ldap: bool = False,
     no_rpc: bool = False,
     loot: bool = False,
-    dpapi_key: Optional[str] = None,
-    bh_connector: Optional[Any] = None,
+    dpapi_key: str | None = None,
+    bh_connector: Any | None = None,
     concise: bool = False,
     opsec: bool = False,
-    laps_cache: Optional[LAPSCache] = None,
+    laps_cache: LAPSCache | None = None,
     validate_creds: bool = False,
     ldap_tier0: bool = False,
     no_lsa: bool = False,
     services: bool = False,
     services_only: bool = False,
-    all_service_rows: Optional[List] = None,
-) -> Tuple[List[str], Optional[Union[bool, LAPSFailure]]]:
+    all_service_rows: list | None = None,
+) -> tuple[list[str], bool | LAPSFailure | None]:
     """
     Connect to `target`, enumerate scheduled tasks, and return printable lines.
 
@@ -153,8 +153,8 @@ def process_target(
     ldap_hashes = auth.ldap_hashes
     gc_server = auth.gc_server
 
-    out_lines: List[str] = []
-    laps_result: Optional[Union[bool, LAPSFailure]] = None
+    out_lines: list[str] = []
+    laps_result: bool | LAPSFailure | None = None
 
     status(f"[Collecting] {target} ...")
 
@@ -175,7 +175,7 @@ def process_target(
     laps_type_used = None
     laps_cred = None  # Track LAPS credentials for RPC reuse
     discovered_hostname = None
-    cred_validation_results: Dict[str, TaskRunInfo] = {}  # RPC credential validation cache
+    cred_validation_results: dict[str, TaskRunInfo] = {}  # RPC credential validation cache
 
     try:
         # LAPS Mode: Two-phase connection (negotiate -> lookup -> auth)
@@ -515,7 +515,7 @@ def process_target(
             aes_key=rpc_aes_key,
             kerberos=rpc_kerberos,
             dc_ip=dc_ip,
-            opsec=no_rpc,  # Use no_rpc flag (opsec sets this)
+            opsec=opsec,
             debug=debug,
         )
 
@@ -545,7 +545,7 @@ def process_target(
                 info(f"{target}: Using DPAPI key from LSA extraction for task credential decryption")
 
     # Perform DPAPI credential looting (skip for --services-only — no tasks to decrypt)
-    decrypted_creds: List[Any] = []
+    decrypted_creds: list[Any] = []
     if loot and not services_only:
         decrypted_creds, loot_lines = perform_dpapi_looting(
             target,
@@ -559,8 +559,8 @@ def process_target(
     total = len(items)
     filtered_count = 0  # Count of tasks that pass should_include filter
     priv_count = 0
-    priv_lines: List[str] = []
-    task_lines: List[str] = []
+    priv_lines: list[str] = []
+    task_lines: list[str] = []
 
     # Pre-fetch pwdLastSet for all unique users via single LDAP batch query
     pwd_cache: PwdLastSetCache = prefetch_pwd_last_set(
@@ -584,7 +584,7 @@ def process_target(
     )
 
     # Pre-fetch Tier-0 group members via LDAP (pre-flight approach)
-    tier0_cache: Dict[str, Tuple[bool, list]] = prefetch_tier0_members(
+    tier0_cache: dict[str, tuple[bool, list]] = prefetch_tier0_members(
         target,
         domain=domain,
         dc_ip=dc_ip,
@@ -668,7 +668,7 @@ def process_target(
 
                 # Get known domain SID prefixes for unknown domain detection
                 # Pass full dict (prefix -> FQDN) for trust-aware display
-                known_prefixes: Optional[Dict[str, Any]] = hv.hv_domain_sids if hv and hasattr(hv, 'hv_domain_sids') and hv.hv_domain_sids else None
+                known_prefixes: dict[str, Any] | None = hv.hv_domain_sids if hv and hasattr(hv, 'hv_domain_sids') and hv.hv_domain_sids else None
 
                 _, row.resolved_runas = format_runas_with_sid_resolution(
                     runas,
@@ -824,12 +824,12 @@ def process_target(
     good(f"{target}: Found {filtered_count} tasks (of {total} total), privileged {priv_display}{backup_msg}{laps_msg}")
 
     # --- Service enumeration (if enabled) ---
-    service_lines: List[str] = []
+    service_lines: list[str] = []
     if services:
         from ..smb.local_users import enumerate_local_users
         from .helpers import perform_service_enumeration
 
-        local_accounts: Optional[set] = None
+        local_accounts: set | None = None
         if not no_rpc:
             try:
                 local_users_dict = enumerate_local_users(smb, server_fqdn or target)

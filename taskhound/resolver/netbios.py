@@ -3,22 +3,22 @@
 # Maps NETBIOS domain names (e.g., "YOURCOMPANY") to FQDNs (e.g., "corp.example.com")
 # Uses lazy loading from LDAP on first lookup.
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from ..utils.logging import debug
 
 # Module-level state
-_netbios_to_fqdn_cache: Dict[str, str] = {}
+_netbios_to_fqdn_cache: dict[str, str] = {}
 _netbios_cache_loaded: bool = False
-_netbios_cache_ldap_creds: Optional[Dict[str, Any]] = None
+_netbios_cache_ldap_creds: dict[str, Any] | None = None
 
 
 def set_netbios_ldap_credentials(
     domain: str,
-    dc_ip: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    dc_ip: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
 ) -> None:
     """
@@ -46,7 +46,7 @@ def set_netbios_ldap_credentials(
     }
 
 
-def resolve_netbios_to_fqdn(netbios_name: str) -> Optional[str]:
+def resolve_netbios_to_fqdn(netbios_name: str) -> str | None:
     """
     Resolve a NETBIOS domain name to its FQDN.
 
@@ -96,7 +96,7 @@ def add_netbios_mapping(netbios_name: str, fqdn: str) -> None:
     _netbios_to_fqdn_cache[netbios_name.upper()] = fqdn.upper()
 
 
-def get_netbios_cache() -> Dict[str, str]:
+def get_netbios_cache() -> dict[str, str]:
     """
     Get the current NETBIOS → FQDN cache.
 

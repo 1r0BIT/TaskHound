@@ -17,7 +17,6 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
 
 from ..utils.logging import good, info, status, warn
 
@@ -31,7 +30,7 @@ REGISTRY_PATH = "Windows/System32/config"
 GUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
 
-def find_windows_root(mount_path: str) -> Optional[Path]:
+def find_windows_root(mount_path: str) -> Path | None:
     """
     Find the Windows root directory in a mounted filesystem.
 
@@ -75,7 +74,7 @@ def find_windows_root(mount_path: str) -> Optional[Path]:
     return None
 
 
-def get_hostname_from_registry(windows_root: Path, debug: bool = False) -> Optional[str]:
+def get_hostname_from_registry(windows_root: Path, debug: bool = False) -> str | None:
     """
     Attempt to extract hostname from SYSTEM registry hive.
 
@@ -116,7 +115,7 @@ def get_hostname_from_registry(windows_root: Path, debug: bool = False) -> Optio
         return None
 
 
-def extract_dpapi_key_from_registry(windows_root: Path, debug: bool = False) -> Optional[str]:
+def extract_dpapi_key_from_registry(windows_root: Path, debug: bool = False) -> str | None:
     """
     Extract DPAPI SYSTEM user key from offline registry hives.
 
@@ -412,12 +411,12 @@ def extract_credentials(windows_root: Path, output_dir: Path, verbose: bool = Fa
 
 def load_from_disk(
     mount_path: str,
-    backup_dir: Optional[str] = None,
-    hostname: Optional[str] = None,
+    backup_dir: str | None = None,
+    hostname: str | None = None,
     no_backup: bool = False,
     verbose: bool = False,
     debug: bool = False,
-) -> Tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     """
     Load tasks and DPAPI data from a mounted Windows filesystem.
 

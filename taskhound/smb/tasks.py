@@ -7,7 +7,6 @@
 # single permission issue doesn't abort the entire crawl.
 
 import io
-from typing import List, Tuple
 
 from impacket.smbconnection import SMBConnection
 
@@ -56,12 +55,12 @@ def smb_readfile(smb: SMBConnection, share: str, path: str) -> bytes:
     return buff.getvalue()
 
 
-def crawl_tasks(smb: SMBConnection, include_ms: bool = False) -> List[Tuple[str, bytes]]:
+def crawl_tasks(smb: SMBConnection, include_ms: bool = False) -> list[tuple[str, bytes]]:
     # Recursively crawl the scheduled tasks tree and collect XMLs.
     #
     # By default the large \Microsoft subtree is skipped for speed unless
     # `include_ms` is True.
-    results: List[Tuple[str, bytes]] = []
+    results: list[tuple[str, bytes]] = []
     share = "C$"
 
     # Verify access to root first

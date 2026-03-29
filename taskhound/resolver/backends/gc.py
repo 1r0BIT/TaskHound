@@ -2,7 +2,6 @@
 #
 # Resolution via Global Catalog (port 3268/3269) for forest-wide SID lookups.
 
-from typing import Optional
 
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
@@ -10,11 +9,11 @@ from ...utils.logging import debug, info, warn
 from ..constants import sid_to_binary
 
 # Module-level cache for discovered GC server
-_discovered_gc_server: Optional[str] = None
+_discovered_gc_server: str | None = None
 _gc_discovery_attempted: bool = False
 
 
-def get_discovered_gc_server(domain: str) -> Optional[str]:
+def get_discovered_gc_server(domain: str) -> str | None:
     """
     Get a Global Catalog server for the domain, discovering via DNS if needed.
 
@@ -58,15 +57,15 @@ def get_discovered_gc_server(domain: str) -> Optional[str]:
 def resolve_sid_via_global_catalog(
     sid: str,
     domain: str,
-    gc_server: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    gc_server: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    aes_key: Optional[str] = None,
-    nameserver: Optional[str] = None,
+    aes_key: str | None = None,
+    nameserver: str | None = None,
     use_tcp: bool = False,
-) -> Optional[str]:
+) -> str | None:
     """
     Resolve a SID from a foreign domain within the same AD forest via Global Catalog.
 

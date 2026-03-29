@@ -1,5 +1,4 @@
 import sys
-from typing import Optional
 
 from ..resolver import extract_domain_sid_from_hv
 from ..resolver.backends import resolve_sid_via_ldap
@@ -7,20 +6,20 @@ from .logging import good, info, warn
 
 
 def preflight_credential_check(
-    domain: Optional[str],
-    username: Optional[str],
-    password: Optional[str],
-    hashes: Optional[str],
+    domain: str | None,
+    username: str | None,
+    password: str | None,
+    hashes: str | None,
     kerberos: bool,
-    dc_ip: Optional[str],
+    dc_ip: str | None,
     timeout: int,
-    aes_key: Optional[str] = None,
-    ldap_domain: Optional[str] = None,
-    ldap_user: Optional[str] = None,
-    ldap_password: Optional[str] = None,
-    ldap_hashes: Optional[str] = None,
+    aes_key: str | None = None,
+    ldap_domain: str | None = None,
+    ldap_user: str | None = None,
+    ldap_password: str | None = None,
+    ldap_hashes: str | None = None,
     no_ldap: bool = False,
-    targets: Optional[list] = None,
+    targets: list | None = None,
 ):
     """Validate credentials before scanning to prevent account lockout.
 
@@ -144,17 +143,17 @@ def preflight_credential_check(
 
 
 def verify_ldap_connection(
-    domain: Optional[str],
-    dc_ip: Optional[str],
-    username: Optional[str],
-    password: Optional[str],
-    hashes: Optional[str],
+    domain: str | None,
+    dc_ip: str | None,
+    username: str | None,
+    password: str | None,
+    hashes: str | None,
     kerberos: bool,
     no_ldap: bool,
-    ldap_domain: Optional[str] = None,
-    ldap_user: Optional[str] = None,
-    ldap_password: Optional[str] = None,
-    ldap_hashes: Optional[str] = None,
+    ldap_domain: str | None = None,
+    ldap_user: str | None = None,
+    ldap_password: str | None = None,
+    ldap_hashes: str | None = None,
     hv_loader=None,
 ):
     """Test LDAP connection and SID resolution capability during initialization."""

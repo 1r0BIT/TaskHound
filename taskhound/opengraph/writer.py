@@ -6,7 +6,7 @@ Contains logic for generating and writing OpenGraph files (nodes and edges).
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any
 
 from bhopengraph import Node, OpenGraph, Properties
 
@@ -19,19 +19,20 @@ from .builder import (
     _create_service_edges,
     _create_service_node,
     _create_task_node,
+    extract_domain_from_fqdn,
     resolve_object_ids_chunked,
 )
 
 
 def generate_opengraph_files(
     output_dir: str,
-    tasks: List[Union[Dict, TaskRow]],
+    tasks: list[dict | TaskRow],
     bh_connector=None,
-    ldap_config: Optional[Dict] = None,
+    ldap_config: dict | None = None,
     allow_orphans: bool = False,
-    computer_sids: Optional[Dict[str, str]] = None,
-    netbios_name: Optional[str] = None,
-) -> Optional[str]:
+    computer_sids: dict[str, str] | None = None,
+    netbios_name: str | None = None,
+) -> str | None:
     """
     Generates OpenGraph compatible JSON files for BloodHound.
 
@@ -51,7 +52,7 @@ def generate_opengraph_files(
     :param netbios_name: NetBIOS domain name (e.g., "CONTOSO") - used for accurate domain comparison
     """
     # Convert TaskRow objects to dicts if needed
-    task_dicts: List[Dict[str, Any]] = []
+    task_dicts: list[dict[str, Any]] = []
     for t in tasks:
         if isinstance(t, TaskRow):
             task_dicts.append(t.to_dict())
@@ -70,16 +71,10 @@ def generate_opengraph_files(
     graph = OpenGraph()
 
     # 1. Collect unique names for resolution
-    computer_names: Set[str] = set()
-    user_names: Set[str] = set()
+    computer_names: set[str] = set()
+    user_names: set[str] = set()
 
-    # Helper to extract domain from FQDN
-    def _extract_domain(fqdn: str) -> str:
-        if "." in fqdn:
-            parts = fqdn.split(".")
-            if len(parts) >= 2:
-                return ".".join(parts[1:]).upper()
-        return "WORKGROUP"
+    _extract_domain = extract_domain_from_fqdn
 
     info("Collecting unique principals for resolution...")
     for task in valid_tasks:
@@ -100,8 +95,8 @@ def generate_opengraph_files(
     info(f"Found {len(computer_names)} unique computers and {len(user_names)} unique users")
 
     # 2. Resolve names to IDs if connector is available
-    computer_map: Dict[str, Optional[tuple]] = {}
-    user_map: Dict[str, Optional[tuple]] = {}
+    computer_map: dict[str, tuple | None] = {}
+    user_map: dict[str, tuple | None] = {}
 
     if bh_connector:
         info("Resolving Principals...")
@@ -257,13 +252,13 @@ def generate_opengraph_files(
 
 def generate_service_opengraph_files(
     output_dir: str,
-    services: List[Union[Dict, ServiceRow]],
+    services: list[dict | ServiceRow],
     bh_connector=None,
-    ldap_config: Optional[Dict] = None,
+    ldap_config: dict | None = None,
     allow_orphans: bool = False,
-    computer_sids: Optional[Dict[str, str]] = None,
-    netbios_name: Optional[str] = None,
-) -> Optional[str]:
+    computer_sids: dict[str, str] | None = None,
+    netbios_name: str | None = None,
+) -> str | None:
     """
     Generate OpenGraph JSON for Windows service findings.
 
@@ -279,7 +274,7 @@ def generate_service_opengraph_files(
     :param computer_sids: FQDN→SID mapping from SMB connections
     :param netbios_name: NetBIOS domain name
     """
-    svc_dicts: List[Dict[str, Any]] = []
+    svc_dicts: list[dict[str, Any]] = []
     for s in services:
         if isinstance(s, ServiceRow):
             svc_dicts.append(s.to_dict())
@@ -297,15 +292,10 @@ def generate_service_opengraph_files(
     graph = OpenGraph()
 
     # Collect unique names for resolution
-    computer_names: Set[str] = set()
-    user_names: Set[str] = set()
+    computer_names: set[str] = set()
+    user_names: set[str] = set()
 
-    def _extract_domain(fqdn: str) -> str:
-        if "." in fqdn:
-            parts = fqdn.split(".")
-            if len(parts) >= 2:
-                return ".".join(parts[1:]).upper()
-        return "WORKGROUP"
+    _extract_domain = extract_domain_from_fqdn
 
     for svc in valid_services:
         hostname = (svc.get("host") or "").strip().upper()
@@ -320,8 +310,8 @@ def generate_service_opengraph_files(
                 user_names.add(principal_id)
 
     # Resolve names to IDs
-    computer_map: Dict[str, Optional[tuple]] = {}
-    user_map: Dict[str, Optional[tuple]] = {}
+    computer_map: dict[str, tuple | None] = {}
+    user_map: dict[str, tuple | None] = {}
 
     if bh_connector:
         info("Resolving service principals...")

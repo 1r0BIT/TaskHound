@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 import traceback
-from typing import Any, Dict
+from typing import Any
 
 from rich.console import Console
 from rich.table import Table
@@ -133,7 +133,7 @@ class OnceOnly(argparse.Action):
         setattr(namespace, self.dest, values)
 
 
-def load_config() -> Dict[str, Any]:
+def load_config() -> dict[str, Any]:
     """
     Load configuration from TOML files.
 

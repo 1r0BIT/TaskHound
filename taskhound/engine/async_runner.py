@@ -14,9 +14,10 @@
 import random
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 from rich.progress import (
     BarColumn,
@@ -50,7 +51,7 @@ class AsyncConfig:
     workers: int = 10
     """Number of concurrent worker threads."""
 
-    rate_limit: Optional[float] = None
+    rate_limit: float | None = None
     """Maximum targets per second. None = unlimited."""
 
     timeout: int = 30
@@ -59,7 +60,7 @@ class AsyncConfig:
     show_progress: bool = True
     """Show progress bar during processing."""
 
-    jitter: Optional[float] = None
+    jitter: float | None = None
     """Random delay (0 to N seconds) between hosts. Only for sequential mode."""
 
 
@@ -76,19 +77,19 @@ class TargetResult:
     skipped: bool = False
     """Whether target was skipped (e.g., dual-homed duplicate)."""
 
-    lines: List[str] = field(default_factory=list)
+    lines: list[str] = field(default_factory=list)
     """Output lines from processing."""
 
-    rows: List[TaskRow] = field(default_factory=list)
+    rows: list[TaskRow] = field(default_factory=list)
     """Structured task data rows for export."""
 
-    service_rows: List[ServiceRow] = field(default_factory=list)
+    service_rows: list[ServiceRow] = field(default_factory=list)
     """Structured service data rows for export."""
 
-    laps_result: Optional[Union[bool, LAPSFailure]] = None
+    laps_result: bool | LAPSFailure | None = None
     """LAPS authentication result if applicable."""
 
-    error: Optional[str] = None
+    error: str | None = None
     """Error message if processing failed."""
 
     elapsed_ms: float = 0.0
@@ -107,7 +108,7 @@ class AsyncTaskHound:
         def process_fn(target: str, all_rows: List[Dict], **kwargs) -> Tuple[List[str], Optional[LAPSResult]]
     """
 
-    def __init__(self, config: Optional[AsyncConfig] = None):
+    def __init__(self, config: AsyncConfig | None = None):
         """
         Initialize async engine.
 
@@ -116,8 +117,8 @@ class AsyncTaskHound:
         """
         self.config = config or AsyncConfig()
         self._output_lock = threading.Lock()
-        self._rate_semaphore: Optional[threading.Semaphore] = None
-        self._rate_thread: Optional[threading.Thread] = None
+        self._rate_semaphore: threading.Semaphore | None = None
+        self._rate_thread: threading.Thread | None = None
         self._stop_rate_limiter = threading.Event()
 
         # Statistics
@@ -129,8 +130,8 @@ class AsyncTaskHound:
         self._lock = threading.Lock()
 
         # Rich progress bar
-        self._progress: Optional[Progress] = None
-        self._task_id: Optional[TaskID] = None
+        self._progress: Progress | None = None
+        self._task_id: TaskID | None = None
 
     def _start_rate_limiter(self) -> None:
         """Start background thread that releases rate limiter tokens."""
@@ -167,7 +168,7 @@ class AsyncTaskHound:
         self,
         target: str,
         process_fn: Callable,
-        kwargs: Dict[str, Any],
+        kwargs: dict[str, Any],
     ) -> TargetResult:
         """
         Process a single target with rate limiting and error handling.
@@ -187,8 +188,8 @@ class AsyncTaskHound:
         result = TargetResult(target=target, success=False)
 
         # Each worker gets its own row collectors
-        target_rows: List[TaskRow] = []
-        target_service_rows: List[ServiceRow] = []
+        target_rows: list[TaskRow] = []
+        target_service_rows: list[ServiceRow] = []
 
         try:
             # Override the shared service_rows list with a per-target one
@@ -280,10 +281,10 @@ class AsyncTaskHound:
 
     def run(
         self,
-        targets: List[str],
+        targets: list[str],
         process_fn: Callable,
         **kwargs,
-    ) -> List[TargetResult]:
+    ) -> list[TargetResult]:
         """
         Process multiple targets in parallel.
 
@@ -308,7 +309,7 @@ class AsyncTaskHound:
         self._succeeded = 0
         self._failed = 0
         self._skipped = 0
-        results: List[TargetResult] = []
+        results: list[TargetResult] = []
         start_time = time.perf_counter()
 
         status(f"[*] Starting parallel scan: {len(targets)} targets, {self.config.workers} workers")
@@ -374,10 +375,10 @@ class AsyncTaskHound:
 
     def _run_sequential(
         self,
-        targets: List[str],
+        targets: list[str],
         process_fn: Callable,
-        kwargs: Dict[str, Any],
-    ) -> List[TargetResult]:
+        kwargs: dict[str, Any],
+    ) -> list[TargetResult]:
         """
         Run targets sequentially (--threads 1 mode).
 
@@ -388,7 +389,7 @@ class AsyncTaskHound:
         self._succeeded = 0
         self._failed = 0
         self._skipped = 0
-        results: List[TargetResult] = []
+        results: list[TargetResult] = []
         start_time = time.perf_counter()
 
         jitter_msg = f" (jitter: 0-{self.config.jitter}s)" if self.config.jitter else ""
@@ -420,14 +421,19 @@ class AsyncTaskHound:
                     time.sleep(jitter_delay)
 
                 result = TargetResult(target=target, success=False)
-                target_rows: List[TaskRow] = []
+                target_rows: list[TaskRow] = []
+                target_service_rows: list[ServiceRow] = []
                 target_start = time.perf_counter()
 
                 try:
+                    # Override the shared service_rows list with a per-target one
+                    worker_kwargs = dict(kwargs)
+                    worker_kwargs["all_service_rows"] = target_service_rows
+
                     lines, laps_result = process_fn(
                         target=target,
                         all_rows=target_rows,
-                        **kwargs
+                        **worker_kwargs
                     )
 
                     # Check for failure rows
@@ -445,6 +451,7 @@ class AsyncTaskHound:
                     result.success = not has_failure and not has_skipped
                     result.lines = lines
                     result.rows = target_rows
+                    result.service_rows = target_service_rows
                     result.laps_result = laps_result
 
                     # Mark as skipped only if explicitly flagged via SKIPPED row
@@ -487,7 +494,7 @@ class AsyncTaskHound:
 
         return results
 
-    def print_results_threadsafe(self, lines: List[str], print_fn: Callable[[List[str]], None]) -> None:
+    def print_results_threadsafe(self, lines: list[str], print_fn: Callable[[list[str]], None]) -> None:
         """
         Print results with output lock to prevent interleaving.
 
@@ -499,7 +506,7 @@ class AsyncTaskHound:
             print_fn(lines)
 
 
-def aggregate_results(results: List[TargetResult]) -> Tuple[List[TaskRow], List[ServiceRow], List[LAPSFailure], int]:
+def aggregate_results(results: list[TargetResult]) -> tuple[list[TaskRow], list[ServiceRow], list[LAPSFailure], int]:
     """
     Aggregate results from parallel processing.
 
@@ -509,9 +516,9 @@ def aggregate_results(results: List[TargetResult]) -> Tuple[List[TaskRow], List[
     Returns:
         Tuple of (all_rows, all_service_rows, laps_failures, laps_successes)
     """
-    all_rows: List[TaskRow] = []
-    all_service_rows: List[ServiceRow] = []
-    laps_failures: List[LAPSFailure] = []
+    all_rows: list[TaskRow] = []
+    all_service_rows: list[ServiceRow] = []
+    laps_failures: list[LAPSFailure] = []
     laps_successes = 0
 
     for result in results:
@@ -528,8 +535,8 @@ def aggregate_results(results: List[TargetResult]) -> Tuple[List[TaskRow], List[
 
 
 def print_summary(
-    results: List[TargetResult],
-    laps_failures: List[LAPSFailure],
+    results: list[TargetResult],
+    laps_failures: list[LAPSFailure],
     laps_successes: int,
     total_time_ms: float,
 ) -> None:

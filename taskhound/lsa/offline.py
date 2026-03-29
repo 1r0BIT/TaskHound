@@ -10,7 +10,7 @@
 #       ├── SYSTEM       # Required: service configurations
 #       └── SECURITY     # Optional: LSA secrets (for --loot)
 
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from ..utils.logging import debug as log_debug
 from ..utils.logging import good, info, warn
@@ -31,7 +31,7 @@ _WIN32_SERVICE_TYPES = {0x10, 0x20, 0x30, 0x50, 0x60, 0x110, 0x120}
 def enumerate_services_from_hive(
     system_hive_path: str,
     hostname: str = "OFFLINE",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Parse a SYSTEM registry hive to enumerate service configurations.
 
@@ -51,7 +51,7 @@ def enumerate_services_from_hive(
         warn("impacket.winregistry not available — cannot parse offline hives")
         return []
 
-    services: List[Dict[str, Any]] = []
+    services: list[dict[str, Any]] = []
 
     try:
         reg = Registry(system_hive_path, isRemote=False)
@@ -138,7 +138,7 @@ def extract_offline_lsa_secrets(
     security_hive_path: str,
     hostname: str = "OFFLINE",
     service_names: set | None = None,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Extract _SC_* LSA secrets from offline SYSTEM + SECURITY hives.
 
@@ -153,8 +153,8 @@ def extract_offline_lsa_secrets(
     """
     from impacket.examples.secretsdump import LocalOperations, LSASecrets
 
-    credentials: Dict[str, str] = {}
-    captured: List[Tuple[Any, str]] = []
+    credentials: dict[str, str] = {}
+    captured: list[tuple[Any, str]] = []
 
     def _callback(secret_type, secret: str) -> None:
         captured.append((secret_type, secret))

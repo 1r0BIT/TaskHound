@@ -6,7 +6,7 @@
 
 import os
 import traceback
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from ..classification import classify_task
 from ..models.task import TaskRow
@@ -19,15 +19,15 @@ from .helpers import sort_tasks_by_priority
 
 def process_offline_directory(
     offline_dir: str,
-    hv: Optional[HighValueLoader],
+    hv: HighValueLoader | None,
     show_unsaved_creds: bool,
     include_local: bool,
-    all_rows: List[TaskRow],
+    all_rows: list[TaskRow],
     debug: bool,
     no_ldap: bool = False,
-    dpapi_key: Optional[str] = None,
+    dpapi_key: str | None = None,
     concise: bool = False,
-) -> List[str]:
+) -> list[str]:
     """
     Process previously collected XML files from a directory structure.
 
@@ -52,7 +52,7 @@ def process_offline_directory(
     Returns:
         List of printable output strings
     """
-    out_lines: List[str] = []
+    out_lines: list[str] = []
 
     if not os.path.exists(offline_dir) or not os.path.isdir(offline_dir):
         warn(f"Offline directory does not exist or is not a directory: {offline_dir}")
@@ -100,7 +100,7 @@ def process_offline_directory(
     good(f"Offline mode: Found {total_hosts} host directories to process")
 
     # Decrypt DPAPI files and collect credentials per host
-    host_decrypted_creds: Dict[str, List] = {}  # hostname -> decrypted_creds
+    host_decrypted_creds: dict[str, list] = {}  # hostname -> decrypted_creds
     if dpapi_key:
         info("DPAPI key provided - will decrypt collected credential files")
         for host in host_dirs:
@@ -122,7 +122,7 @@ def process_offline_directory(
     return out_lines
 
 
-def _process_offline_dpapi_decryption(hostname: str, host_dir: str, dpapi_key: str, debug: bool) -> Tuple[List[str], List]:
+def _process_offline_dpapi_decryption(hostname: str, host_dir: str, dpapi_key: str, debug: bool) -> tuple[list[str], list]:
     """
     Process DPAPI files from offline collection.
 
@@ -142,8 +142,8 @@ def _process_offline_dpapi_decryption(hostname: str, host_dir: str, dpapi_key: s
         - out_lines: List of printable output strings
         - decrypted_creds: List of ScheduledTaskCredential objects for task matching
     """
-    out_lines: List[str] = []
-    decrypted_creds: List = []
+    out_lines: list[str] = []
+    decrypted_creds: list = []
 
     # Check if this directory has dpapi_loot structure
     # Priority order:
@@ -210,15 +210,15 @@ def _process_offline_dpapi_decryption(hostname: str, host_dir: str, dpapi_key: s
 def _process_offline_host(
     hostname: str,
     host_dir: str,
-    hv: Optional[HighValueLoader],
+    hv: HighValueLoader | None,
     show_unsaved_creds: bool,
     include_local: bool,
-    all_rows: List[TaskRow],
+    all_rows: list[TaskRow],
     debug: bool,
     no_ldap: bool = False,
     concise: bool = False,
-    decrypted_creds: Optional[List] = None,
-) -> List[str]:
+    decrypted_creds: list | None = None,
+) -> list[str]:
     """
     Process XML files for a single host from offline directory.
 
@@ -240,7 +240,7 @@ def _process_offline_host(
     # Import the credential matching function from online module
     from .online import _match_decrypted_password
 
-    out_lines: List[str] = []
+    out_lines: list[str] = []
     xml_files = []
 
     # Walk the host directory to find all XML files
@@ -264,8 +264,8 @@ def _process_offline_host(
     good(f"{hostname}: Processing {len(xml_files)} XML files from offline directory")
 
     priv_count = 0
-    priv_lines: List[str] = []
-    task_lines: List[str] = []
+    priv_lines: list[str] = []
+    task_lines: list[str] = []
 
     for rel_path, file_path in xml_files:
         try:

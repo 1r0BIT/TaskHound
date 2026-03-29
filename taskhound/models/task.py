@@ -5,7 +5,7 @@
 
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class TaskType(str, Enum):
@@ -65,47 +65,47 @@ class TaskRow:
     path: str
 
     # Connection info
-    target_ip: Optional[str] = None
-    computer_sid: Optional[str] = None
+    target_ip: str | None = None
+    computer_sid: str | None = None
 
     # Classification
     type: str = field(default=TaskType.TASK.value)
-    reason: Optional[str] = None
-    password_analysis: Optional[str] = None
+    reason: str | None = None
+    password_analysis: str | None = None
 
     # Task identity
-    runas: Optional[str] = None
-    resolved_runas: Optional[str] = None  # Resolved username if runas was a SID
-    command: Optional[str] = None
-    arguments: Optional[str] = None
-    author: Optional[str] = None
-    date: Optional[str] = None
+    runas: str | None = None
+    resolved_runas: str | None = None  # Resolved username if runas was a SID
+    command: str | None = None
+    arguments: str | None = None
+    author: str | None = None
+    date: str | None = None
 
     # Task configuration
-    logon_type: Optional[str] = None
-    enabled: Optional[str] = None
-    trigger_type: Optional[str] = None
-    start_boundary: Optional[str] = None
-    interval: Optional[str] = None
-    duration: Optional[str] = None
-    days_interval: Optional[str] = None
+    logon_type: str | None = None
+    enabled: str | None = None
+    trigger_type: str | None = None
+    start_boundary: str | None = None
+    interval: str | None = None
+    duration: str | None = None
+    days_interval: str | None = None
 
     # Credential hints
-    credentials_hint: Optional[str] = None
-    credential_guard: Optional[bool] = None
+    credentials_hint: str | None = None
+    credential_guard: bool | None = None
 
     # Credential validation (--validate-creds)
-    cred_status: Optional[str] = None
-    cred_password_valid: Optional[bool] = None
-    cred_hijackable: Optional[bool] = None
-    cred_last_run: Optional[str] = None
-    cred_return_code: Optional[str] = None
-    cred_detail: Optional[str] = None
+    cred_status: str | None = None
+    cred_password_valid: bool | None = None
+    cred_hijackable: bool | None = None
+    cred_last_run: str | None = None
+    cred_return_code: str | None = None
+    cred_detail: str | None = None
 
     # DPAPI looted credentials
-    decrypted_password: Optional[str] = None
+    decrypted_password: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON/CSV export."""
         return asdict(self)
 
@@ -114,9 +114,9 @@ class TaskRow:
         cls,
         host: str,
         rel_path: str,
-        meta: Dict[str, Any],
-        target_ip: Optional[str] = None,
-        computer_sid: Optional[str] = None,
+        meta: dict[str, Any],
+        target_ip: str | None = None,
+        computer_sid: str | None = None,
     ) -> "TaskRow":
         """
         Create a TaskRow from parsed task XML metadata.
@@ -167,7 +167,7 @@ class TaskRow:
         cls,
         host: str,
         reason: str,
-        target_ip: Optional[str] = None,
+        target_ip: str | None = None,
     ) -> "TaskRow":
         """
         Create a FAILURE row for hosts that couldn't be processed.
@@ -193,7 +193,7 @@ class TaskRow:
         cls,
         host: str,
         reason: str,
-        target_ip: Optional[str] = None,
+        target_ip: str | None = None,
     ) -> "TaskRow":
         """
         Create a SKIPPED row for dual-homed hosts already processed.

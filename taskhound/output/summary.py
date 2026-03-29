@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ..utils.console import console
 from ..utils.console import print_summary_table as rich_summary_table
@@ -79,11 +79,11 @@ def _clean_failure_reason(reason: str) -> str:
 
 
 def print_summary_table(
-    all_rows: List[Any],
-    backup_dir: Optional[str] = None,
+    all_rows: list[Any],
+    backup_dir: str | None = None,
     has_hv_data: bool = False,
     has_tier0_detection: bool = False,
-    service_rows: Optional[List[Any]] = None,
+    service_rows: list[Any] | None = None,
 ):
     """Print a nicely formatted summary table showing task/service counts per host."""
     if not all_rows and not service_rows:
@@ -93,7 +93,7 @@ def print_summary_table(
     has_hv = has_hv_data or has_tier0_detection
 
     # Aggregate data by host
-    host_stats: Dict[str, Dict[str, Any]] = {}
+    host_stats: dict[str, dict[str, Any]] = {}
     for row in all_rows:
         # Support both dict and TaskRow objects
         row_dict = row.to_dict() if hasattr(row, "to_dict") else row
@@ -139,7 +139,7 @@ def print_summary_table(
     rich_summary_table(host_stats, has_hv_data=has_hv)
 
 
-def print_decrypted_credentials(all_rows: List[Any], service_rows: Optional[List[Any]] = None) -> int:
+def print_decrypted_credentials(all_rows: list[Any], service_rows: list[Any] | None = None) -> int:
     """
     Print a summary of all decrypted credentials found during the scan.
 
