@@ -310,7 +310,7 @@ def _handle_exports(
             html_dir = os.path.join(output_dir, "html")
             os.makedirs(html_dir, exist_ok=True)
             html_path = os.path.join(html_dir, "taskhound_report.html")
-            generate_html_report(all_rows, html_path, service_rows=service_rows or None)
+            generate_html_report(all_rows, html_path, service_rows=service_rows or None, domain=args.domain)
             print_audit_report_section(html_path)
 
     # Print decrypted credentials summary

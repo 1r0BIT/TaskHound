@@ -46,74 +46,148 @@ def _get_row_value(row: Any, key: str, default: Any = "") -> Any:
     return getattr(row, key, default)
 
 
-def _normalize_username(username: str) -> str:
-    """
-    Normalize a username for deduplication.
+# Module-level domain context for username normalization.
+# Set by generate_html_report() before any processing.
+_report_netbios_domain: str | None = None
 
-    Handles:
-    - Case insensitivity (DOMAIN\\User -> domain\\user)
-    - Domain prefix variations (DOMAIN\\user vs user)
 
-    Returns the normalized form: lowercase, with domain if present.
+def _extract_sam_from_any_format(username: str) -> str:
+    """Extract bare samaccountname from any format.
+
+    Handles: DOMAIN\\user, user@domain.fqdn, bare user, SIDs.
+    Returns lowercase bare sam (or the original if SID/empty).
     """
     if not username:
         return ""
+    u = username.strip()
+    if u.upper().startswith("S-1-"):
+        return u
+    if "\\" in u:
+        return u.rsplit("\\", 1)[1].lower()
+    if "@" in u:
+        return u.split("@", 1)[0].lower()
+    return u.lower()
 
-    username = username.strip().lower()
 
-    # Skip SIDs
-    if username.startswith("s-1-"):
-        return username
+def _normalize_username(username: str) -> str:
+    """Normalize a username to NETBIOS\\sam format for deduplication.
 
-    return username
+    Uses _report_netbios_domain (set from scan domain) when available.
+    All of DOMAIN\\user, user@domain.fqdn, and bare user normalize to
+    the same key: NETBIOS\\sam (lowercase).
+    """
+    if not username:
+        return ""
+    u = username.strip()
+    if u.upper().startswith("S-1-"):
+        return u
+
+    sam = _extract_sam_from_any_format(u)
+    if not sam:
+        return u.lower()
+
+    # If the original had a domain qualifier, or we have a known netbios domain,
+    # normalize to netbios\\sam
+    has_domain = "\\" in u or "@" in u
+    if has_domain or _report_netbios_domain:
+        # Extract domain from the username itself if present
+        if "\\" in u:
+            domain_part = u.split("\\", 1)[0].upper()
+        elif "@" in u:
+            # UPN — derive netbios from FQDN domain part (first component)
+            fqdn_domain = u.split("@", 1)[1]
+            domain_part = fqdn_domain.split(".")[0].upper() if "." in fqdn_domain else fqdn_domain.upper()
+        elif _report_netbios_domain:
+            domain_part = _report_netbios_domain.upper()
+        else:
+            return sam
+        return f"{domain_part}\\{sam}"
+
+    return sam
 
 
 def _get_canonical_username(username: str, seen_usernames: dict[str, str]) -> str:
-    """
-    Get the canonical (display) form of a username, deduplicating variations.
+    """Get the canonical display form (NETBIOS\\Username), deduplicating variations.
 
-    Args:
-        username: The username to canonicalize
-        seen_usernames: Dict mapping normalized usernames to their canonical display form
-
-    Returns:
-        The canonical display form (preserves first-seen casing and domain prefix)
+    All variations of the same account (DOMAIN\\user, user@domain, bare user)
+    resolve to a single NETBIOS\\Username entry.
     """
     if not username:
         return ""
 
     normalized = _normalize_username(username)
-    if not normalized or normalized.startswith("s-1-"):
+    if not normalized or normalized.upper().startswith("S-1-"):
         return username
 
-    # Extract just the username part (without domain) for matching
-    if "\\" in normalized:
-        _, name_part = normalized.rsplit("\\", 1)
-    else:
-        name_part = normalized
+    if normalized in seen_usernames:
+        return seen_usernames[normalized]
 
-    # Check if we've seen this username before (with or without domain)
-    # Prefer the version WITH domain prefix if available
-    for seen_norm, seen_canonical in seen_usernames.items():
-        if "\\" in seen_norm:
-            _, seen_name = seen_norm.rsplit("\\", 1)
-        else:
-            seen_name = seen_norm
-
-        if name_part == seen_name:
-            # If new one has domain and old one doesn't, update canonical
+    # Check if we've seen the same sam under a different domain key
+    sam = _extract_sam_from_any_format(username)
+    for seen_norm, seen_display in seen_usernames.items():
+        if _extract_sam_from_any_format(seen_norm) == sam:
+            # Same user — prefer the version with domain prefix
             if "\\" in normalized and "\\" not in seen_norm:
-                seen_usernames[normalized] = username
-                # Remove the old entry without domain
-                if seen_norm in seen_usernames:
-                    del seen_usernames[seen_norm]
-                return username
-            # Otherwise use existing canonical form
-            return seen_canonical
+                # New one has domain, old didn't — upgrade
+                del seen_usernames[seen_norm]
+                break
+            else:
+                return seen_display
 
-    # First time seeing this username
-    seen_usernames[normalized] = username
-    return username
+    # Build display form: NETBIOS\Username (preserve original sam casing)
+    original_sam = _extract_sam_from_any_format(username)
+    # Restore original casing by finding sam in the raw username
+    u = username.strip()
+    if "\\" in u:
+        original_sam = u.rsplit("\\", 1)[1]
+    elif "@" in u:
+        original_sam = u.split("@", 1)[0]
+    else:
+        original_sam = u
+
+    if "\\" in normalized:
+        domain_part = normalized.split("\\", 1)[0].upper()
+        display = f"{domain_part}\\{original_sam}"
+    else:
+        display = username
+
+    seen_usernames[normalized] = display
+    return display
+
+
+def _normalize_account_display(account: str) -> str:
+    """Normalize an account name to NETBIOS\\Sam for display.
+
+    Standalone version (no dedup dict needed). Uses _report_netbios_domain
+    context. Strips SID suffixes like '(S-1-5-...)' and collapses all
+    formats (UPN, downlevel, bare) to NETBIOS\\Sam.
+    """
+    if not account:
+        return account
+
+    # Strip trailing SID suffix like " (S-1-5-21-...)"
+    clean = account.strip()
+    if " (S-1-5-" in clean:
+        clean = clean[:clean.index(" (S-1-5-")].strip()
+
+    if clean.upper().startswith("S-1-"):
+        return clean
+
+    # Extract original-cased sam
+    if "\\" in clean:
+        original_sam = clean.rsplit("\\", 1)[1]
+    elif "@" in clean:
+        original_sam = clean.split("@", 1)[0]
+    else:
+        original_sam = clean
+
+    # Build NETBIOS\Sam
+    normalized = _normalize_username(clean)
+    if "\\" in normalized:
+        domain_part = normalized.split("\\", 1)[0].upper()
+        return f"{domain_part}\\{original_sam}"
+
+    return clean
 
 
 def calculate_severity(row: Any) -> SeverityScore:
@@ -2344,7 +2418,7 @@ def _generate_attack_path_summary(
             task_type = str(_get_row_value(row, "type", "")).upper()
             if task_type != "TIER-0":
                 continue
-            account = _get_finding_account(row, kind)
+            account = _normalize_account_display(_get_finding_account(row, kind))
             host = str(_get_row_value(row, "host", "Unknown"))
             tier0_hosts.setdefault(account, set()).add(host)
             decrypted = _get_row_value(row, "decrypted_password", "")
@@ -2380,7 +2454,7 @@ def _generate_attack_path_summary(
         task_type = str(_get_row_value(row, "type", "")).upper()
         if task_type not in ("TIER-0", "PRIV"):
             continue
-        account = _get_finding_account(row, kind)
+        account = _normalize_account_display(_get_finding_account(row, kind))
         host = str(_get_row_value(row, "host", "Unknown"))
         account_hosts.setdefault(account, set()).add(host)
 
@@ -2440,7 +2514,7 @@ def _generate_credential_summary(
         if not decrypted or decrypted in ("N/A", "", "-"):
             continue
 
-        account = _get_finding_account(row, kind)
+        account = _normalize_account_display(_get_finding_account(row, kind))
         host = str(_get_row_value(row, "host", "Unknown"))
         name = _get_finding_display_name(row, kind)
         task_type = str(_get_row_value(row, "type", "")).upper()
@@ -2531,7 +2605,7 @@ def _generate_account_risk_matrix(
         if task_type not in ("TIER-0", "PRIV"):
             continue
 
-        account = _get_finding_account(row, kind)
+        account = _normalize_account_display(_get_finding_account(row, kind))
         host = str(_get_row_value(row, "host", "Unknown"))
 
         if account not in matrix_data:
@@ -2620,6 +2694,7 @@ def generate_html_report(
     output_path: str,
     scan_time: str | None = None,
     service_rows: list[Any] | None = None,
+    domain: str | None = None,
 ) -> str:
     """
     Generate a comprehensive HTML security audit report.
@@ -2629,10 +2704,19 @@ def generate_html_report(
         output_path: Path to write the HTML file
         scan_time: Optional timestamp string (defaults to current time)
         service_rows: Optional list of ServiceRow objects for service findings
+        domain: Domain FQDN from scan (e.g., 'ludus.domain') — used for
+                normalizing account names to NETBIOS\\sam format
 
     Returns:
         The output path where the report was written
     """
+    # Set module-level netbios domain for username normalization
+    global _report_netbios_domain
+    if domain:
+        _report_netbios_domain = domain.split(".")[0].upper() if "." in domain else domain.upper()
+    else:
+        _report_netbios_domain = None
+
     if scan_time is None:
         scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
