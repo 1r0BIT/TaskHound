@@ -510,7 +510,6 @@ def perform_service_enumeration(
     from ..classification import classify_service
     from ..models.service import ServiceRow
     from ..parsers.service_filter import filter_domain_services
-    from ..resolver import format_runas_with_sid_resolution, is_sid
     from ..smb.svcctl import enumerate_services
 
     try:
@@ -547,27 +546,9 @@ def perform_service_enumeration(
 
         account = row.start_name or ""
 
-        # SID resolution
-        if account and is_sid(account):
-            resolved = format_runas_with_sid_resolution(
-                account,
-                hv_loader=hv,
-                bh_connector=bh_connector,
-                smb_connection=None if no_rpc else smb,
-                no_ldap=no_ldap,
-                domain=domain,
-                dc_ip=dc_ip,
-                username=username,
-                password=password,
-                hashes=hashes,
-                kerberos=kerberos,
-                ldap_domain=ldap_domain,
-                ldap_user=ldap_user,
-                ldap_password=ldap_password,
-                ldap_hashes=ldap_hashes,
-            )
-            if resolved and resolved != account:
-                row.resolved_runas = resolved
+        # NOTE: No SID resolution needed for services. Windows SCM rejects raw
+        # SIDs as start_name — only DOMAIN\user, user@domain, or .\user are
+        # valid. Classification and OpenGraph handle these formats directly.
 
         # Classify
         classify_service(

@@ -340,7 +340,12 @@ def _classify_by_privilege(
             lookup_user = resolved_account
 
         has_domain_qualifier = "\\" in lookup_user or "@" in lookup_user or is_sid(account)
-        norm_user = lookup_user.split("\\")[-1].lower() if "\\" in lookup_user else lookup_user.lower()
+        if "\\" in lookup_user:
+            norm_user = lookup_user.split("\\")[-1].lower()
+        elif "@" in lookup_user:
+            norm_user = lookup_user.split("@")[0].lower()
+        else:
+            norm_user = lookup_user.lower()
         tier0_result = tier0_cache.get(norm_user) if has_domain_qualifier else None
 
         if tier0_result:

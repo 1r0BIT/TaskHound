@@ -1,6 +1,6 @@
 # Tests for service classification and shared privilege detection.
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from taskhound.classification import (
     _check_account_disabled,
@@ -216,48 +216,36 @@ class TestClassifyService:
         assert row.type == "SERVICE"
 
 
-class TestServiceEnumerationSIDResolution:
-    """Test that perform_service_enumeration passes hv_loader= (not hv=) to format_runas_with_sid_resolution."""
+class TestServiceIdentityResolution:
+    """Test that service identity resolution handles SCM name formats correctly.
 
-    @patch("taskhound.smb.svcctl.enumerate_services")
-    @patch("taskhound.parsers.service_filter.filter_domain_services")
-    @patch("taskhound.resolver.format_runas_with_sid_resolution")
-    @patch("taskhound.resolver.is_sid", return_value=True)
-    @patch("taskhound.classification.classify_service")
-    def test_passes_hv_loader_kwarg(
-        self, mock_classify, mock_is_sid, mock_format_runas, mock_filter, mock_enum
-    ):
-        """Verify hv_loader= keyword (not hv=) is passed to format_runas_with_sid_resolution."""
-        from taskhound.engine.helpers import perform_service_enumeration
+    Windows SCM only stores: DOMAIN\\user, user@domain, or .\\user.
+    Raw SIDs are rejected by SCM at configuration time, so SID resolution
+    is not needed for services.
+    """
 
-        # Set up mock chain: enumerate -> filter -> one service with a SID account
-        mock_enum.return_value = [{"ServiceName": "TestSvc", "StartName": "S-1-5-21-1234-1001"}]
-        mock_svc = MagicMock()
-        mock_svc.__getitem__ = lambda self, k: {"ServiceName": "TestSvc", "StartName": "S-1-5-21-1234-1001"}[k]
-        mock_filter.return_value = [mock_svc]
+    def test_tier0_cache_normalizes_downlevel(self):
+        """DOMAIN\\user is normalized to bare sam for tier0_cache lookup."""
+        from taskhound.classification import _classify_by_privilege
 
-        # ServiceRow.from_svcctl returns a row with a SID start_name
-        mock_row = ServiceRow(host="dc01.corp.local", service_name="TestSvc", start_name="S-1-5-21-1234-1001")
+        tier0_cache = {"cloud": (True, ["Domain Admins"])}
+        result = _classify_by_privilege("LUDUS\\cloud", hv=None, tier0_cache=tier0_cache)
+        assert result is not None
+        assert result[0] == "TIER-0"
 
-        mock_format_runas.return_value = "CORP\\resolved_user"
-        mock_classify.return_value = MagicMock(task_type="SERVICE", should_include=True)
+    def test_tier0_cache_normalizes_upn(self):
+        """user@domain is normalized to bare sam for tier0_cache lookup."""
+        from taskhound.classification import _classify_by_privilege
 
-        fake_hv = MagicMock()
-        fake_smb = MagicMock()
+        tier0_cache = {"cloud": (True, ["Domain Admins"])}
+        result = _classify_by_privilege("cloud@ludus.domain", hv=None, tier0_cache=tier0_cache)
+        assert result is not None
+        assert result[0] == "TIER-0"
 
-        with patch("taskhound.models.service.ServiceRow.from_svcctl", return_value=mock_row):
-            perform_service_enumeration(
-                target="dc01",
-                smb=fake_smb,
-                host="dc01.corp.local",
-                hv=fake_hv,
-                domain="corp.local",
-            )
+    def test_tier0_cache_rejects_bare_name(self):
+        """Bare samaccountname without domain qualifier should NOT match tier0_cache."""
+        from taskhound.classification import _classify_by_privilege
 
-        # The critical assertion: format_runas_with_sid_resolution must receive hv_loader=, not hv=
-        mock_format_runas.assert_called_once()
-        call_kwargs = mock_format_runas.call_args
-        assert "hv_loader" in call_kwargs.kwargs, (
-            "format_runas_with_sid_resolution should be called with hv_loader= keyword"
-        )
-        assert call_kwargs.kwargs["hv_loader"] is fake_hv
+        tier0_cache = {"cloud": (True, ["Domain Admins"])}
+        result = _classify_by_privilege("cloud", hv=None, tier0_cache=tier0_cache)
+        assert result is None  # Bare names are ambiguous, should not match
