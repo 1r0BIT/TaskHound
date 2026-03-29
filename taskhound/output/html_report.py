@@ -2406,89 +2406,68 @@ def _generate_attack_path_summary(
     opening += f".{cred_sentence}"
     paragraphs.append(opening)
 
-    # --- Tier-0 paragraph ---
+    # --- Tier-0 paragraph (Domain Takeover risk) ---
     if stats.tier0_count > 0 or stats.service_tier0_count > 0:
-        total_tier0 = stats.tier0_count + stats.service_tier0_count
-        # Collect tier-0 accounts and the hosts they appear on
-        tier0_hosts: dict[str, set[str]] = {}
+        tier0_accounts: set[str] = set()
         tier0_has_decrypted = False
-        decrypted_tier0_accounts: list[str] = []
-
         for _severity, row, kind in findings:
-            task_type = str(_get_row_value(row, "type", "")).upper()
-            if task_type != "TIER-0":
-                continue
-            account = _normalize_account_display(_get_finding_account(row, kind))
-            host = str(_get_row_value(row, "host", "Unknown"))
-            tier0_hosts.setdefault(account, set()).add(host)
-            decrypted = _get_row_value(row, "decrypted_password", "")
-            if decrypted and decrypted not in ("N/A", "", "-"):
-                tier0_has_decrypted = True
-                if account not in decrypted_tier0_accounts:
-                    decrypted_tier0_accounts.append(account)
+            if str(_get_row_value(row, "type", "")).upper() == "TIER-0":
+                tier0_accounts.add(_normalize_account_display(_get_finding_account(row, kind)))
+                decrypted = _get_row_value(row, "decrypted_password", "")
+                if decrypted and decrypted not in ("N/A", "", "-"):
+                    tier0_has_decrypted = True
 
-        account_names = sorted(tier0_hosts.keys())
-        all_tier0_hosts = sorted({h for hosts in tier0_hosts.values() for h in hosts})
-
+        names = ", ".join(html.escape(a) for a in sorted(tier0_accounts))
         tier0_text = (
-            f"A total of {total_tier0} finding{'s' if total_tier0 != 1 else ''}"
-            f" involve{'s' if total_tier0 == 1 else ''} Tier-0 privileged account{'s' if len(account_names) != 1 else ''}"
-            f" ({', '.join(html.escape(a) for a in account_names)})"
-            f" on {', '.join(html.escape(h) for h in all_tier0_hosts)}."
-            " Compromise of these accounts would grant full domain control."
+            f"<strong>Domain Takeover:</strong> Tier-0 account{'s' if len(tier0_accounts) != 1 else ''}"
+            f" ({names}) {'were' if len(tier0_accounts) != 1 else 'was'} found running"
+            " tasks or services with stored credentials."
         )
-
         if tier0_has_decrypted:
-            confirmed_names = ", ".join(html.escape(a) for a in decrypted_tier0_accounts)
-            tier0_text += (
-                f" This was confirmed during the assessment: plaintext credentials for"
-                f" {confirmed_names} were successfully recovered."
-            )
-
+            tier0_text += " Plaintext credentials were successfully recovered during the assessment."
         paragraphs.append(tier0_text)
 
-    # --- Lateral movement paragraph ---
-    # Find privileged accounts that appear on multiple hosts
-    account_hosts: dict[str, set[str]] = {}
+    # --- PRIV paragraph (Lateral Movement / Privilege Escalation risk) ---
+    priv_accounts: set[str] = set()
+    priv_multi_host: set[str] = set()
+    priv_account_hosts: dict[str, set[str]] = {}
     for _severity, row, kind in findings:
         task_type = str(_get_row_value(row, "type", "")).upper()
-        if task_type not in ("TIER-0", "PRIV"):
-            continue
-        account = _normalize_account_display(_get_finding_account(row, kind))
-        host = str(_get_row_value(row, "host", "Unknown"))
-        account_hosts.setdefault(account, set()).add(host)
+        if task_type == "PRIV":
+            account = _normalize_account_display(_get_finding_account(row, kind))
+            priv_accounts.add(account)
+            host = str(_get_row_value(row, "host", "Unknown"))
+            priv_account_hosts.setdefault(account, set()).add(host)
 
-    shared_accounts = {acct: hosts for acct, hosts in account_hosts.items() if len(hosts) > 1}
-    if shared_accounts:
-        parts: list[str] = []
-        for acct, hosts in sorted(shared_accounts.items()):
-            sorted_hosts = sorted(hosts)
-            parts.append(
-                f"{html.escape(acct)} (found on {', '.join(html.escape(h) for h in sorted_hosts)})"
-            )
-        lateral_text = (
-            "Privileged accounts were observed spanning multiple hosts, creating lateral movement risk: "
-            + "; ".join(parts)
-            + ". Compromise of any single host running these accounts could enable lateral movement to the others."
+    priv_multi_host = {a for a, h in priv_account_hosts.items() if len(h) > 1}
+
+    if priv_accounts:
+        names = ", ".join(html.escape(a) for a in sorted(priv_accounts))
+        priv_text = (
+            f"<strong>Lateral Movement &amp; Privilege Escalation:</strong>"
+            f" Privileged account{'s' if len(priv_accounts) != 1 else ''}"
+            f" ({names}) {'were' if len(priv_accounts) != 1 else 'was'} found with stored credentials."
         )
-        paragraphs.append(lateral_text)
+        if priv_multi_host:
+            priv_text += (
+                f" {len(priv_multi_host)} of these span{'s' if len(priv_multi_host) == 1 else ''}"
+                " multiple hosts, enabling lateral movement via credential reuse."
+            )
+        paragraphs.append(priv_text)
 
     # --- Credential Guard note ---
-    cred_guard_hosts: list[str] = []
-    for _severity, row, _kind in findings:
-        if _get_row_value(row, "credential_guard", None) is True:
-            host = str(_get_row_value(row, "host", "Unknown"))
-            if host not in cred_guard_hosts:
-                cred_guard_hosts.append(host)
-
+    cred_guard_hosts = len({
+        str(_get_row_value(row, "host", ""))
+        for _s, row, _k in findings
+        if _get_row_value(row, "credential_guard", None) is True
+    })
     if cred_guard_hosts:
-        cred_guard_hosts_sorted = sorted(cred_guard_hosts)
-        cg_text = (
-            f"Credential Guard was detected on {', '.join(html.escape(h) for h in cred_guard_hosts_sorted)},"
-            " which provides hardware-based protection against credential extraction on"
-            f" {'this host' if len(cred_guard_hosts_sorted) == 1 else 'these hosts'}."
+        paragraphs.append(
+            f"<strong>Note:</strong> Credential Guard was detected on {cred_guard_hosts}"
+            f" host{'s' if cred_guard_hosts != 1 else ''}, providing protection against"
+            " DPAPI-based credential extraction for scheduled tasks."
+            " LSA secrets (service credentials) may still be extractable."
         )
-        paragraphs.append(cg_text)
 
     para_html = "".join(f"<p>{p}</p>" for p in paragraphs)
 
