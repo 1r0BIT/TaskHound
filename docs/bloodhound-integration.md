@@ -144,6 +144,54 @@ taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinr
 --bh-allow-orphans       # Include nodes even if the Computer isn't in BH
 ```
 
+### Node and edge documentation
+
+For detailed documentation on every custom node kind and edge kind -- including
+abuse info, remediation guidance, OPSEC considerations, and MITRE ATT&CK references
+-- see [opengraph-nodes-and-edges.md](opengraph-nodes-and-edges.md).
+
+### Starter queries
+
+TaskHound ships pre-built Cypher queries for exploring OpenGraph data in BloodHound
+CE. Import `docs/opengraph/queries/starter_queries.json` into the Cypher tab via
+drag and drop. Queries include full attack path visualization, credential extraction
+results, TIER-0 findings, shortest-path analysis, and more.
+
+See [opengraph/queries/README.md](opengraph/queries/README.md) for the full list.
+
+> **Note:** OpenGraph nodes are not supported in BloodHound's Search or Pathfinding
+> tabs. Use the Cypher tab exclusively.
+
+### Custom icons
+
+TaskHound includes an icon definition pack for BloodHound CE. To register custom
+icons for ScheduledTask and WindowsService nodes:
+
+```bash
+python docs/opengraph/icons/upload_icons.py \
+  --url http://localhost:8080 \
+  --token YOUR_BEARER_TOKEN
+
+# Preview without uploading
+python docs/opengraph/icons/upload_icons.py \
+  --url http://localhost:8080 \
+  --token YOUR_BEARER_TOKEN \
+  --dry-run
+```
+
+Default icons (Font Awesome solid):
+- **ScheduledTask**: `clock` (purple `#8B5CF6`)
+- **WindowsService**: `gears` (cyan `#06B6D4`)
+
+Icon definitions are in `docs/opengraph/icons/icons.json` if you want to customize them.
+
+### Attack path diagram
+
+<img width="1437" height="519" alt="TaskHound OpenGraph Attack Path Diagram" src="https://github.com/user-attachments/assets/fe4077c6-1b3a-43a0-90df-d565f63763f4" />
+
+An editable [arrows.app](https://arrows.app) version is available at
+`docs/opengraph-diagram.json` -- import it to customize the diagram.
+
 ## Limitations
 
 - OpenGraph is BHCE-only. Legacy BloodHound (Neo4j) does not support custom node types.

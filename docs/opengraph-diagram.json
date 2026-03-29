@@ -1,0 +1,261 @@
+{
+  "graph": {
+    "style": {
+      "font-family": "sans-serif",
+      "background-color": "#1a1a2e",
+      "background-image": "",
+      "node-color": "#4a4a6a",
+      "border-width": 2,
+      "border-color": "#6c6c8a",
+      "radius": 50,
+      "node-padding": 5,
+      "node-margin": 2,
+      "outside-position": "auto",
+      "node-icon-image": "",
+      "icon-position": "inside",
+      "icon-size": 64,
+      "caption-position": "inside",
+      "caption-max-width": 200,
+      "caption-color": "#ffffff",
+      "caption-font-size": 14,
+      "caption-font-weight": "bold",
+      "label-position": "inside",
+      "label-display": "pill",
+      "label-color": "#ffffff",
+      "label-background-color": "#6c6c8a",
+      "label-border-color": "#9b9bb0",
+      "label-border-width": 0,
+      "label-font-size": 11,
+      "label-padding": 5,
+      "label-margin": 4,
+      "directionality": "directed",
+      "detail-position": "below",
+      "detail-font-size": 12,
+      "arrow-width": 3,
+      "arrow-color": "#aaaacc",
+      "margin-start": 5,
+      "margin-end": 5,
+      "margin-peer": 20,
+      "attachment-start": "normal",
+      "attachment-end": "normal",
+      "relationship-icon-image": "",
+      "type-color": "#ffffff",
+      "type-font-size": 12,
+      "type-padding": 5,
+      "property-position": "outside",
+      "property-alignment": "colon",
+      "property-color": "#cccccc",
+      "property-font-size": 11,
+      "property-margin": 10
+    },
+    "nodes": [
+      {
+        "id": "n0",
+        "position": { "x": 0, "y": 0 },
+        "caption": "Computer",
+        "labels": ["Computer", "Base"],
+        "properties": {
+          "name": "DC01.DOMAIN.LAB",
+          "objectid": "S-1-5-21-..."
+        },
+        "style": {
+          "node-color": "#17a2b8",
+          "caption-color": "#ffffff",
+          "border-color": "#138496"
+        }
+      },
+      {
+        "id": "n1",
+        "position": { "x": 400, "y": -150 },
+        "caption": "ScheduledTask",
+        "labels": ["ScheduledTask", "Base", "TaskHound"],
+        "properties": {
+          "name": "Backup_DB",
+          "tasktype": "TIER-0",
+          "credentialsstored": "true",
+          "logontype": "Password"
+        },
+        "style": {
+          "node-color": "#8B5CF6",
+          "caption-color": "#ffffff",
+          "border-color": "#7C3AED"
+        }
+      },
+      {
+        "id": "n2",
+        "position": { "x": 400, "y": 0 },
+        "caption": "ScheduledTask",
+        "labels": ["ScheduledTask", "Base", "TaskHound"],
+        "properties": {
+          "name": "Cleanup_Logs",
+          "tasktype": "TASK",
+          "credentialsstored": "false",
+          "logontype": "InteractiveToken"
+        },
+        "style": {
+          "node-color": "#8B5CF6",
+          "caption-color": "#ffffff",
+          "border-color": "#7C3AED"
+        }
+      },
+      {
+        "id": "n3",
+        "position": { "x": 400, "y": 150 },
+        "caption": "WindowsService",
+        "labels": ["WindowsService", "Base", "TaskHound"],
+        "properties": {
+          "name": "SVC_Replication",
+          "serviceclassification": "TIER-0",
+          "isgmsa": "false"
+        },
+        "style": {
+          "node-color": "#06B6D4",
+          "caption-color": "#ffffff",
+          "border-color": "#0891B2"
+        }
+      },
+      {
+        "id": "n4",
+        "position": { "x": 800, "y": -150 },
+        "caption": "User",
+        "labels": ["User", "Base"],
+        "properties": {
+          "name": "SVC_BACKUP@DOMAIN.LAB",
+          "objectid": "S-1-5-21-...-1108"
+        },
+        "style": {
+          "node-color": "#28a745",
+          "caption-color": "#ffffff",
+          "border-color": "#218838"
+        }
+      },
+      {
+        "id": "n5",
+        "position": { "x": 800, "y": 0 },
+        "caption": "User",
+        "labels": ["User", "Base"],
+        "properties": {
+          "name": "JANITOR@DOMAIN.LAB",
+          "objectid": "S-1-5-21-...-1205"
+        },
+        "style": {
+          "node-color": "#28a745",
+          "caption-color": "#ffffff",
+          "border-color": "#218838"
+        }
+      },
+      {
+        "id": "n6",
+        "position": { "x": 800, "y": 150 },
+        "caption": "User",
+        "labels": ["User", "Base"],
+        "properties": {
+          "name": "SVC_REPL@DOMAIN.LAB",
+          "objectid": "S-1-5-21-...-1320"
+        },
+        "style": {
+          "node-color": "#28a745",
+          "caption-color": "#ffffff",
+          "border-color": "#218838"
+        }
+      },
+      {
+        "id": "n7",
+        "position": { "x": 1200, "y": 0 },
+        "caption": "Group",
+        "labels": ["Group", "Base"],
+        "properties": {
+          "name": "DOMAIN ADMINS@DOMAIN.LAB",
+          "objectid": "S-1-5-21-...-512"
+        },
+        "style": {
+          "node-color": "#dc3545",
+          "caption-color": "#ffffff",
+          "border-color": "#c82333"
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "id": "r0",
+        "type": "HasTaskWithStoredCreds",
+        "fromId": "n0",
+        "toId": "n1",
+        "properties": {},
+        "style": {
+          "arrow-color": "#8B5CF6"
+        }
+      },
+      {
+        "id": "r1",
+        "type": "HasTask",
+        "fromId": "n0",
+        "toId": "n2",
+        "properties": {},
+        "style": {
+          "arrow-color": "#95a5a6"
+        }
+      },
+      {
+        "id": "r2",
+        "type": "HasServiceWithStoredCreds",
+        "fromId": "n0",
+        "toId": "n3",
+        "properties": {},
+        "style": {
+          "arrow-color": "#06B6D4"
+        }
+      },
+      {
+        "id": "r3",
+        "type": "RunsAs",
+        "fromId": "n1",
+        "toId": "n4",
+        "properties": {},
+        "style": {
+          "arrow-color": "#e74c3c"
+        }
+      },
+      {
+        "id": "r4",
+        "type": "RunsAs",
+        "fromId": "n2",
+        "toId": "n5",
+        "properties": {},
+        "style": {
+          "arrow-color": "#e74c3c"
+        }
+      },
+      {
+        "id": "r5",
+        "type": "RunsAs",
+        "fromId": "n3",
+        "toId": "n6",
+        "properties": {},
+        "style": {
+          "arrow-color": "#e74c3c"
+        }
+      },
+      {
+        "id": "r6",
+        "type": "MemberOf",
+        "fromId": "n4",
+        "toId": "n7",
+        "properties": {},
+        "style": {
+          "arrow-color": "#dc3545"
+        }
+      },
+      {
+        "id": "r7",
+        "type": "MemberOf",
+        "fromId": "n6",
+        "toId": "n7",
+        "properties": {},
+        "style": {
+          "arrow-color": "#dc3545"
+        }
+      }
+    ]
+  }
+}
