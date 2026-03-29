@@ -1475,6 +1475,208 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             font-weight: 500;
         }
 
+        /* Attack Path Summary */
+        .attack-path {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--severity-info);
+        }
+
+        .attack-path.risk-critical { border-left-color: var(--severity-critical); }
+        .attack-path.risk-high { border-left-color: var(--severity-high); }
+        .attack-path.risk-medium { border-left-color: var(--severity-medium); }
+        .attack-path.risk-low { border-left-color: var(--severity-low); }
+        .attack-path.risk-info { border-left-color: var(--severity-info); }
+
+        .attack-path h2 {
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .attack-path p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.7;
+            margin-bottom: 0.75rem;
+        }
+
+        .attack-path p:last-child {
+            margin-bottom: 0;
+        }
+
+        /* Credential Summary Table */
+        .credential-summary {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+        }
+
+        .credential-summary h2 {
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .credential-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
+        }
+
+        .credential-table th {
+            background: var(--bg-card);
+            padding: 0.6rem 0.75rem;
+            text-align: left;
+            font-weight: 500;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            text-transform: uppercase;
+            font-size: 0.7rem;
+            letter-spacing: 0.04em;
+        }
+
+        .credential-table td {
+            padding: 0.6rem 0.75rem;
+            border: 1px solid var(--border);
+            vertical-align: top;
+            color: var(--text-secondary);
+        }
+
+        .credential-table tr:hover {
+            background: rgba(99, 102, 241, 0.03);
+        }
+
+        .credential-table .password-cell {
+            font-family: 'Consolas', 'Monaco', monospace;
+            color: var(--success-light);
+            background: rgba(22, 101, 52, 0.1);
+            word-break: break-all;
+        }
+
+        .credential-table .no-creds {
+            color: var(--text-muted);
+            font-style: italic;
+            padding: 1.5rem;
+            text-align: center;
+        }
+
+        /* Account Risk Matrix */
+        .risk-matrix-section {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+            overflow-x: auto;
+        }
+
+        .risk-matrix-section h2 {
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .risk-matrix {
+            border-collapse: collapse;
+            font-size: 0.8rem;
+            min-width: 100%;
+        }
+
+        .risk-matrix th {
+            background: var(--bg-card);
+            padding: 0.5rem 0.75rem;
+            text-align: center;
+            font-weight: 500;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            white-space: nowrap;
+        }
+
+        .risk-matrix th:first-child {
+            text-align: left;
+            position: sticky;
+            left: 0;
+            z-index: 1;
+            background: var(--bg-card);
+        }
+
+        .risk-matrix td {
+            padding: 0.4rem 0.6rem;
+            border: 1px solid var(--border);
+            text-align: center;
+            vertical-align: middle;
+        }
+
+        .risk-matrix td:first-child {
+            text-align: left;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            position: sticky;
+            left: 0;
+            z-index: 1;
+            background: var(--bg-secondary);
+        }
+
+        .risk-cell {
+            display: inline-block;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            min-width: 24px;
+        }
+
+        .risk-cell.severity-critical {
+            background: var(--severity-critical-bg);
+            color: #fca5a5;
+            border: 1px solid var(--severity-critical);
+        }
+        .risk-cell.severity-high {
+            background: var(--severity-high-bg);
+            color: #fdba74;
+            border: 1px solid var(--severity-high);
+        }
+        .risk-cell.severity-medium {
+            background: var(--severity-medium-bg);
+            color: #fcd34d;
+            border: 1px solid var(--severity-medium);
+        }
+        .risk-cell.severity-low {
+            background: var(--severity-low-bg);
+            color: #93c5fd;
+            border: 1px solid var(--severity-low);
+        }
+        .risk-cell.severity-info {
+            background: rgba(75, 85, 99, 0.15);
+            color: var(--text-secondary);
+            border: 1px solid var(--severity-info);
+        }
+
+        .risk-matrix .multi-host {
+            font-weight: 600;
+        }
+
         /* Print styles */
         @media print {
             body {
@@ -1498,6 +1700,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {{HEADER}}
         {{DISCLAIMER}}
         {{EXECUTIVE_SUMMARY}}
+        {{ATTACK_PATH_SUMMARY}}
+        {{CREDENTIAL_SUMMARY}}
+        {{ACCOUNT_RISK_MATRIX}}
         {{CLASSIFICATION_REFERENCE}}
         {{UNIFIED_FINDINGS}}
         {{FAILURES}}
@@ -1998,6 +2203,326 @@ def _generate_footer() -> str:
 
 
 
+def _generate_attack_path_summary(
+    stats: AuditStatistics,
+    findings: list[tuple[SeverityScore, Any, str]],
+    service_rows: list[Any] | None = None,
+) -> str:
+    """Generate a data-driven attack path narrative section."""
+    total_findings = len(findings)
+    if total_findings == 0:
+        return ""
+
+    risk_class = f"risk-{stats.overall_risk.lower()}"
+    paragraphs: list[str] = []
+
+    # --- Opening paragraph (always) ---
+    cred_sentence = ""
+    if stats.decrypted_count > 0:
+        cred_sentence = (
+            f" {stats.decrypted_count} plaintext credential{'s were' if stats.decrypted_count != 1 else ' was'}"
+            " successfully extracted."
+        )
+    else:
+        cred_sentence = " No plaintext credentials were successfully extracted."
+
+    opening = (
+        f"The assessment identified {total_findings} finding{'s' if total_findings != 1 else ''}"
+        f" across {stats.total_hosts} host{'s' if stats.total_hosts != 1 else ''}"
+    )
+    severity_parts: list[str] = []
+    if stats.critical_count > 0:
+        severity_parts.append(f"{stats.critical_count} critical")
+    if stats.high_count > 0:
+        severity_parts.append(f"{stats.high_count} high-severity")
+    if severity_parts:
+        opening += f", including {' and '.join(severity_parts)} issue{'s' if (stats.critical_count + stats.high_count) != 1 else ''}"
+    opening += f".{cred_sentence}"
+    paragraphs.append(opening)
+
+    # --- Tier-0 paragraph ---
+    if stats.tier0_count > 0 or stats.service_tier0_count > 0:
+        total_tier0 = stats.tier0_count + stats.service_tier0_count
+        # Collect tier-0 accounts and the hosts they appear on
+        tier0_hosts: dict[str, set[str]] = {}
+        tier0_has_decrypted = False
+        decrypted_tier0_accounts: list[str] = []
+
+        for _severity, row, kind in findings:
+            task_type = str(_get_row_value(row, "type", "")).upper()
+            if task_type != "TIER-0":
+                continue
+            account = _get_finding_account(row, kind)
+            host = str(_get_row_value(row, "host", "Unknown"))
+            tier0_hosts.setdefault(account, set()).add(host)
+            decrypted = _get_row_value(row, "decrypted_password", "")
+            if decrypted and decrypted not in ("N/A", "", "-"):
+                tier0_has_decrypted = True
+                if account not in decrypted_tier0_accounts:
+                    decrypted_tier0_accounts.append(account)
+
+        account_names = sorted(tier0_hosts.keys())
+        all_tier0_hosts = sorted({h for hosts in tier0_hosts.values() for h in hosts})
+
+        tier0_text = (
+            f"A total of {total_tier0} finding{'s' if total_tier0 != 1 else ''}"
+            f" involve{'s' if total_tier0 == 1 else ''} Tier-0 privileged account{'s' if len(account_names) != 1 else ''}"
+            f" ({', '.join(html.escape(a) for a in account_names)})"
+            f" on {', '.join(html.escape(h) for h in all_tier0_hosts)}."
+            " Compromise of these accounts would grant full domain control."
+        )
+
+        if tier0_has_decrypted:
+            confirmed_names = ", ".join(html.escape(a) for a in decrypted_tier0_accounts)
+            tier0_text += (
+                f" This was confirmed during the assessment: plaintext credentials for"
+                f" {confirmed_names} were successfully recovered."
+            )
+
+        paragraphs.append(tier0_text)
+
+    # --- Lateral movement paragraph ---
+    # Find privileged accounts that appear on multiple hosts
+    account_hosts: dict[str, set[str]] = {}
+    for _severity, row, kind in findings:
+        task_type = str(_get_row_value(row, "type", "")).upper()
+        if task_type not in ("TIER-0", "PRIV"):
+            continue
+        account = _get_finding_account(row, kind)
+        host = str(_get_row_value(row, "host", "Unknown"))
+        account_hosts.setdefault(account, set()).add(host)
+
+    shared_accounts = {acct: hosts for acct, hosts in account_hosts.items() if len(hosts) > 1}
+    if shared_accounts:
+        parts: list[str] = []
+        for acct, hosts in sorted(shared_accounts.items()):
+            sorted_hosts = sorted(hosts)
+            parts.append(
+                f"{html.escape(acct)} (found on {', '.join(html.escape(h) for h in sorted_hosts)})"
+            )
+        lateral_text = (
+            "Privileged accounts were observed spanning multiple hosts, creating lateral movement risk: "
+            + "; ".join(parts)
+            + ". Compromise of any single host running these accounts could enable lateral movement to the others."
+        )
+        paragraphs.append(lateral_text)
+
+    # --- Credential Guard note ---
+    cred_guard_hosts: list[str] = []
+    for _severity, row, _kind in findings:
+        if _get_row_value(row, "credential_guard", None) is True:
+            host = str(_get_row_value(row, "host", "Unknown"))
+            if host not in cred_guard_hosts:
+                cred_guard_hosts.append(host)
+
+    if cred_guard_hosts:
+        cred_guard_hosts_sorted = sorted(cred_guard_hosts)
+        cg_text = (
+            f"Credential Guard was detected on {', '.join(html.escape(h) for h in cred_guard_hosts_sorted)},"
+            " which provides hardware-based protection against credential extraction on"
+            f" {'this host' if len(cred_guard_hosts_sorted) == 1 else 'these hosts'}."
+        )
+        paragraphs.append(cg_text)
+
+    para_html = "".join(f"<p>{p}</p>" for p in paragraphs)
+
+    return f"""
+        <div class="attack-path {risk_class}">
+            <h2>Attack Path Summary</h2>
+            {para_html}
+        </div>
+    """
+
+
+def _generate_credential_summary(
+    findings: list[tuple[SeverityScore, Any, str]],
+    service_rows: list[Any] | None = None,
+) -> str:
+    """Generate a table of all extracted credentials (passwords and hashes)."""
+    severity_order = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
+
+    cred_rows: list[dict[str, str]] = []
+
+    for severity, row, kind in findings:
+        decrypted = _get_row_value(row, "decrypted_password", "")
+        if not decrypted or decrypted in ("N/A", "", "-"):
+            continue
+
+        account = _get_finding_account(row, kind)
+        host = str(_get_row_value(row, "host", "Unknown"))
+        name = _get_finding_display_name(row, kind)
+        task_type = str(_get_row_value(row, "type", "")).upper()
+        cred_guard = _get_row_value(row, "credential_guard", None)
+        source = "Task" if kind == "task" else "Service"
+
+        cred_rows.append({
+            "account": account,
+            "password": str(decrypted),
+            "source": source,
+            "host": host,
+            "name": name,
+            "classification": task_type,
+            "cred_guard": "Yes" if cred_guard is True else "No" if cred_guard is False else "-",
+            "severity_rank": str(severity_order.get(severity.level, 0)),
+            "class_rank": str({"TIER-0": 3, "PRIV": 2}.get(task_type, 1)),
+        })
+
+    # Sort by classification severity (TIER-0 first), then by finding severity
+    cred_rows.sort(key=lambda r: (-int(r["class_rank"]), -int(r["severity_rank"])))
+
+    summary_html = """
+        <div class="credential-summary">
+            <h2>Credential Summary</h2>
+    """
+
+    if not cred_rows:
+        summary_html += '<p class="credential-table no-creds">No credentials were successfully extracted during this assessment.</p>'
+        summary_html += "</div>"
+        return summary_html
+
+    summary_html += """
+            <table class="credential-table">
+                <thead>
+                    <tr>
+                        <th>Account</th>
+                        <th>Password / Hash</th>
+                        <th>Source</th>
+                        <th>Host</th>
+                        <th>Finding Name</th>
+                        <th>Classification</th>
+                        <th>Credential Guard</th>
+                    </tr>
+                </thead>
+                <tbody>
+    """
+
+    for cr in cred_rows:
+        account_class = ""
+        if cr["classification"] == "TIER-0":
+            account_class = " tier0"
+        elif cr["classification"] == "PRIV":
+            account_class = " priv"
+
+        summary_html += f"""
+                    <tr>
+                        <td><span class="finding-account{account_class}">{html.escape(cr['account'])}</span></td>
+                        <td class="password-cell">{html.escape(cr['password'])}</td>
+                        <td>{html.escape(cr['source'])}</td>
+                        <td>{html.escape(cr['host'])}</td>
+                        <td style="font-family: 'Consolas', 'Monaco', monospace; font-size: 0.8rem;">{html.escape(cr['name'])}</td>
+                        <td>{html.escape(cr['classification'])}</td>
+                        <td>{html.escape(cr['cred_guard'])}</td>
+                    </tr>
+        """
+
+    summary_html += """
+                </tbody>
+            </table>
+        </div>
+    """
+
+    return summary_html
+
+
+def _generate_account_risk_matrix(
+    findings: list[tuple[SeverityScore, Any, str]],
+    service_rows: list[Any] | None = None,
+) -> str:
+    """Generate an account-vs-host risk matrix for privileged accounts."""
+    severity_order = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
+
+    # Collect data: account -> host -> {kinds, max_severity_level}
+    matrix_data: dict[str, dict[str, dict[str, Any]]] = {}
+
+    for severity, row, kind in findings:
+        task_type = str(_get_row_value(row, "type", "")).upper()
+        if task_type not in ("TIER-0", "PRIV"):
+            continue
+
+        account = _get_finding_account(row, kind)
+        host = str(_get_row_value(row, "host", "Unknown"))
+
+        if account not in matrix_data:
+            matrix_data[account] = {}
+        if host not in matrix_data[account]:
+            matrix_data[account][host] = {"kinds": set(), "max_severity": "INFO"}
+
+        cell = matrix_data[account][host]
+        cell["kinds"].add(kind)
+
+        if severity_order.get(severity.level, 0) > severity_order.get(cell["max_severity"], 0):
+            cell["max_severity"] = severity.level
+
+    if not matrix_data:
+        return ""
+
+    # Determine unique hosts across all privileged accounts
+    all_hosts: list[str] = sorted({h for acct_data in matrix_data.values() for h in acct_data})
+    # Sort accounts: by highest severity across all hosts, then name
+    def account_sort_key(acct: str) -> tuple[int, str]:
+        max_sev = 0
+        for host_data in matrix_data[acct].values():
+            sev_val = severity_order.get(host_data["max_severity"], 0)
+            if sev_val > max_sev:
+                max_sev = sev_val
+        return (-max_sev, acct.lower())
+
+    sorted_accounts = sorted(matrix_data.keys(), key=account_sort_key)
+
+    # Check which accounts span multiple hosts (lateral movement)
+    multi_host_accounts = {acct for acct in matrix_data if len(matrix_data[acct]) > 1}
+
+    matrix_html = """
+        <div class="risk-matrix-section">
+            <h2>Account Risk Matrix</h2>
+            <table class="risk-matrix">
+                <thead>
+                    <tr>
+                        <th>Account</th>
+    """
+
+    for host in all_hosts:
+        matrix_html += f"<th>{html.escape(host)}</th>"
+
+    matrix_html += """
+                    </tr>
+                </thead>
+                <tbody>
+    """
+
+    for account in sorted_accounts:
+        multi_class = ' class="multi-host"' if account in multi_host_accounts else ""
+        matrix_html += f"<tr><td{multi_class}>{html.escape(account)}</td>"
+
+        for host in all_hosts:
+            cell_data = matrix_data[account].get(host)
+            if cell_data is None:
+                matrix_html += "<td></td>"
+            else:
+                kinds = cell_data["kinds"]
+                sev_level = cell_data["max_severity"]
+                sev_class = f"severity-{sev_level.lower()}"
+
+                label_parts: list[str] = []
+                if "task" in kinds:
+                    label_parts.append("T")
+                if "service" in kinds:
+                    label_parts.append("S")
+                label = " ".join(label_parts)
+
+                matrix_html += f'<td><span class="risk-cell {sev_class}">{label}</span></td>'
+
+        matrix_html += "</tr>"
+
+    matrix_html += """
+                </tbody>
+            </table>
+        </div>
+    """
+
+    return matrix_html
+
+
 def generate_html_report(
     rows: list[Any],
     output_path: str,
@@ -2026,6 +2551,9 @@ def generate_html_report(
     header = _generate_header(stats, scan_time)
     disclaimer = _generate_disclaimer()
     executive_summary = _generate_executive_summary(stats)
+    attack_path_summary = _generate_attack_path_summary(stats, findings, service_rows)
+    credential_summary = _generate_credential_summary(findings, service_rows)
+    account_risk_matrix = _generate_account_risk_matrix(findings, service_rows)
     classification_reference = _generate_classification_reference()
     unified_findings = _generate_unified_findings(findings)
     failures = _generate_failures(stats)
@@ -2036,6 +2564,9 @@ def generate_html_report(
         HTML_TEMPLATE.replace("{{HEADER}}", header)
         .replace("{{DISCLAIMER}}", disclaimer)
         .replace("{{EXECUTIVE_SUMMARY}}", executive_summary)
+        .replace("{{ATTACK_PATH_SUMMARY}}", attack_path_summary)
+        .replace("{{CREDENTIAL_SUMMARY}}", credential_summary)
+        .replace("{{ACCOUNT_RISK_MATRIX}}", account_risk_matrix)
         .replace("{{CLASSIFICATION_REFERENCE}}", classification_reference)
         .replace("{{UNIFIED_FINDINGS}}", unified_findings)
         .replace("{{FAILURES}}", failures)
