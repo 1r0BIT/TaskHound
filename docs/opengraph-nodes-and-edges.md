@@ -9,9 +9,9 @@ format: General, Abuse Info, Remediation, OPSEC, References, and Properties.
 
 ## Nodes
 
-### ScheduledTask
+### TH_ScheduledTask
 
-**Kinds**: `ScheduledTask`, `Base`, `TaskHound`
+**Kinds**: `TH_ScheduledTask`, `Base`, `TaskHound`
 
 #### General
 
@@ -19,7 +19,7 @@ Represents a Windows scheduled task discovered on a remote host via SMB share cr
 (`C$\Windows\System32\Tasks`). TaskHound parses each task XML to extract the RunAs
 principal, logon type, command line, trigger schedule, and credential storage hints.
 
-A ScheduledTask node appears in BloodHound when TaskHound processes a target with
+A TH_ScheduledTask node appears in BloodHound when TaskHound processes a target with
 `--bh-opengraph` enabled. Tasks running as local system accounts (NT AUTHORITY\SYSTEM,
 LOCAL SERVICE, NETWORK SERVICE) are excluded from the graph -- only tasks running as
 domain principals generate nodes and edges.
@@ -155,9 +155,9 @@ the recovered password enables lateral movement to HOST-B.
 
 ---
 
-### WindowsService
+### TH_WindowsService
 
-**Kinds**: `WindowsService`, `Base`, `TaskHound`
+**Kinds**: `TH_WindowsService`, `Base`, `TaskHound`
 
 #### General
 
@@ -197,7 +197,7 @@ restart the service. The payload runs as the service account.
 blobs, the NTLM hash is extractable from LSA secrets. This hash is usable for
 pass-the-hash attacks. The `password` property shows the hash as `NTLM:<hash>`.
 
-**Lateral movement**: Same pattern as ScheduledTask -- recover credentials from
+**Lateral movement**: Same pattern as TH_ScheduledTask -- recover credentials from
 a service on HOST-A, use them to authenticate to HOST-B where the service account
 has privileges.
 
@@ -256,7 +256,7 @@ has privileges.
 - See [opsec.md](opsec.md#lsa-secret-extraction) for details.
 
 **Detection when abusing extracted credentials**:
-- Same as ScheduledTask -- credential reuse generates standard authentication events.
+- Same as TH_ScheduledTask -- credential reuse generates standard authentication events.
 - Pass-the-hash with extracted gMSA NTLM generates Event ID 4624 with NtLmSsp
   authentication package.
 
@@ -298,9 +298,15 @@ has privileges.
 
 ## Edges
 
-### HasTask
+### TH_HasTask
 
-**Direction**: `Computer` -> `ScheduledTask`
+**Direction**: `Computer` -> `TH_ScheduledTask`
+
+**Traversable**: No. This edge is declared **non-traversable** in TaskHound's v9
+extension schema and is deliberately excluded from BloodHound Pathfinding / Attack
+Paths. Because these tasks store no credentials, there is no recoverable secret to
+pivot on, so including them in pathfinding would generate false attack paths. The
+edge is still visible in raw Cypher (`MATCH ()-[:TH_HasTask]->()`).
 
 #### General
 
@@ -308,7 +314,7 @@ Indicates that a scheduled task exists on the computer but does **not** store
 credentials. The task uses logon type `InteractiveToken` (runs only when the user
 is already logged in) or `ServiceAccount` (uses the machine's service ticket).
 
-These tasks are less immediately exploitable than `HasTaskWithStoredCreds` because
+These tasks are less immediately exploitable than `TH_HasTaskWithStoredCreds` because
 there is no password to extract, but they still reveal which privileged accounts
 are configured to run automated tasks on which hosts.
 
@@ -331,7 +337,7 @@ delegation).
 
 #### OPSEC
 
-Same as ScheduledTask node OPSEC -- the edge itself doesn't create additional IOCs.
+Same as TH_ScheduledTask node OPSEC -- the edge itself doesn't create additional IOCs.
 
 #### References
 
@@ -339,9 +345,16 @@ Same as ScheduledTask node OPSEC -- the edge itself doesn't create additional IO
 
 ---
 
-### HasTaskWithStoredCreds
+### TH_HasTaskWithStoredCreds
 
-**Direction**: `Computer` -> `ScheduledTask`
+**Direction**: `Computer` -> `TH_ScheduledTask`
+
+**Traversable**: Yes. This edge is declared **traversable** in TaskHound's v9
+extension schema, so it appears in BloodHound Pathfinding / Attack Paths (not just
+raw Cypher). Together with `TH_RunsAs` it forms the real
+`Computer -> TH_ScheduledTask -> RunAs principal` attack path that pathfinding can
+discover automatically. On pre-v9 BloodHound the schema install no-ops and the edge
+remains generic / Cypher-only.
 
 #### General
 
@@ -351,7 +364,7 @@ stored credentials means the password is recoverable with local admin access.
 
 Created when the task's logon type is `Password`. (S4U tasks do not store
 credentials -- they use Kerberos S4U2Self for local-only access without persisting
-a password, so they get a `HasTask` edge instead.)
+a password, so they get a `TH_HasTask` edge instead.)
 
 #### Abuse Info
 
@@ -359,7 +372,7 @@ This edge represents a direct credential recovery opportunity:
 
 1. Gain local admin on the Computer (start node)
 2. Use TaskHound `--loot` or manual DPAPI extraction to recover the stored password
-3. Authenticate as the RunAs user (end node's `runas` property -> follow the `RunsAs` edge)
+3. Authenticate as the RunAs user (end node's `runas` property -> follow the `TH_RunsAs` edge)
 4. From the User node, follow existing BloodHound attack paths to escalate further
 
 #### Remediation
@@ -367,7 +380,7 @@ This edge represents a direct credential recovery opportunity:
 - Migrate to gMSA or InteractiveToken logon types where possible
 - Enable Credential Guard to protect DPAPI secrets
 - Run TaskHound regularly to detect new tasks with stored credentials
-- See ScheduledTask node remediation for full guidance
+- See TH_ScheduledTask node remediation for full guidance
 
 #### OPSEC
 
@@ -383,9 +396,16 @@ This edge represents a direct credential recovery opportunity:
 
 ---
 
-### HasServiceWithStoredCreds
+### TH_HasServiceWithStoredCreds
 
-**Direction**: `Computer` -> `WindowsService`
+**Direction**: `Computer` -> `TH_WindowsService`
+
+**Traversable**: Yes. This edge is declared **traversable** in TaskHound's v9
+extension schema, so it appears in BloodHound Pathfinding / Attack Paths (not just
+raw Cypher). Together with `TH_RunsAs` it forms the real
+`Computer -> TH_WindowsService -> RunAs principal` attack path that pathfinding can
+discover automatically. On pre-v9 BloodHound the schema install no-ops and the edge
+remains generic / Cypher-only.
 
 #### General
 
@@ -400,7 +420,7 @@ This edge represents a direct credential recovery opportunity:
 1. Gain local admin on the Computer (start node)
 2. Extract LSA secrets (TaskHound does this via `--loot`, or use `nxc smb <target> --lsa` / `secretsdump.py`)
 3. The service password appears as `_SC_<ServiceName>` in the LSA dump
-4. Authenticate as the service account (follow the `RunsAs` edge to the User node)
+4. Authenticate as the service account (follow the `TH_RunsAs` edge to the User node)
 5. Pivot through BloodHound's existing attack paths from that User
 
 For gMSA services (`isgmsa: true`), the extracted credential is an NTLM hash
@@ -415,7 +435,7 @@ rather than a plaintext password. This hash is directly usable for pass-the-hash
   elsewhere
 - Restrict local admin access to hosts running privileged services
 - Enable Credential Guard
-- See WindowsService node remediation for full guidance
+- See TH_WindowsService node remediation for full guidance
 
 #### OPSEC
 
@@ -430,9 +450,17 @@ rather than a plaintext password. This hash is directly usable for pass-the-hash
 
 ---
 
-### RunsAs
+### TH_RunsAs
 
-**Direction**: `ScheduledTask` -> `User` or `WindowsService` -> `User`
+**Direction**: `TH_ScheduledTask` -> `User` or `TH_WindowsService` -> `User`
+
+**Traversable**: Yes. This edge is declared **traversable** in TaskHound's v9
+extension schema and is the hinge of the attack path -- it carries pathfinding from
+TaskHound's custom nodes onto BloodHound's native User node. Combined with
+`TH_HasTaskWithStoredCreds` / `TH_HasServiceWithStoredCreds`, the full
+`Computer -> TH_ScheduledTask|TH_WindowsService -> User` chain now surfaces in
+BloodHound Pathfinding / Attack Paths. On pre-v9 BloodHound the schema install
+no-ops and the edge remains generic / Cypher-only.
 
 #### General
 
@@ -446,18 +474,21 @@ works across domain renames and avoids ambiguity with duplicate names.
 
 #### Abuse Info
 
-This edge itself is informational -- it maps "this task/service authenticates as
-this user." The abuse scenario is:
+This edge maps "this task/service authenticates as this user." Because it is
+traversable, the chain below is now discoverable directly in BloodHound Pathfinding
+rather than only via hand-written Cypher:
 
-1. Extract credentials from the task/service (via `HasTaskWithStoredCreds` or
-   `HasServiceWithStoredCreds`)
-2. Follow this `RunsAs` edge to identify the compromised User
+1. Extract credentials from the task/service (via `TH_HasTaskWithStoredCreds` or
+   `TH_HasServiceWithStoredCreds`)
+2. Follow this `TH_RunsAs` edge to identify the compromised User
 3. From the User node, use BloodHound's standard pathfinding to find escalation
    paths (MemberOf, AdminTo, HasSession, GenericAll, etc.)
 
-The combination of `HasTaskWithStoredCreds → ScheduledTask → RunsAs → User →
+The combination of `TH_HasTaskWithStoredCreds → TH_ScheduledTask → TH_RunsAs → User →
 MemberOf → Domain Admins` represents a complete privilege escalation path from
-"local admin on one host" to "domain admin."
+"local admin on one host" to "domain admin" -- and since `TH_HasTaskWithStoredCreds`
+and `TH_RunsAs` are both traversable, BloodHound stitches it into Attack Paths
+automatically.
 
 #### Remediation
 

@@ -35,8 +35,14 @@ All queries appear under the **TaskHound** category.
 
 ## Notes
 
-- OpenGraph nodes are **not** supported in BloodHound's Search or Pathfinding tabs.
-  Use the **Cypher tab** exclusively.
+- On **BloodHound CE v9+**, TaskHound's stored-credential edges
+  (`TH_HasTaskWithStoredCreds`, `TH_HasServiceWithStoredCreds`, `TH_RunsAs`) are
+  declared **traversable** by the installed extension schema, so the
+  Computer -> Task/Service -> RunAs-principal attack path shows up in
+  **Pathfinding / Attack Paths** as well as in the Cypher tab. The
+  `TH_HasTask` edge is non-traversable (no stored creds) and stays out of
+  pathfinding to avoid false attack paths. On pre-v9 BloodHound these edges
+  remain Cypher-only — use the **Cypher tab**.
 - Queries use `LIMIT 1000` by default. Adjust as needed for large environments.
-- The `TaskHound` kind is shared by both ScheduledTask and WindowsService nodes,
-  useful for cross-type queries.
+- The `TaskHound` kind is shared by both `TH_ScheduledTask` and
+  `TH_WindowsService` nodes, useful for cross-type queries.

@@ -97,18 +97,23 @@ Export to CSV, point `--bh-data` at it. Good enough.
 This is the fun part. TaskHound generates custom BloodHound nodes and edges that show
 scheduled task and service attack paths directly in the BloodHound graph.
 
+All custom node and edge kinds are namespace-prefixed with `TH_` (required by
+BloodHound CE v9). Native BloodHound kinds (`Computer`, `User`, `Base`) are never
+prefixed, and `TaskHound` stays unprefixed because it is upload-grouping metadata,
+not a graph kind.
+
 ### Task nodes
 
-- **Node type**: `ScheduledTask` (kinds: ScheduledTask, Base, TaskHound)
-- **Edge**: `HasTaskWithStoredCreds` -- Computer to ScheduledTask (if credentials are stored)
-- **Edge**: `HasTask` -- Computer to ScheduledTask (no stored credentials)
-- **Edge**: `RunsAs` -- ScheduledTask to User (the service account)
+- **Node type**: `TH_ScheduledTask` (kinds: TH_ScheduledTask, Base, TaskHound)
+- **Edge**: `TH_HasTaskWithStoredCreds` -- Computer to TH_ScheduledTask (if credentials are stored, traversable)
+- **Edge**: `TH_HasTask` -- Computer to TH_ScheduledTask (no stored credentials, non-traversable)
+- **Edge**: `TH_RunsAs` -- TH_ScheduledTask to User (the service account, traversable)
 
 ### Service nodes (new)
 
-- **Node type**: `WindowsService` (kinds: WindowsService, Base, TaskHound)
-- **Edge**: `HasServiceWithStoredCreds` -- Computer to WindowsService
-- **Edge**: `RunsAs` -- WindowsService to User
+- **Node type**: `TH_WindowsService` (kinds: TH_WindowsService, Base, TaskHound)
+- **Edge**: `TH_HasServiceWithStoredCreds` -- Computer to TH_WindowsService (traversable)
+- **Edge**: `TH_RunsAs` -- TH_WindowsService to User (traversable)
 
 ### Output files
 
@@ -138,11 +143,12 @@ taskhound -u cloud.strife -p 'Buster$word97!' -d shinra.local -t reactor01.shinr
 ### Customization
 
 ```bash
---bh-icon clock          # Font Awesome icon for task nodes (default: clock)
---bh-color #FF0000       # Node color
---bh-force-icon          # Override icon even if already set
 --bh-allow-orphans       # Include nodes even if the Computer isn't in BH
 ```
+
+Node icons and colors are no longer set via CLI flags. They are declared in the
+v9 extension schema and applied automatically on upload (see "Traversability and
+icons" below).
 
 ### Node and edge documentation
 
@@ -159,31 +165,31 @@ results, TIER-0 findings, shortest-path analysis, and more.
 
 See [opengraph/queries/README.md](opengraph/queries/README.md) for the full list.
 
-> **Note:** OpenGraph nodes are not supported in BloodHound's Search or Pathfinding
-> tabs. Use the Cypher tab exclusively.
+### Traversability and icons
 
-### Custom icons
+TaskHound ships a BloodHound CE v9 extension schema that makes the credential-bearing
+edges traversable. On upload, TaskHound auto-installs the schema via
+`PUT /api/v2/extensions`; it is also written to the output directory as
+`taskhound_extension_schema.json` so you can install it manually in the BloodHound UI
+if you prefer.
 
-TaskHound includes an icon definition pack for BloodHound CE. To register custom
-icons for ScheduledTask and WindowsService nodes:
+The schema declares which edges participate in pathfinding:
 
-```bash
-python docs/opengraph/icons/upload_icons.py \
-  --url http://localhost:8080 \
-  --token YOUR_BEARER_TOKEN
+- `TH_HasTaskWithStoredCreds`, `TH_HasServiceWithStoredCreds`, `TH_RunsAs` are
+  **traversable** -- they form the real `Computer -> Task/Service -> RunAs-principal`
+  attack path and now show up in BloodHound's **Pathfinding / Attack Paths** views,
+  not just raw Cypher.
+- `TH_HasTask` is **non-traversable** -- there are no stored credentials behind it, so
+  it is intentionally excluded from pathfinding to avoid false attack paths.
 
-# Preview without uploading
-python docs/opengraph/icons/upload_icons.py \
-  --url http://localhost:8080 \
-  --token YOUR_BEARER_TOKEN \
-  --dry-run
-```
+The schema also declares node icons and colors, applied automatically once installed:
 
-Default icons (Font Awesome solid):
-- **ScheduledTask**: `clock` (purple `#8B5CF6`)
-- **WindowsService**: `gears` (cyan `#06B6D4`)
+- **TH_ScheduledTask**: `clock` (purple `#8B5CF6`)
+- **TH_WindowsService**: `gears` (cyan `#06B6D4`)
 
-Icon definitions are in `docs/opengraph/icons/icons.json` if you want to customize them.
+> **Note:** Traversability and icons require BloodHound CE **v9+**. On pre-v9
+> BloodHound the schema install no-ops -- the edges remain generic and are
+> reachable via the Cypher tab only, not Search or Pathfinding.
 
 ### Attack path diagram
 
