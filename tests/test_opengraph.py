@@ -3,7 +3,7 @@ Comprehensive test suite for OpenGraph functionality.
 
 Tests cover:
 - Task node creation with proper IDs and properties
-- Edge creation (HasTask, HasTaskWithStoredCreds, RunsAs)
+- Edge creation (TH_HasTask, TH_HasTaskWithStoredCreds, TH_RunsAs)
 - Principal ID formatting (local vs domain accounts)
 - SID conversion utilities
 - BloodHound API integration
@@ -118,7 +118,7 @@ class TestTaskNodeCreation:
 
     def test_node_creation_with_creds(self, sample_task_with_creds):
         node = _create_task_node(sample_task_with_creds)
-        assert "ScheduledTask" in node.kinds
+        assert "TH_ScheduledTask" in node.kinds
         props_dict = node.properties._properties
         assert props_dict["credentialsstored"] is True
 
@@ -166,8 +166,8 @@ class TestRelationshipEdges:
     def test_edges_with_stored_creds(self, sample_task_with_creds):
         edges, skipped = _create_relationship_edges(sample_task_with_creds, {}, {}, allow_orphans=True)
         assert len(edges) == 2
-        assert edges[0].kind == "HasTaskWithStoredCreds"
-        assert edges[1].kind == "RunsAs"
+        assert edges[0].kind == "TH_HasTaskWithStoredCreds"
+        assert edges[1].kind == "TH_RunsAs"
 
 
 class TestSIDConversion:
@@ -212,6 +212,13 @@ class TestOpenGraphGeneration:
         assert data["metadata"]["source_kind"] == "TaskHound"
         # source_kind is also stamped onto every node's kinds at add-time.
         assert all("TaskHound" in n["kinds"] for n in data["graph"]["nodes"])
+
+        # The v9 extension schema is dropped next to the data for manual UI install.
+        from taskhound.opengraph.schema import EXTENSION_SCHEMA, SCHEMA_FILENAME
+
+        schema_file = temp_output_dir / SCHEMA_FILENAME
+        assert schema_file.exists()
+        assert json.loads(schema_file.read_text()) == EXTENSION_SCHEMA
 
     def test_generated_graph_has_source_kind_when_empty(self, temp_output_dir):
         """Even an empty graph must carry a non-null source_kind for BHCE ingest."""
@@ -348,10 +355,10 @@ class TestTaskNodeProperties:
     """Tests for task node property handling."""
 
     def test_node_has_correct_kinds(self):
-        """Node should have ScheduledTask, Base, and TaskHound kinds."""
+        """Node should have TH_ScheduledTask, Base, and TaskHound kinds."""
         task = {"host": "DC.LAB", "path": "\\Task"}
         node = _create_task_node(task)
-        assert "ScheduledTask" in node.kinds
+        assert "TH_ScheduledTask" in node.kinds
         assert "Base" in node.kinds
         assert "TaskHound" in node.kinds
 

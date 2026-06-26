@@ -1,14 +1,10 @@
 """
 Tests for BloodHound OpenGraph upload module.
 """
-from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
 from taskhound.output.bloodhound import (
     extract_host_from_connector,
-    find_model_json,
     normalize_bloodhound_connector,
 )
 
@@ -109,60 +105,6 @@ class TestExtractHostFromConnector:
         result = extract_host_from_connector("bloodhound")
 
         assert result == "bloodhound"
-
-
-class TestFindModelJson:
-    """Tests for find_model_json function"""
-
-    def test_raises_file_not_found_when_missing(self):
-        """Should raise FileNotFoundError when model.json not found"""
-        with patch.object(Path, 'exists', return_value=False):
-            with pytest.raises(FileNotFoundError) as exc_info:
-                find_model_json()
-
-            assert "model.json not found" in str(exc_info.value)
-
-    def test_returns_path_when_found_in_config(self):
-        """Should return path when found in config directory"""
-        Path(__file__).parent.parent / "config" / "model.json"
-
-        def mock_exists(self):
-            return str(self).endswith("config/model.json")
-
-        with patch.object(Path, 'exists', mock_exists):
-            # This will find it in one of the config paths
-            try:
-                result = find_model_json()
-                assert "model.json" in str(result)
-            except FileNotFoundError:
-                # May not find it in test environment - that's ok
-                pass
-
-
-class TestFindModelJsonSearchOrder:
-    """Tests for find_model_json search order logic"""
-
-    def test_checks_project_config_first(self):
-        """Should check project config directory first"""
-        # This test verifies the search order conceptually
-        # The function checks multiple paths in order
-        # Due to Path mocking complexity, we verify behavior differently
-        try:
-            result = find_model_json()
-            # If found, verify it's a Path to model.json
-            assert "model.json" in str(result)
-        except FileNotFoundError:
-            # Expected in test environment without model.json
-            pass
-
-    @patch('taskhound.output.bloodhound.warn')
-    @patch.object(Path, 'exists')
-    @patch.object(Path, 'cwd')
-    def test_warns_when_using_cwd(self, mock_cwd, mock_exists, mock_warn):
-        """Should warn when using model.json from CWD"""
-        # This test is complex to set up properly due to Path behavior
-        # The key is that warn() gets called when finding in CWD
-        pass  # Acknowledged test limitation
 
 
 class TestUploadIntegration:

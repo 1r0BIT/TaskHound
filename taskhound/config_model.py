@@ -26,11 +26,6 @@ class BloodHoundConfig:
     bh_api_key_id: str | None = None  # API key ID for BHCE HMAC authentication
     bh_type: str | None = None  # 'bhce' or 'legacy'
 
-    # Icon configuration (icon is always set on upload, force_icon overrides existing)
-    bh_force_icon: bool = False
-    bh_icon: str = "clock"
-    bh_color: str = "#8B5CF6"
-
     # Live connection (legacy)
     bh_live: bool = False
     bh_save: str | None = None
@@ -61,10 +56,6 @@ class BloodHoundConfig:
             bh_password=args.bh_password,
             bh_api_key=args.bh_api_key,
             bh_api_key_id=args.bh_api_key_id,
-            # Icon (always set on upload, force_icon for overwrite)
-            bh_force_icon=args.bh_force_icon,
-            bh_icon=args.bh_icon,
-            bh_color=args.bh_color,
             # Live (legacy)
             bh_live=args.bh_live,
             bh_save=args.bh_save,

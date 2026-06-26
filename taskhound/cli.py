@@ -217,7 +217,7 @@ def _upload_opengraph_batch(
         )
         return
 
-    # Single auth, single icon set, upload all files
+    # Single auth, single schema install, upload all files
     results = upload_opengraph_batch(
         files=uploadable,
         bloodhound_url=bh_config.bh_connector,
@@ -225,10 +225,6 @@ def _upload_opengraph_batch(
         password=bh_config.bh_password,
         api_key=bh_config.bh_api_key,
         api_key_id=bh_config.bh_api_key_id,
-        set_icon=True,
-        force_icon=bh_config.bh_force_icon,
-        icon_name=bh_config.bh_icon,
-        icon_color=bh_config.bh_color,
     )
 
     all_success = all(results)

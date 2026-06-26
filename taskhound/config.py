@@ -297,13 +297,8 @@ def load_config() -> dict[str, Any]:
     # Note: output_dir is deprecated - OpenGraph now uses {output_dir}/opengraph/
     if "no_upload" in bhog:
         defaults["bh_no_upload"] = bhog["no_upload"]
-    # Note: set_icon removed - icon is now always set on upload
-    if "force_icon" in bhog:
-        defaults["bh_force_icon"] = bhog["force_icon"]
-    if "icon" in bhog:
-        defaults["bh_icon"] = bhog["icon"]
-    if "color" in bhog:
-        defaults["bh_color"] = bhog["color"]
+    # Node icons/colors are now declared in the v9 extension schema (opengraph/schema.py);
+    # the legacy icon/color/force_icon options were removed.
     if "allow_orphans" in bhog:
         defaults["bh_allow_orphans"] = bhog["allow_orphans"]
 
@@ -544,19 +539,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--bh-no-upload",
         action="store_true",
         help="Generate OpenGraph files but skip automatic upload to BloodHound (files still saved)",
-    )
-    bhog.add_argument(
-        "--bh-force-icon",
-        action="store_true",
-        help="Force icon update even if ScheduledTask icon already exists (icon is set automatically on upload)",
-    )
-    bhog.add_argument(
-        "--bh-icon", default="clock", help="Font Awesome icon name for ScheduledTask nodes (default: clock)"
-    )
-    bhog.add_argument(
-        "--bh-color",
-        default="#8B5CF6",
-        help="Hex color code for ScheduledTask node icon (default: #8B5CF6 - vibrant purple)",
     )
     bhog.add_argument(
         "--bh-allow-orphans",

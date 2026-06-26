@@ -22,6 +22,7 @@ from .builder import (
     extract_domain_from_fqdn,
     resolve_object_ids_chunked,
 )
+from .schema import EXTENSION_SCHEMA, SCHEMA_FILENAME
 
 # BloodHound OpenGraph source_kind — namespaces all TaskHound-generated nodes/edges.
 # Must be passed to OpenGraph(source_kind=...) at construction time: bhopengraph stamps
@@ -29,6 +30,22 @@ from .builder import (
 # add_node() calls would populate metadata only and miss the node kinds. Task and service
 # graphs share this kind (they are already distinguished by node kind and by file).
 SOURCE_KIND = "TaskHound"
+
+
+def _write_extension_schema(output_path: Path) -> None:
+    """Drop the v9 OpenGraph extension schema next to the graph data.
+
+    Lets the schema be hand-installed via the BloodHound OpenGraph Management UI on
+    instances where API install (``_install_schema`` during upload) is undesirable. Best
+    effort — a failure here must not abort graph generation.
+    """
+    schema_path = output_path / SCHEMA_FILENAME
+    try:
+        with open(schema_path, "w", encoding="utf-8") as f:
+            json.dump(EXTENSION_SCHEMA, f, indent=2)
+        debug(f"Extension schema written: {schema_path}")
+    except OSError as e:
+        warn(f"Could not write extension schema to {schema_path}: {e}")
 
 
 def generate_opengraph_files(
@@ -46,7 +63,7 @@ def generate_opengraph_files(
     Process:
     1. Collect all unique computer and user names from tasks
     2. Resolve them to BloodHound node IDs (graph IDs) and objectIds (SIDs) in bulk
-    3. Create ScheduledTask nodes
+    3. Create TH_ScheduledTask nodes
     4. Create edges using resolved IDs (reliable) or names (fallback)
     5. Write to JSON file
 
@@ -242,6 +259,9 @@ def generate_opengraph_files(
 
         status(f"[+] OpenGraph json generated. {len(graph.nodes)} nodes and {len(graph.edges)} edges")
 
+        # Drop the extension schema alongside the data for manual UI install
+        _write_extension_schema(output_path)
+
         # Also write raw data for debugging/manual import
         data_path = output_path / "taskhound_data.json"
         with open(data_path, 'w', encoding='utf-8') as f:
@@ -270,7 +290,7 @@ def generate_service_opengraph_files(
     Generate OpenGraph JSON for Windows service findings.
 
     Writes to a separate file (taskhound_services_opengraph.json) with
-    WindowsService nodes (distinct from the task graph's ScheduledTask nodes)
+    TH_WindowsService nodes (distinct from the task graph's TH_ScheduledTask nodes)
     to avoid contaminating the task OpenGraph data when re-uploading. Both
     graphs share the "TaskHound" source_kind.
 
@@ -386,6 +406,10 @@ def generate_service_opengraph_files(
             json.dump(graph_dict, f, indent=2)
 
         status(f"[+] Service OpenGraph generated. {len(graph.nodes)} nodes and {len(graph.edges)} edges")
+
+        # Drop the extension schema alongside the data for manual UI install
+        _write_extension_schema(output_path)
+
         return str(json_path)
 
     except Exception as e:

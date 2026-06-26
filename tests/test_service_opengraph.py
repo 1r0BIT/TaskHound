@@ -53,7 +53,7 @@ class TestCreateServiceNode:
         }
         node = _create_service_node(svc)
 
-        assert "WindowsService" in node.kinds
+        assert "TH_WindowsService" in node.kinds
         assert "Base" in node.kinds
         assert "TaskHound" in node.kinds
         assert node.properties.to_dict()["name"] == "MSSQLSERVER"
@@ -102,7 +102,7 @@ class TestCreateServiceEdges:
 
         edges, skipped = _create_service_edges(svc, computer_map, user_map)
 
-        has_svc_edges = [e for e in edges if e.kind == "HasServiceWithStoredCreds"]
+        has_svc_edges = [e for e in edges if e.kind == "TH_HasServiceWithStoredCreds"]
         assert len(has_svc_edges) == 1
         assert has_svc_edges[0].start_node == "S-1-5-21-COMP-SID"
 
@@ -117,7 +117,7 @@ class TestCreateServiceEdges:
 
         edges, skipped = _create_service_edges(svc, computer_map, user_map)
 
-        runs_as_edges = [e for e in edges if e.kind == "RunsAs"]
+        runs_as_edges = [e for e in edges if e.kind == "TH_RunsAs"]
         assert len(runs_as_edges) == 1
         assert runs_as_edges[0].end_node == "S-1-5-21-USER"
 
@@ -179,9 +179,17 @@ class TestGenerateServiceOpengraphFiles:
             nodes = graph.get("nodes", [])
             assert len(nodes) >= 1
 
-            # Find the WindowsService node
-            svc_nodes = [n for n in nodes if "WindowsService" in n.get("kinds", [])]
+            # Find the TH_WindowsService node
+            svc_nodes = [n for n in nodes if "TH_WindowsService" in n.get("kinds", [])]
             assert len(svc_nodes) == 1
+
+            # The v9 extension schema is dropped next to the data for manual UI install.
+            from taskhound.opengraph.schema import EXTENSION_SCHEMA, SCHEMA_FILENAME
+
+            schema_path = os.path.join(tmpdir, SCHEMA_FILENAME)
+            assert os.path.exists(schema_path)
+            with open(schema_path) as sf:
+                assert json.load(sf) == EXTENSION_SCHEMA
 
     def test_returns_none_for_empty(self):
         from taskhound.opengraph.writer import generate_service_opengraph_files

@@ -1,15 +1,9 @@
 """Tests for taskhound/output/bloodhound.py - BloodHound upload utilities."""
 
-import os
-import tempfile
-from pathlib import Path
-from unittest.mock import patch
-
-import pytest
+from unittest.mock import Mock, patch
 
 from taskhound.output.bloodhound import (
     extract_host_from_connector,
-    find_model_json,
     normalize_bloodhound_connector,
 )
 
@@ -99,52 +93,6 @@ class TestExtractHostFromConnector:
         assert result == "myserver"
 
 
-class TestFindModelJson:
-    """Tests for find_model_json function."""
-
-    def test_not_found_raises_error(self):
-        """Raises FileNotFoundError when model.json not found anywhere."""
-        with patch.object(Path, "exists", return_value=False), pytest.raises(FileNotFoundError) as exc_info:
-            find_model_json()
-        # Error message should be helpful
-        assert "model.json not found" in str(exc_info.value)
-
-    def test_finds_config_directory(self):
-        """Finds model.json in config/ directory."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_dir = Path(tmpdir) / "config"
-            config_dir.mkdir()
-            model_path = config_dir / "model.json"
-            model_path.write_text('{"test": true}')
-
-            # Mock the paths to use our temp directory
-            original_cwd = Path.cwd()
-            try:
-                os.chdir(tmpdir)
-                result = find_model_json()
-                # Should find the model.json in config/
-                assert result.exists()
-            finally:
-                os.chdir(original_cwd)
-
-    def test_warns_on_cwd_fallback(self):
-        """Test that warn is called when using model.json from CWD (skipped if config/ exists)."""
-        # This test verifies the warning behavior when using CWD fallback
-        # Due to search order complexity, we just verify the function returns a path
-        with tempfile.TemporaryDirectory() as tmpdir:
-            model_path = Path(tmpdir) / "model.json"
-            model_path.write_text('{"test": true}')
-
-            original_cwd = Path.cwd()
-            try:
-                os.chdir(tmpdir)
-                # The function should find the model.json and return it
-                result = find_model_json()
-                assert result.exists()
-            finally:
-                os.chdir(original_cwd)
-
-
 class TestUploadWithoutRequests:
     """Tests for upload function when requests library is not available."""
 
@@ -199,3 +147,53 @@ class TestNormalizeEdgeCases:
         """Preserves custom port for HTTPS URLs."""
         result = normalize_bloodhound_connector("https://bh.domain.com:9443", is_legacy=False)
         assert result == "https://bh.domain.com:9443"
+
+
+class TestSchemaInstallWiring:
+    """The migration's core behavior: install the v9 extension schema once, after auth and
+    BEFORE the upload loop, in BOTH upload entrypoints — and a failed install (pre-v9 404)
+    must NOT abort the upload (handoff §7: fall back to a generic, Cypher-only upload)."""
+
+    def test_batch_installs_schema_before_upload(self):
+        from taskhound.output import bloodhound
+
+        order = []
+        auth = Mock()
+        with patch.object(bloodhound, "_authenticate_with_fallback", return_value=auth), \
+             patch.object(bloodhound, "_install_schema",
+                          side_effect=lambda a: order.append("install") or True) as inst, \
+             patch.object(bloodhound, "_upload_file",
+                          side_effect=lambda *a, **k: order.append("upload") or True) as up:
+            results = bloodhound.upload_opengraph_batch(["a.json", "b.json"], "http://localhost:8080")
+
+        inst.assert_called_once_with(auth)
+        assert up.call_count == 2
+        assert order == ["install", "upload", "upload"]  # schema must precede every upload
+        assert results == [True, True]
+
+    def test_single_installs_schema_before_upload(self):
+        from taskhound.output import bloodhound
+
+        order = []
+        auth = Mock()
+        with patch.object(bloodhound, "_authenticate_with_fallback", return_value=auth), \
+             patch.object(bloodhound, "_install_schema",
+                          side_effect=lambda a: order.append("install") or True), \
+             patch.object(bloodhound, "_upload_file",
+                          side_effect=lambda *a, **k: order.append("upload") or True):
+            ok = bloodhound.upload_opengraph_to_bloodhound("a.json", "http://localhost:8080")
+
+        assert ok is True
+        assert order == ["install", "upload"]
+
+    def test_failed_install_does_not_abort_upload(self):
+        from taskhound.output import bloodhound
+
+        auth = Mock()
+        with patch.object(bloodhound, "_authenticate_with_fallback", return_value=auth), \
+             patch.object(bloodhound, "_install_schema", return_value=False), \
+             patch.object(bloodhound, "_upload_file", return_value=True) as up:
+            results = bloodhound.upload_opengraph_batch(["a.json"], "http://localhost:8080")
+
+        up.assert_called_once()  # pre-v9 install failure still proceeds to a generic upload
+        assert results == [True]

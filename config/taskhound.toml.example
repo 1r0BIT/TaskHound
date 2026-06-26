@@ -93,9 +93,8 @@ type = "bhce" # or "legacy"
 # Files are saved to {output_dir}/opengraph/ (uses main --output-dir)
 enabled = true
 no_upload = false
-# force_icon = false  # Force icon update even if already exists
-icon = "clock"
-color = "#8B5CF6"
+# Node icons/colors are declared in the v9 extension schema (auto-installed on upload);
+# the legacy icon/color/force_icon options were removed.
 # allow_orphans = false  # Create edges even when nodes are missing
 
 [ldap]

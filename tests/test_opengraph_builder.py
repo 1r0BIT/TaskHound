@@ -95,7 +95,7 @@ class TestCreateTaskNode:
         node = _create_task_node(task)
 
         assert node is not None
-        assert "ScheduledTask" in node.kinds
+        assert "TH_ScheduledTask" in node.kinds
         assert "Base" in node.kinds
         assert "TaskHound" in node.kinds
 

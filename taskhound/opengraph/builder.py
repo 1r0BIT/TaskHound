@@ -13,6 +13,14 @@ from ..resolver import resolve_name_to_sid_via_ldap
 from ..smb.tasks import strip_task_root
 from ..utils.cache_manager import get_cache
 from ..utils.logging import debug, good, info, warn
+from .schema import (
+    EDGE_HAS_SERVICE_WITH_CREDS,
+    EDGE_HAS_TASK,
+    EDGE_HAS_TASK_WITH_CREDS,
+    EDGE_RUNS_AS,
+    NODE_SCHEDULED_TASK,
+    NODE_WINDOWS_SERVICE,
+)
 
 
 def extract_domain_from_fqdn(fqdn: str) -> str:
@@ -151,7 +159,7 @@ def _create_task_node(task: dict) -> Node:
     # NOTE: First kind in array becomes "Primary Kind" in BloodHound UI
     node = Node(
         id=object_id,
-        kinds=["ScheduledTask", "Base", "TaskHound"],
+        kinds=[NODE_SCHEDULED_TASK, "Base", "TaskHound"],
         properties=Properties(**properties_dict)
     )
 
@@ -405,10 +413,10 @@ def _create_relationship_edges(
     # Create deterministic ID for the task node (must match _create_task_node)
     task_object_id = _create_task_object_id(hostname, task_path)
 
-    # 1. Create (Computer)-[HasTask]->(ScheduledTask) edge
-    edge_kind = "HasTask"
+    # 1. Create (Computer)-[TH_HasTask]->(TH_ScheduledTask) edge
+    edge_kind = EDGE_HAS_TASK
     if task.get("credentials_hint") == "stored_credentials":
-        edge_kind = "HasTaskWithStoredCreds"
+        edge_kind = EDGE_HAS_TASK_WITH_CREDS
 
     computer_object_id = None
     computer_match_by = "name"  # Default fallback
@@ -499,7 +507,7 @@ def _create_relationship_edges(
                     runs_as_edge = Edge(
                         start_node=task_object_id,
                         end_node=principal_id,
-                        kind="RunsAs",
+                        kind=EDGE_RUNS_AS,
                         start_match_by="id",
                         end_match_by="name"
                     )
@@ -521,7 +529,7 @@ def _create_relationship_edges(
                 runs_as_edge = Edge(
                     start_node=task_object_id,
                     end_node=user_object_id if user_object_id else principal_id,
-                    kind="RunsAs",
+                    kind=EDGE_RUNS_AS,
                     start_match_by="id",
                     end_match_by=user_match_by
                 )
@@ -539,7 +547,7 @@ def _create_relationship_edges(
                 runs_as_edge = Edge(
                     start_node=task_object_id,
                     end_node=principal_id,
-                    kind="RunsAs",
+                    kind=EDGE_RUNS_AS,
                     start_match_by="id",
                     end_match_by="name"
                 )
@@ -1042,7 +1050,7 @@ def _create_service_node(svc: dict) -> Node:
     """
     Create a WindowsService node for BloodHound OpenGraph.
 
-    Node kinds: ["WindowsService", "Base", "TaskHound"]
+    Node kinds: [NODE_WINDOWS_SERVICE ("TH_WindowsService"), "Base", "TaskHound"]
     """
     hostname = (svc.get("host") or "").strip().upper()
     service_name = (svc.get("service_name") or "").strip()
@@ -1106,7 +1114,7 @@ def _create_service_node(svc: dict) -> Node:
 
     return Node(
         id=object_id,
-        kinds=["WindowsService", "Base", "TaskHound"],
+        kinds=[NODE_WINDOWS_SERVICE, "Base", "TaskHound"],
         properties=Properties(**properties_dict),
     )
 
@@ -1123,8 +1131,8 @@ def _create_service_edges(
     Create edges for a Windows service node.
 
     Edge types:
-    - HasServiceWithStoredCreds: Computer → WindowsService (all domain-account services)
-    - RunsAs: WindowsService → User
+    - TH_HasServiceWithStoredCreds: Computer → TH_WindowsService (all domain-account services)
+    - TH_RunsAs: TH_WindowsService → User
     """
     from bhopengraph import Edge
 
@@ -1151,7 +1159,7 @@ def _create_service_edges(
             edges.append(Edge(
                 start_node=computer_sid,
                 end_node=service_id,
-                kind="HasServiceWithStoredCreds",
+                kind=EDGE_HAS_SERVICE_WITH_CREDS,
                 start_match_by="id",
                 end_match_by="id",
             ))
@@ -1161,7 +1169,7 @@ def _create_service_edges(
         edges.append(Edge(
             start_node=hostname,
             end_node=service_id,
-            kind="HasServiceWithStoredCreds",
+            kind=EDGE_HAS_SERVICE_WITH_CREDS,
             start_match_by="name",
             end_match_by="id",
         ))
@@ -1183,7 +1191,7 @@ def _create_service_edges(
                     edges.append(Edge(
                         start_node=service_id,
                         end_node=user_sid,
-                        kind="RunsAs",
+                        kind=EDGE_RUNS_AS,
                         start_match_by="id",
                         end_match_by="id",
                     ))
@@ -1192,7 +1200,7 @@ def _create_service_edges(
                     edges.append(Edge(
                         start_node=service_id,
                         end_node=principal_id,
-                        kind="RunsAs",
+                        kind=EDGE_RUNS_AS,
                         start_match_by="id",
                         end_match_by="name",
                     ))
@@ -1203,7 +1211,7 @@ def _create_service_edges(
                 edges.append(Edge(
                     start_node=service_id,
                     end_node=principal_id,
-                    kind="RunsAs",
+                    kind=EDGE_RUNS_AS,
                     start_match_by="id",
                     end_match_by="name",
                 ))
