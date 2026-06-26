@@ -574,6 +574,17 @@ class TestCheckHighvalue:
         assert loaded_loader.check_highvalue("unknown_user") is False
         assert loaded_loader.check_highvalue("S-1-5-21-999-999-999-999") is False
 
+    def test_check_highvalue_bare_matches(self, loaded_loader):
+        """check_highvalue_bare() matches a bare sAMAccountName directly (guard bypassed)."""
+        assert loaded_loader.check_highvalue_bare("admin") is True
+        assert loaded_loader.check_highvalue_bare("ADMIN") is True  # case-insensitive
+        assert loaded_loader.check_highvalue_bare("unknown_user") is False
+
+    def test_check_highvalue_bare_empty(self, loaded_loader):
+        """check_highvalue_bare() returns False for empty input."""
+        assert loaded_loader.check_highvalue_bare("") is False
+        assert loaded_loader.check_highvalue_bare(None) is False
+
 
 class TestCheckTier0:
     """Tests for HighValueLoader.check_tier0 method."""
@@ -645,6 +656,22 @@ class TestCheckTier0:
         is_tier0, reasons = loaded_loader.check_tier0("domain_admin")
         assert is_tier0 is False
         assert reasons == []
+
+    def test_check_tier0_bare_matches(self, loaded_loader):
+        """check_tier0_bare() matches a bare sAMAccountName directly (guard bypassed).
+
+        Used by the opt-in --match-bare-runas fallback after the caller has filtered out
+        known local accounts. Mirrors check_tier0() scoring via the shared helper.
+        """
+        is_tier0, reasons = loaded_loader.check_tier0_bare("domain_admin")
+        assert is_tier0 is True
+        assert "TIER0 Group Membership" in reasons
+
+    def test_check_tier0_bare_no_match(self, loaded_loader):
+        """check_tier0_bare() returns (False, []) for a non-privileged or unknown account."""
+        assert loaded_loader.check_tier0_bare("regular_user") == (False, [])
+        assert loaded_loader.check_tier0_bare("nonexistent") == (False, [])
+        assert loaded_loader.check_tier0_bare("") == (False, [])
 
     def test_bare_administrator_not_tier0(self, loaded_loader):
         """Bare 'Administrator' must not match domain Administrator in BloodHound data."""

@@ -76,6 +76,7 @@ class TaskRow:
     # Task identity
     runas: str | None = None
     resolved_runas: str | None = None  # Resolved username if runas was a SID
+    resolved_runas_sid: str | None = None  # Domain SID resolved from a bare-name runas
     command: str | None = None
     arguments: str | None = None
     author: str | None = None

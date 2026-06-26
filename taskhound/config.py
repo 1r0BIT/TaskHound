@@ -659,6 +659,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable LDAP-based Tier-0 detection via group membership queries. Checks if runas accounts are members of privileged groups (Domain Admins, Enterprise Admins, etc.) without requiring BloodHound data.",
     )
     ldap.add_argument(
+        "--match-bare-runas",
+        action="store_true",
+        help="Fallback for bare-username RunAs values (no DOMAIN\\ prefix, no UPN @). Online "
+        "scans already resolve bare names to a domain SID via LDAP; this flag additionally "
+        "matches a bare name against domain Tier-0/high-value data when no SID could be resolved "
+        "(offline, --opsec, or --no-ldap). Matches are annotated to verify the account is not a "
+        "same-named local account. Off by default to avoid local-account false positives.",
+    )
+    ldap.add_argument(
         "--gc-server",
         help="Global Catalog server IP for resolving foreign domain SIDs. If not specified, auto-discovers via DNS SRV records (_gc._tcp.<domain>). Use this when auto-discovery fails or you want to target a specific GC.",
     )

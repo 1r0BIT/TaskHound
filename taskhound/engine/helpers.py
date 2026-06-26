@@ -479,6 +479,7 @@ def perform_service_enumeration(
     ldap_hashes: str | None = None,
     pwd_cache: dict | None = None,
     tier0_cache: dict | None = None,
+    match_bare_runas: bool = False,
     debug: bool = False,
 ) -> list[Any]:
     """
@@ -558,6 +559,7 @@ def perform_service_enumeration(
             pwd_cache=pwd_cache,
             tier0_cache=tier0_cache,
             resolved_account=row.resolved_runas,
+            match_bare_runas=match_bare_runas,
         )
 
         rows.append(row)

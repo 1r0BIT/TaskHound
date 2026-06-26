@@ -277,6 +277,25 @@ def binary_to_sid(binary_sid: bytes) -> str | None:
 # Domain User Detection
 # =============================================================================
 
+# Known local domains / authority names (English + common misspellings/localized variants).
+LOCAL_DOMAIN_MARKERS = ("nt authority", "nt_autority", "nt_autoritat", "nt_autorität", "localhost")
+
+# Known local users / built-in / service accounts (English + German variants). Bare names
+# matching these are almost certainly local accounts, not domain accounts.
+LOCAL_USER_NAMES = {
+    "system",
+    "netzwerkdienst",
+    "networkservice",
+    "lokaler dienst",
+    "localservice",
+    "administrator",
+    "guest",
+    "gast",
+    "wdagutilityaccount",
+    "defaultaccount",
+}
+
+
 def looks_like_domain_user(runas: str) -> bool:
     r"""
     Return True when `runas` appears to represent a domain account.
@@ -309,24 +328,11 @@ def looks_like_domain_user(runas: str) -> bool:
         user = user.strip().lower()
 
         # Known local domains / authority names (English + some common misspellings/variants)
-        local_domain_markers = ("nt authority", "nt_autority", "nt_autoritat", "nt_autorität", "localhost")
-        if any(ld in domain for ld in local_domain_markers):
+        if any(ld in domain for ld in LOCAL_DOMAIN_MARKERS):
             return False
 
         # Known local users / service accounts (English + German variants)
-        local_user_names = {
-            "system",
-            "netzwerkdienst",
-            "networkservice",
-            "lokaler dienst",
-            "localservice",
-            "administrator",
-            "guest",
-            "gast",
-            "wdagutilityaccount",
-            "defaultaccount",
-        }
-        if user in local_user_names:
+        if user in LOCAL_USER_NAMES:
             return False
 
         # If domain is the computer name (often represented as dot), it's local
@@ -334,3 +340,30 @@ def looks_like_domain_user(runas: str) -> bool:
 
     # If username contains @ (UPN format), it's likely a domain user
     return "@" in val
+
+
+def is_bare_name(value: str) -> bool:
+    r"""Return True when `value` is a bare account name with no qualifier.
+
+    A bare name is not a SID and has neither a NETBIOS domain prefix (``DOMAIN\user``)
+    nor a UPN suffix (``user@domain``). These are the values that scheduled-task
+    ``<UserId>`` fields sometimes carry instead of a fully-qualified principal.
+    """
+    if not value:
+        return False
+    val = value.strip()
+    if not val or is_sid(val):
+        return False
+    return "\\" not in val and "@" not in val
+
+
+def is_probably_local_bare_name(value: str) -> bool:
+    """Return True when a bare name matches a well-known local/built-in account.
+
+    Used to avoid resolving or matching bare names (e.g. ``Administrator``, ``Guest``,
+    localized service accounts) that are almost certainly local accounts rather than
+    domain accounts. Returns False for any value that is not a bare name.
+    """
+    if not is_bare_name(value):
+        return False
+    return value.strip().lower() in LOCAL_USER_NAMES

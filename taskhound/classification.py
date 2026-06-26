@@ -118,6 +118,94 @@ def _analyze_password_age(
     return None
 
 
+# Reason fragments (kept as module constants so task/service paths stay identical).
+_HIGHVALUE_REASON = "High Value match found (Check BloodHound Outbound Object Control for Details)"
+_BARE_MATCH_NOTE = " (matched by bare username — verify not a local account)"
+
+
+def _bloodhound_privilege(
+    hv: Any,
+    account: str,
+    resolved_account_sid: str | None,
+    match_bare_runas: bool,
+) -> tuple[str, str] | None:
+    r"""Detect TIER-0/PRIV for an account using BloodHound data.
+
+    Returns (classification, reason) or None. Handles a bare-name RunAs (no ``DOMAIN\``
+    prefix, no UPN ``@``): when it was resolved to a domain SID upstream, that SID is matched
+    directly against BloodHound's SID-keyed data (a domain-LDAP-resolved SID proves the bare
+    name is a real domain account, neutralizing the local-account false-positive concern).
+    When ``match_bare_runas`` is set and no SID was resolved, fall back to matching the bare
+    name against domain data with a verification annotation.
+    """
+    from .resolver import is_bare_name, is_probably_local_bare_name
+
+    bare = is_bare_name(account)
+    lookup = resolved_account_sid if (resolved_account_sid and bare) else account
+
+    is_tier0, reasons = hv.check_tier0(lookup)
+    if is_tier0:
+        return "TIER-0", "; ".join(reasons)
+    if hv.check_highvalue(lookup):
+        return "PRIV", _HIGHVALUE_REASON
+
+    if match_bare_runas and bare and not resolved_account_sid and not is_probably_local_bare_name(account):
+        is_tier0, reasons = hv.check_tier0_bare(account)
+        if is_tier0:
+            return "TIER-0", "; ".join(reasons) + _BARE_MATCH_NOTE
+        if hv.check_highvalue_bare(account):
+            return "PRIV", _HIGHVALUE_REASON + _BARE_MATCH_NOTE
+    return None
+
+
+def _ldap_tier0(
+    account: str,
+    tier0_cache: Tier0Cache,
+    resolved_account: str | None,
+    resolved_account_sid: str | None,
+    match_bare_runas: bool,
+) -> tuple[str, str] | None:
+    r"""Detect TIER-0 via the pre-fetched LDAP tier0_cache (used when BloodHound is absent).
+
+    The cache is keyed by sAMAccountName and contains only domain accounts. A bare name is
+    matched when it was resolved to a domain SID upstream (proven domain account) or, opt-in
+    via ``match_bare_runas``, when it is not a known local account.
+    """
+    from .resolver import is_bare_name, is_probably_local_bare_name, is_sid
+
+    lookup_user = account
+    if is_sid(account) and resolved_account:
+        lookup_user = resolved_account
+
+    if "\\" in lookup_user:
+        norm_user = lookup_user.split("\\")[-1].lower()
+    elif "@" in lookup_user:
+        norm_user = lookup_user.split("@")[0].lower()
+    else:
+        norm_user = lookup_user.lower()
+
+    bare = is_bare_name(account)
+    allow = (
+        "\\" in lookup_user
+        or "@" in lookup_user
+        or is_sid(account)
+        or (bare and resolved_account_sid is not None)
+        or (bare and match_bare_runas and not is_probably_local_bare_name(account))
+    )
+    if not allow:
+        return None
+
+    tier0_result = tier0_cache.get(norm_user)
+    if tier0_result:
+        is_tier0, groups = tier0_result
+        if is_tier0:
+            reason = f"Tier-0 via LDAP: member of {', '.join(groups)}"
+            if bare and not resolved_account_sid:
+                reason += _BARE_MATCH_NOTE
+            return "TIER-0", reason
+    return None
+
+
 def classify_task(
     row: "TaskRow",
     meta: dict[str, Any],
@@ -129,6 +217,8 @@ def classify_task(
     pwd_cache: PwdLastSetCache | None = None,
     tier0_cache: Tier0Cache | None = None,
     resolved_runas: str | None = None,
+    resolved_runas_sid: str | None = None,
+    match_bare_runas: bool = False,
 ) -> ClassificationResult:
     """
     Classify a task as TIER-0, PRIV, or TASK based on the runas account.
@@ -147,6 +237,8 @@ def classify_task(
         pwd_cache: Pre-fetched dict of username -> pwdLastSet datetime
         tier0_cache: Pre-fetched dict of username -> (is_tier0, group_list) from LDAP
         resolved_runas: Pre-resolved username if runas was a SID (for tier0_cache lookup)
+        resolved_runas_sid: Domain SID resolved from a bare-name runas (for BloodHound SID match)
+        match_bare_runas: Opt-in fallback matching unresolved bare names against domain data
 
     Returns:
         ClassificationResult with task_type, reason, password_analysis, should_include
@@ -170,97 +262,40 @@ def classify_task(
                 return f"[ACCOUNT DISABLED] {reason}"
         return reason
 
-    # Check for Tier 0 first, then high-value
-    # Priority: BloodHound data > LDAP tier0_cache
+    # Check for Tier 0 / high-value. Priority: BloodHound data > LDAP tier0_cache.
+    # A bare-name RunAs (e.g. "svc_admin" with no domain) is matched via its resolved
+    # domain SID when available; see _bloodhound_privilege / _ldap_tier0.
+    priv: tuple[str, str] | None = None
     if hv and hv.loaded:
-        # Check Tier 0 classification via BloodHound
-        is_tier0, tier0_reasons = hv.check_tier0(runas)
-        if is_tier0:
-            reason = "; ".join(tier0_reasons)
-            password_analysis = None
-
-            if has_no_saved_creds:
-                reason = f"{reason} (no saved credentials — DPAPI dump not applicable; manipulation requires an interactive session)"
-            else:
-                password_analysis = _analyze_password_age(hv, runas, meta, rel_path, pwd_cache)
-
-            # Add account status indicator
-            reason = _add_account_status(reason)
-
-            # Update row in place
-            row.type = TaskType.TIER0.value
-            row.reason = reason
-            row.password_analysis = password_analysis
-
-            return ClassificationResult(
-                task_type="TIER-0",
-                reason=reason,
-                password_analysis=password_analysis,
-                should_include=True,
-            )
-
-        # Check high-value (PRIV)
-        if hv.check_highvalue(runas):
-            reason = "High Value match found (Check BloodHound Outbound Object Control for Details)"
-            password_analysis = None
-
-            if has_no_saved_creds:
-                reason = f"{reason} (no saved credentials — DPAPI dump not applicable; manipulation requires an interactive session)"
-            else:
-                password_analysis = _analyze_password_age(hv, runas, meta, rel_path, pwd_cache)
-
-            # Add account status indicator
-            reason = _add_account_status(reason)
-
-            # Update row in place
-            row.type = TaskType.PRIV.value
-            row.reason = reason
-            row.password_analysis = password_analysis
-
-            return ClassificationResult(
-                task_type="PRIV",
-                reason=reason,
-                password_analysis=password_analysis,
-                should_include=True,
-            )
-
-    # Check LDAP-based Tier-0 detection (when BloodHound not available)
+        priv = _bloodhound_privilege(hv, runas, resolved_runas_sid, match_bare_runas)
     elif tier0_cache:
-        # Normalize username for lookup
-        # If runas is a SID and we have a resolved username, use that instead
-        from .resolver import is_sid
-        lookup_user = runas
-        if is_sid(runas) and resolved_runas:
-            lookup_user = resolved_runas
-        # Only query the cache when there is an explicit domain qualifier or the original
-        # runas was a domain SID — bare names resolve to LOCAL accounts first per
-        # LookupAccountName() and must not be matched against domain tier-0 data.
-        has_domain_qualifier = "\\" in lookup_user or "@" in lookup_user or is_sid(runas)
-        norm_user = lookup_user.split("\\")[-1].lower() if "\\" in lookup_user else lookup_user.lower()
-        tier0_result = tier0_cache.get(norm_user) if has_domain_qualifier else None
+        priv = _ldap_tier0(runas, tier0_cache, resolved_runas, resolved_runas_sid, match_bare_runas)
 
-        if tier0_result:
-            is_tier0, groups = tier0_result
-            if is_tier0:
-                reason = f"Tier-0 via LDAP: member of {', '.join(groups)}"
-                password_analysis = None
+    if priv:
+        classification, reason = priv
+        password_analysis = None
 
-                if has_no_saved_creds:
-                    reason = f"{reason} (no saved credentials — DPAPI dump not applicable; manipulation requires an interactive session)"
-                else:
-                    password_analysis = _analyze_password_age(hv, runas, meta, rel_path, pwd_cache)
+        if has_no_saved_creds:
+            reason = f"{reason} (no saved credentials — DPAPI dump not applicable; manipulation requires an interactive session)"
+        else:
+            password_analysis = _analyze_password_age(hv, runas, meta, rel_path, pwd_cache)
 
-                # Update row in place
-                row.type = TaskType.TIER0.value
-                row.reason = reason
-                row.password_analysis = password_analysis
+        # Account-disabled indicator is only available from BloodHound data (the LDAP
+        # tier0_cache carries no enabled/disabled state) — matches prior behavior.
+        if hv and hv.loaded:
+            reason = _add_account_status(reason)
 
-                return ClassificationResult(
-                    task_type="TIER-0",
-                    reason=reason,
-                    password_analysis=password_analysis,
-                    should_include=True,
-                )
+        # Update row in place
+        row.type = TaskType.TIER0.value if classification == "TIER-0" else TaskType.PRIV.value
+        row.reason = reason
+        row.password_analysis = password_analysis
+
+        return ClassificationResult(
+            task_type=classification,
+            reason=reason,
+            password_analysis=password_analysis,
+            should_include=True,
+        )
 
     # Regular task - still analyze password age if credentials are stored
     password_analysis = None
@@ -305,6 +340,8 @@ def _classify_by_privilege(
     hv: Any | None,
     tier0_cache: Tier0Cache | None = None,
     resolved_account: str | None = None,
+    resolved_account_sid: str | None = None,
+    match_bare_runas: bool = False,
 ) -> tuple[str, str] | None:
     """
     Check if an account is TIER-0 or PRIV via BloodHound or LDAP cache.
@@ -317,42 +354,18 @@ def _classify_by_privilege(
         hv: HighValueLoader instance (can be None)
         tier0_cache: Pre-fetched LDAP Tier-0 membership data
         resolved_account: Resolved username if account was a SID
+        resolved_account_sid: Domain SID resolved from a bare-name account
+        match_bare_runas: Opt-in fallback matching unresolved bare names against domain data
 
     Returns:
         Tuple of (classification, reason) if TIER-0 or PRIV detected,
         None if the account is not privileged.
     """
-    # Priority 1: BloodHound data
+    # Priority 1: BloodHound data; Priority 2: LDAP tier0_cache (when BloodHound absent).
     if hv and hv.loaded:
-        is_tier0, tier0_reasons = hv.check_tier0(account)
-        if is_tier0:
-            return "TIER-0", "; ".join(tier0_reasons)
-
-        if hv.check_highvalue(account):
-            return "PRIV", "High Value match found (Check BloodHound Outbound Object Control for Details)"
-
-    # Priority 2: LDAP tier0_cache (when BloodHound not available)
-    elif tier0_cache:
-        from .resolver import is_sid
-
-        lookup_user = account
-        if is_sid(account) and resolved_account:
-            lookup_user = resolved_account
-
-        has_domain_qualifier = "\\" in lookup_user or "@" in lookup_user or is_sid(account)
-        if "\\" in lookup_user:
-            norm_user = lookup_user.split("\\")[-1].lower()
-        elif "@" in lookup_user:
-            norm_user = lookup_user.split("@")[0].lower()
-        else:
-            norm_user = lookup_user.lower()
-        tier0_result = tier0_cache.get(norm_user) if has_domain_qualifier else None
-
-        if tier0_result:
-            is_tier0, groups = tier0_result
-            if is_tier0:
-                return "TIER-0", f"Tier-0 via LDAP: member of {', '.join(groups)}"
-
+        return _bloodhound_privilege(hv, account, resolved_account_sid, match_bare_runas)
+    if tier0_cache:
+        return _ldap_tier0(account, tier0_cache, resolved_account, resolved_account_sid, match_bare_runas)
     return None
 
 
@@ -403,6 +416,8 @@ def classify_service(
     pwd_cache: PwdLastSetCache | None = None,
     tier0_cache: Tier0Cache | None = None,
     resolved_account: str | None = None,
+    resolved_account_sid: str | None = None,
+    match_bare_runas: bool = False,
 ) -> ClassificationResult:
     """
     Classify a service as TIER-0, PRIV, or SERVICE based on the start_name account.
@@ -425,7 +440,11 @@ def classify_service(
     from .models.service import ServiceType
 
     # Check privilege level
-    priv_result = _classify_by_privilege(account, hv, tier0_cache, resolved_account)
+    priv_result = _classify_by_privilege(
+        account, hv, tier0_cache, resolved_account,
+        resolved_account_sid=resolved_account_sid,
+        match_bare_runas=match_bare_runas,
+    )
 
     if priv_result:
         classification, reason = priv_result

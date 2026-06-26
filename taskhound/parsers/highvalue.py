@@ -569,6 +569,17 @@ class HighValueLoader:
             sam = val.split("@", 1)[0].lower()
         return sam in self.hv_users
 
+    def check_highvalue_bare(self, sam: str) -> bool:
+        r"""Match a BARE sAMAccountName directly against high-value domain data.
+
+        Bypasses check_highvalue()'s bare-name guard. The caller is responsible for
+        ensuring the bare name is a domain account and not a local one (e.g. via
+        resolver.is_probably_local_bare_name).
+        """
+        if not sam:
+            return False
+        return sam.strip().lower() in self.hv_users
+
     def check_tier0(self, runas: str) -> tuple[bool, list[str]]:
         # Return (True, reasons) if the given RunAs value belongs to Tier 0 groups.
         # Enhanced to include AdminSDHolder detection via admincount=1
@@ -599,6 +610,25 @@ class HighValueLoader:
             sam = val.split("@", 1)[0].lower()
             user_data = self.hv_users.get(sam)
 
+        return self._tier0_from_user_data(user_data)
+
+    def check_tier0_bare(self, sam: str) -> tuple[bool, list[str]]:
+        r"""Match a BARE sAMAccountName directly against Tier-0 domain data.
+
+        Bypasses check_tier0()'s bare-name guard. The caller is responsible for
+        ensuring the bare name is a domain account and not a local one (e.g. via
+        resolver.is_probably_local_bare_name).
+        """
+        if not sam:
+            return False, []
+        return self._tier0_from_user_data(self.hv_users.get(sam.strip().lower()))
+
+    def _tier0_from_user_data(self, user_data: dict | None) -> tuple[bool, list[str]]:
+        """Compute (is_tier0, reasons) from a resolved BloodHound user record.
+
+        Shared by check_tier0() (SID / qualified-name lookup) and check_tier0_bare()
+        (bare sAMAccountName lookup).
+        """
         if not user_data:
             return False, []
 
@@ -612,7 +642,7 @@ class HighValueLoader:
         # Create a mapping of SID to display name for output
         sid_to_name = {}
         if len(group_sids) == len(group_names):
-            sid_to_name = dict(zip(group_sids, group_names))
+            sid_to_name = dict(zip(group_sids, group_names, strict=False))
 
         matching_tier0_groups = []
         has_actual_tier0_groups = False

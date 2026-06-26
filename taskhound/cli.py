@@ -929,6 +929,7 @@ This scan involves:
             no_ldap=args.no_ldap,
             dpapi_key=dpapi_key,
             concise=not args.verbose,
+            match_bare_runas=args.match_bare_runas,
         )
 
     elif args.offline:
@@ -943,6 +944,7 @@ This scan involves:
             no_ldap=args.no_ldap,
             dpapi_key=args.dpapi_key,
             concise=not args.verbose,
+            match_bare_runas=args.match_bare_runas,
         )
     else:
         # Online mode: process targets via SMB
@@ -1038,6 +1040,7 @@ This scan involves:
             "laps_cache": laps_cache,
             "validate_creds": args.validate_creds,
             "ldap_tier0": args.ldap_tier0,
+            "match_bare_runas": args.match_bare_runas,
             "no_lsa": args.no_lsa,
             "services": args.services,
             "services_only": args.services_only,

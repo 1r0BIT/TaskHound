@@ -26,7 +26,10 @@ from ..parsers.highvalue import HighValueLoader
 from ..parsers.task_xml import parse_task_xml
 from ..resolver import (
     format_runas_with_sid_resolution,
+    is_bare_name,
+    is_probably_local_bare_name,
     is_sid,
+    resolve_name_to_sid,
 )
 from ..smb.connection import (
     _dns_ptr_lookup,
@@ -101,6 +104,7 @@ def process_target(
     laps_cache: LAPSCache | None = None,
     validate_creds: bool = False,
     ldap_tier0: bool = False,
+    match_bare_runas: bool = False,
     no_lsa: bool = False,
     services: bool = False,
     services_only: bool = False,
@@ -693,6 +697,26 @@ def process_target(
                     gc_server=gc_server,
                 )
 
+        elif is_bare_name(runas) and not opsec and not no_ldap and not is_probably_local_bare_name(runas):
+            # Bare RunAs (no DOMAIN\ prefix, no UPN @): resolve it to a domain SID so the
+            # SID-aware Tier-0 / high-value matchers can identify it. A name that resolves in
+            # domain LDAP is provably a domain account (local accounts are not in LDAP), so this
+            # does not reintroduce the local-account false-positive the bare-name guard prevents.
+            bare_sid = resolve_name_to_sid(
+                runas,
+                domain=ldap_domain or domain,
+                is_computer=False,
+                hv_loader=hv,
+                dc_ip=dc_ip,
+                username=ldap_user or username,
+                password=ldap_password or password,
+                hashes=ldap_hashes or hashes,
+                kerberos=kerberos,
+            )
+            if bare_sid:
+                row.resolved_runas_sid = bare_sid
+                log_debug(f"{target}: Resolved bare RunAs '{runas}' -> {bare_sid}")
+
         # Enrich row with decrypted password if available from DPAPI loot
         if decrypted_creds:
             row.decrypted_password = _match_decrypted_password(runas, decrypted_creds, row.resolved_runas)
@@ -725,6 +749,8 @@ def process_target(
             pwd_cache=pwd_cache,
             tier0_cache=tier0_cache,
             resolved_runas=row.resolved_runas,
+            resolved_runas_sid=row.resolved_runas_sid,
+            match_bare_runas=match_bare_runas,
         )
 
         if not result.should_include:
@@ -862,6 +888,7 @@ def process_target(
             ldap_hashes=ldap_hashes,
             pwd_cache=pwd_cache,
             tier0_cache=tier0_cache,
+            match_bare_runas=match_bare_runas,
             debug=debug,
         )
 

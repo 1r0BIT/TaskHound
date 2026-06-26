@@ -28,6 +28,8 @@ from .constants import (
     WELL_KNOWN_SIDS,
     binary_to_sid,
     get_domain_sid_prefix,
+    is_bare_name,
+    is_probably_local_bare_name,
     is_sid,
     looks_like_domain_user,
     resolve_rid_to_name,
@@ -106,6 +108,8 @@ __all__ = [
     "Tier0Cache",
     # Utilities
     "is_sid",
+    "is_bare_name",
+    "is_probably_local_bare_name",
     "get_domain_sid_prefix",
     "looks_like_domain_user",
     "resolve_rid_to_name",

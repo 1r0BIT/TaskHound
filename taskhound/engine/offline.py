@@ -27,6 +27,7 @@ def process_offline_directory(
     no_ldap: bool = False,
     dpapi_key: str | None = None,
     concise: bool = False,
+    match_bare_runas: bool = False,
 ) -> list[str]:
     """
     Process previously collected XML files from a directory structure.
@@ -78,7 +79,7 @@ def process_offline_directory(
         # Also process any XML files in this directory, passing decrypted creds for matching
         lines = _process_offline_host(
             hostname, offline_dir, hv, show_unsaved_creds, include_local, all_rows, debug, no_ldap, concise,
-            decrypted_creds=decrypted_creds
+            decrypted_creds=decrypted_creds, match_bare_runas=match_bare_runas,
         )
         out_lines.extend(lines)
         return out_lines
@@ -115,7 +116,7 @@ def process_offline_directory(
         host_path = os.path.join(offline_dir, host_dir)
         lines = _process_offline_host(
             host_dir, host_path, hv, show_unsaved_creds, include_local, all_rows, debug, no_ldap, concise,
-            decrypted_creds=host_decrypted_creds.get(host_dir, [])
+            decrypted_creds=host_decrypted_creds.get(host_dir, []), match_bare_runas=match_bare_runas,
         )
         out_lines.extend(lines)
 
@@ -218,6 +219,7 @@ def _process_offline_host(
     no_ldap: bool = False,
     concise: bool = False,
     decrypted_creds: list | None = None,
+    match_bare_runas: bool = False,
 ) -> list[str]:
     """
     Process XML files for a single host from offline directory.
@@ -310,6 +312,7 @@ def _process_offline_host(
             show_unsaved_creds=show_unsaved_creds,
             include_local=include_local,
             pwd_cache=None,  # No LDAP in offline mode
+            match_bare_runas=match_bare_runas,
         )
 
         if not result.should_include:

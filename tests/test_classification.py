@@ -660,3 +660,114 @@ class TestClassificationResult:
         assert result.reason == "Domain Admin"
         assert result.password_analysis == "Old password"
         assert result.should_include is True
+
+
+class TestClassifyTaskBareName:
+    """Bare-username RunAs handling (no DOMAIN\\ prefix, no UPN @).
+
+    A scheduled task's <UserId> is sometimes a bare sAMAccountName. The same domain
+    account stored domain-qualified on one host and bare on another must classify the
+    same. The primary path resolves the bare name to a domain SID upstream (online +
+    LDAP); the opt-in --match-bare-runas flag covers offline / --opsec / --no-ldap.
+    """
+
+    SID = "S-1-5-21-1234-5678-9012-1107"
+
+    def _hv(self):
+        hv = MagicMock()
+        hv.loaded = True
+        hv.check_tier0.return_value = (False, [])
+        hv.check_highvalue.return_value = False
+        hv.check_tier0_bare.return_value = (False, [])
+        hv.check_highvalue_bare.return_value = False
+        hv.analyze_password_age.return_value = ("UNKNOWN", None)
+        hv.is_account_enabled.return_value = True
+        return hv
+
+    def _row(self, runas="svc_x"):
+        return TaskRow(host="h.domain.local", path="\\T", runas=runas, credentials_hint="stored_credentials")
+
+    def test_bloodhound_resolved_sid_is_tier0(self):
+        """A bare runas resolved to a domain SID is matched via the SID (check_tier0)."""
+        hv = self._hv()
+        hv.check_tier0.side_effect = lambda v: (
+            (True, ["TIER0 Group Membership", "AdminSDHolder"]) if v == self.SID else (False, [])
+        )
+
+        result = classify_task(
+            row=self._row(), meta={}, runas="svc_x", rel_path="\\T", hv=hv,
+            show_unsaved_creds=False, include_local=False, resolved_runas_sid=self.SID,
+        )
+
+        assert result.task_type == "TIER-0"
+        assert "TIER0 Group Membership" in result.reason
+        assert "matched by bare username" not in result.reason  # SID match needs no caveat
+        hv.check_tier0.assert_any_call(self.SID)  # matched by SID, not the bare name
+
+    def test_bare_no_resolution_no_flag_is_task(self):
+        """Without a resolved SID and without the flag, a bare runas stays TASK."""
+        hv = self._hv()
+        result = classify_task(
+            row=self._row(), meta={}, runas="svc_x", rel_path="\\T", hv=hv,
+            show_unsaved_creds=False, include_local=False,
+        )
+        assert result.task_type == "TASK"
+        hv.check_tier0.assert_called_once_with("svc_x")  # falls back to the bare name
+        hv.check_tier0_bare.assert_not_called()
+
+    def test_match_bare_flag_tier0_annotated(self):
+        """--match-bare-runas matches a non-local bare name and annotates the reason."""
+        hv = self._hv()
+        hv.check_tier0_bare.return_value = (True, ["TIER0 Group Membership"])
+
+        result = classify_task(
+            row=self._row(), meta={}, runas="svc_x", rel_path="\\T", hv=hv,
+            show_unsaved_creds=False, include_local=False, match_bare_runas=True,
+        )
+
+        assert result.task_type == "TIER-0"
+        assert "matched by bare username" in result.reason
+        hv.check_tier0_bare.assert_called_once_with("svc_x")
+
+    def test_match_bare_flag_skips_local_account(self):
+        """--match-bare-runas must not match a known local account name (e.g. Administrator)."""
+        hv = self._hv()
+        hv.check_tier0_bare.return_value = (True, ["TIER0 Group Membership"])  # would match if called
+
+        result = classify_task(
+            row=self._row(runas="Administrator"), meta={}, runas="Administrator", rel_path="\\T", hv=hv,
+            show_unsaved_creds=False, include_local=False, match_bare_runas=True,
+        )
+
+        assert result.task_type == "TASK"
+        hv.check_tier0_bare.assert_not_called()
+
+    def test_ldap_path_resolved_sid_is_tier0(self):
+        """LDAP tier0_cache: a bare name proven a domain account (resolved SID) → TIER-0, no caveat."""
+        result = classify_task(
+            row=self._row(), meta={}, runas="svc_x", rel_path="\\T", hv=None,
+            show_unsaved_creds=False, include_local=False,
+            tier0_cache={"svc_x": (True, ["Domain Admins"])}, resolved_runas_sid=self.SID,
+        )
+        assert result.task_type == "TIER-0"
+        assert result.reason.startswith("Tier-0 via LDAP")
+        assert "matched by bare username" not in result.reason
+
+    def test_ldap_path_match_bare_flag_annotated(self):
+        """LDAP tier0_cache: opt-in flag matches a bare name with a verification annotation."""
+        result = classify_task(
+            row=self._row(), meta={}, runas="svc_x", rel_path="\\T", hv=None,
+            show_unsaved_creds=False, include_local=False,
+            tier0_cache={"svc_x": (True, ["Domain Admins"])}, match_bare_runas=True,
+        )
+        assert result.task_type == "TIER-0"
+        assert "matched by bare username" in result.reason
+
+    def test_ldap_path_bare_no_flag_no_sid_is_task(self):
+        """LDAP tier0_cache: an unproven bare name without the flag stays TASK."""
+        result = classify_task(
+            row=self._row(), meta={}, runas="svc_x", rel_path="\\T", hv=None,
+            show_unsaved_creds=False, include_local=False,
+            tier0_cache={"svc_x": (True, ["Domain Admins"])},
+        )
+        assert result.task_type == "TASK"
