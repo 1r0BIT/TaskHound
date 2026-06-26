@@ -4,11 +4,11 @@
 # Dict[str, Any] approach, giving type safety and IDE autocomplete support.
 
 from dataclasses import asdict, dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class TaskType(str, Enum):
+class TaskType(StrEnum):
     """Classification type for a scheduled task."""
 
     TIER0 = "TIER-0"

@@ -4,7 +4,6 @@
 # if SIDs are from foreign domains, and classifying trust types.
 
 from dataclasses import dataclass
-from typing import Union
 
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
@@ -42,7 +41,7 @@ class TrustInfo:
 
 
 # Type alias for backwards compatibility - can be either simple str or TrustInfo
-TrustData = Union[str, TrustInfo]
+TrustData = str | TrustInfo
 
 
 # Track domain prefixes known to be external trusts (different forest)

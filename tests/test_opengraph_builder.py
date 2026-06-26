@@ -283,6 +283,15 @@ class TestCreateTaskNode:
 class TestCreatePrincipalId:
     """Tests for _create_principal_id function"""
 
+    @pytest.fixture(autouse=True)
+    def _isolated_cache(self, tmp_path):
+        # _create_principal_id consults the global per-host local-user cache via get_cache(),
+        # which is None until init_cache() runs. Give each test a fresh, isolated cache so the
+        # local-user lookup tests don't depend on cache state leaked in from other test modules.
+        from taskhound.utils.cache_manager import init_cache
+
+        init_cache(ttl_hours=1, enabled=True, cache_file=tmp_path / "cache.db")
+
     def test_returns_none_for_empty_user(self):
         """Should return None for empty runas user"""
         result = _create_principal_id("", "DOMAIN.LAB", {})

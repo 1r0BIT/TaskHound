@@ -6,11 +6,11 @@
 # triggers, logon types).
 
 from dataclasses import asdict, dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class ServiceType(str, Enum):
+class ServiceType(StrEnum):
     """Classification type for a Windows service."""
 
     TIER0 = "TIER-0"
