@@ -208,6 +208,18 @@ class TestOpenGraphGeneration:
         assert "WS01.EXAMPLE.LAB" in node_ids
         assert "BACKUPUSER@EXAMPLE.LAB" in node_ids
 
+        # BHCE namespaces custom OpenGraph data by source_kind; it must be set (not null).
+        assert data["metadata"]["source_kind"] == "TaskHound"
+        # source_kind is also stamped onto every node's kinds at add-time.
+        assert all("TaskHound" in n["kinds"] for n in data["graph"]["nodes"])
+
+    def test_generated_graph_has_source_kind_when_empty(self, temp_output_dir):
+        """Even an empty graph must carry a non-null source_kind for BHCE ingest."""
+        output_file = generate_opengraph_files(str(temp_output_dir), [])
+        with open(output_file) as f:
+            data = json.load(f)
+        assert data["metadata"]["source_kind"] == "TaskHound"
+
 
 class TestBloodHoundAPI:
     """Tests for BloodHound API integration."""

@@ -23,6 +23,13 @@ from .builder import (
     resolve_object_ids_chunked,
 )
 
+# BloodHound OpenGraph source_kind — namespaces all TaskHound-generated nodes/edges.
+# Must be passed to OpenGraph(source_kind=...) at construction time: bhopengraph stamps
+# this onto every node's `kinds` when the node is added, so assigning it after the
+# add_node() calls would populate metadata only and miss the node kinds. Task and service
+# graphs share this kind (they are already distinguished by node kind and by file).
+SOURCE_KIND = "TaskHound"
+
 
 def generate_opengraph_files(
     output_dir: str,
@@ -68,7 +75,7 @@ def generate_opengraph_files(
         warn("No valid tasks provided for OpenGraph generation - creating empty graph")
 
     # Initialize OpenGraph container
-    graph = OpenGraph()
+    graph = OpenGraph(source_kind=SOURCE_KIND)
 
     # 1. Collect unique names for resolution
     computer_names: set[str] = set()
@@ -263,8 +270,9 @@ def generate_service_opengraph_files(
     Generate OpenGraph JSON for Windows service findings.
 
     Writes to a separate file (taskhound_services_opengraph.json) with
-    source_kind "TaskHound_Services" to avoid contaminating the task
-    OpenGraph data when re-uploading.
+    WindowsService nodes (distinct from the task graph's ScheduledTask nodes)
+    to avoid contaminating the task OpenGraph data when re-uploading. Both
+    graphs share the "TaskHound" source_kind.
 
     :param services: List of ServiceRow objects or dicts
     :param output_dir: Directory to write output files
@@ -289,7 +297,7 @@ def generate_service_opengraph_files(
         warn("No valid services for OpenGraph generation")
         return None
 
-    graph = OpenGraph()
+    graph = OpenGraph(source_kind=SOURCE_KIND)
 
     # Collect unique names for resolution
     computer_names: set[str] = set()

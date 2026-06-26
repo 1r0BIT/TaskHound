@@ -184,7 +184,11 @@ def _upload_opengraph_batch(
 
     if not uploadable:
         if opengraph_files:
-            info("Skipping BloodHound upload - no data (0 nodes, 0 edges)")
+            warn(
+                "Skipping BloodHound upload - graph is empty (0 nodes, 0 edges). "
+                "No privileged tasks/services with resolvable principals were found, "
+                "or all edges were skipped (try --bh-allow-orphans)."
+            )
         print_opengraph_section(
             json_path=json_data_path or (opengraph_files[0] if opengraph_files else ""),
             uploaded=False,

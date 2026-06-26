@@ -170,6 +170,10 @@ class TestGenerateServiceOpengraphFiles:
             with open(result) as f:
                 data = json.load(f)
 
+            # BHCE namespaces custom OpenGraph data by source_kind; it must be set (not null).
+            # Task and service graphs share the "TaskHound" source_kind.
+            assert data["metadata"]["source_kind"] == "TaskHound"
+
             # Should have nodes (at least the service node)
             graph = data.get("graph", data)
             nodes = graph.get("nodes", [])
