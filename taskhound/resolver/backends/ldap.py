@@ -293,6 +293,18 @@ def resolve_name_to_sid_via_ldap(
         return None
 
 
+def _filetime(attr_vals: list[str]) -> datetime | None:
+    """Convert a Windows FILETIME LDAP attribute value to an aware datetime."""
+    try:
+        filetime = int(attr_vals[0]) if attr_vals else 0
+        if filetime > 0:
+            unix_ts = (filetime - 116444736000000000) / 10000000
+            return datetime.fromtimestamp(unix_ts, tz=UTC)
+    except (ValueError, OSError):
+        pass
+    return None
+
+
 def batch_get_user_attributes(
     usernames: list[str],
     domain: str,
@@ -423,21 +435,11 @@ def batch_get_user_attributes(
                             if attr_name.lower() == "samaccountname":
                                 sam_name = attr_vals[0].lower() if attr_vals else None
                             elif attr_name.lower() == "pwdlastset":
-                                try:
-                                    filetime = int(attr_vals[0]) if attr_vals else 0
-                                    if filetime > 0:
-                                        unix_ts = (filetime - 116444736000000000) / 10000000
-                                        entry_attrs["pwdLastSet"] = datetime.fromtimestamp(unix_ts, tz=UTC)
-                                except (ValueError, OSError):
-                                    pass
+                                if (ts := _filetime(attr_vals)) is not None:
+                                    entry_attrs["pwdLastSet"] = ts
                             elif attr_name.lower() == "lastlogon":
-                                try:
-                                    filetime = int(attr_vals[0]) if attr_vals else 0
-                                    if filetime > 0:
-                                        unix_ts = (filetime - 116444736000000000) / 10000000
-                                        entry_attrs["lastLogon"] = datetime.fromtimestamp(unix_ts, tz=UTC)
-                                except (ValueError, OSError):
-                                    pass
+                                if (ts := _filetime(attr_vals)) is not None:
+                                    entry_attrs["lastLogon"] = ts
                             elif attr_name.lower() == "objectsid" and attr_vals:
                                 try:
                                     binary_sid_data = attribute["vals"][0].asOctets()
