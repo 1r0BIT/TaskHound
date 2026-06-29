@@ -82,20 +82,6 @@ def resolve_netbios_to_fqdn(netbios_name: str) -> str | None:
     return None
 
 
-def add_netbios_mapping(netbios_name: str, fqdn: str) -> None:
-    """
-    Manually add a NETBIOS → FQDN mapping to the cache.
-
-    Use this to populate the cache from BloodHound or other sources.
-
-    Args:
-        netbios_name: NETBIOS domain name (e.g., "YOURCOMPANY")
-        fqdn: Fully qualified domain name (e.g., "corp.example.com")
-    """
-    global _netbios_to_fqdn_cache
-    _netbios_to_fqdn_cache[netbios_name.upper()] = fqdn.upper()
-
-
 def get_netbios_cache() -> dict[str, str]:
     """
     Get the current NETBIOS → FQDN cache.
