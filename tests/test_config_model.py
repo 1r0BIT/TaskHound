@@ -5,7 +5,6 @@ Tests cover:
 - BloodHoundConfig initialization
 - from_args_and_config class method
 - has_credentials method
-- is_bhce and is_legacy methods
 """
 
 from argparse import Namespace
@@ -30,8 +29,6 @@ def mock_args_minimal():
         bh_password=None,
         bh_api_key=None,
         bh_api_key_id=None,
-        bh_live=False,
-        bh_save=None,
         bhce=False,
         legacy=False,
     )
@@ -49,8 +46,6 @@ def mock_args_with_creds():
         bh_password="password123",
         bh_api_key=None,
         bh_api_key_id=None,
-        bh_live=True,
-        bh_save="./data.json",
         bhce=True,
         legacy=False,
     )
@@ -68,8 +63,6 @@ def mock_args_with_api_key():
         bh_password=None,
         bh_api_key="api_key_123",
         bh_api_key_id="key_id_456",
-        bh_live=False,
-        bh_save=None,
         bhce=True,
         legacy=False,
     )
@@ -96,8 +89,6 @@ class TestBloodHoundConfigInit:
         assert config.bh_api_key is None
         assert config.bh_api_key_id is None
         assert config.bh_type is None
-        assert config.bh_live is False
-        assert config.bh_save is None
 
     def test_custom_initialization(self):
         """Should accept custom values"""
@@ -164,14 +155,6 @@ class TestFromArgsAndConfig:
 
         assert config.bh_type == "bhce"
 
-    def test_live_settings(self, mock_args_with_creds):
-        """Should copy live mode settings"""
-        config = BloodHoundConfig.from_args_and_config(mock_args_with_creds)
-
-        assert config.bh_live is True
-        assert config.bh_save == "./data.json"
-
-
 # ============================================================================
 # Unit Tests: has_credentials
 # ============================================================================
@@ -235,37 +218,6 @@ class TestHasCredentials:
 
 
 # ============================================================================
-# Unit Tests: is_bhce and is_legacy
 # ============================================================================
 
 
-class TestTypeChecks:
-    """Tests for is_bhce and is_legacy methods"""
-
-    def test_is_bhce_true(self):
-        """Should return True for bhce type"""
-        config = BloodHoundConfig(bh_type="bhce")
-
-        assert config.is_bhce() is True
-        assert config.is_legacy() is False
-
-    def test_is_legacy_true(self):
-        """Should return True for legacy type"""
-        config = BloodHoundConfig(bh_type="legacy")
-
-        assert config.is_legacy() is True
-        assert config.is_bhce() is False
-
-    def test_no_type_set(self):
-        """Should return False for both when type is None"""
-        config = BloodHoundConfig(bh_type=None)
-
-        assert config.is_bhce() is False
-        assert config.is_legacy() is False
-
-    def test_invalid_type(self):
-        """Should return False for invalid type"""
-        config = BloodHoundConfig(bh_type="invalid")
-
-        assert config.is_bhce() is False
-        assert config.is_legacy() is False

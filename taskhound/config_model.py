@@ -26,10 +26,6 @@ class BloodHoundConfig:
     bh_api_key_id: str | None = None  # API key ID for BHCE HMAC authentication
     bh_type: str | None = None  # 'bhce' or 'legacy'
 
-    # Live connection (legacy)
-    bh_live: bool = False
-    bh_save: str | None = None
-
     @classmethod
     def from_args_and_config(cls, args):
         """
@@ -56,9 +52,6 @@ class BloodHoundConfig:
             bh_password=args.bh_password,
             bh_api_key=args.bh_api_key,
             bh_api_key_id=args.bh_api_key_id,
-            # Live (legacy)
-            bh_live=args.bh_live,
-            bh_save=args.bh_save,
         )
 
         # Determine type from CLI flags if not set
@@ -80,11 +73,3 @@ class BloodHoundConfig:
             return True
         # Otherwise need username and password
         return bool(self.bh_username and self.bh_password)
-
-    def is_bhce(self) -> bool:
-        """Check if this is BloodHound Community Edition."""
-        return self.bh_type == "bhce"
-
-    def is_legacy(self) -> bool:
-        """Check if this is Legacy BloodHound (Neo4j)."""
-        return self.bh_type == "legacy"
