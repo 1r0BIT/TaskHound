@@ -5,35 +5,9 @@
 
 import os
 import traceback
-from dataclasses import dataclass, field
 from typing import Any
 
 from ..utils.logging import good, info, warn
-
-
-@dataclass
-class ConnectionContext:
-    """Context object holding SMB connection state and metadata."""
-
-    smb: Any = None
-    server_fqdn: str | None = None
-    server_sid: str | None = None
-    credguard_status: bool | None = None
-    laps_used: bool = False
-    laps_type_used: str | None = None
-    discovered_hostname: str | None = None
-    laps_cred: Any = None  # LAPSCredential if LAPS mode
-
-
-@dataclass
-class ProcessingContext:
-    """Context for task processing with validation and cache data."""
-
-    cred_validation_results: dict[str, Any] = field(default_factory=dict)
-    decrypted_creds: list[Any] = field(default_factory=list)
-    pwd_cache: dict[str, Any] = field(default_factory=dict)
-    tier0_cache: dict[str, tuple[bool, list]] = field(default_factory=dict)
-    backup_target_dir: str | None = None
 
 
 def setup_backup_directory(target: str, backup_dir: str | None, debug: bool = False) -> str | None:
