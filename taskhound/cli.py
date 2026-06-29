@@ -1048,8 +1048,6 @@ This scan involves:
             async_config = AsyncConfig(
                 workers=args.threads,
                 rate_limit=args.rate_limit,
-                timeout=args.timeout,
-                show_progress=True,
                 jitter=args.jitter,
             )
             async_engine = AsyncTaskHound(async_config)

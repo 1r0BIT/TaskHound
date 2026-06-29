@@ -53,12 +53,6 @@ class AsyncConfig:
     rate_limit: float | None = None
     """Maximum targets per second. None = unlimited."""
 
-    timeout: int = 30
-    """Per-target timeout in seconds."""
-
-    show_progress: bool = True
-    """Show progress bar during processing."""
-
     jitter: float | None = None
     """Random delay (0 to N seconds) between hosts. Only for sequential mode."""
 
