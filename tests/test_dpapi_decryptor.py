@@ -14,21 +14,15 @@ class TestMasterkeyInfo:
     """Tests for MasterkeyInfo class."""
 
     def test_init_basic(self):
-        """MasterkeyInfo initializes with guid, blob, and default sid."""
+        """MasterkeyInfo initializes with guid and blob."""
         mk = MasterkeyInfo(guid="12345678-1234-1234-1234-123456789012", blob=b"test_blob")
         assert mk.guid == "12345678-1234-1234-1234-123456789012"
         assert mk.blob == b"test_blob"
-        assert mk.sid == "S-1-5-18"
 
     def test_guid_normalized_to_lowercase(self):
         """GUID is normalized to lowercase."""
         mk = MasterkeyInfo(guid="ABCD1234-ABCD-ABCD-ABCD-ABCD1234ABCD", blob=b"test")
         assert mk.guid == "abcd1234-abcd-abcd-abcd-abcd1234abcd"
-
-    def test_custom_sid(self):
-        """Custom SID can be provided."""
-        mk = MasterkeyInfo(guid="test-guid", blob=b"test", sid="S-1-5-21-custom")
-        assert mk.sid == "S-1-5-21-custom"
 
     def test_key_initially_none(self):
         """Key is None before decryption."""
@@ -80,21 +74,6 @@ class TestScheduledTaskCredential:
         assert cred.password == "P@ssw0rd"
         assert cred.target == "{12345678-1234-1234-1234-123456789012}"
 
-    def test_dump_method_exists(self):
-        """dump() method exists and is callable."""
-        cred = ScheduledTaskCredential(task_name="Test", blob_path="/path")
-        with patch("taskhound.dpapi.decryptor.good"), patch("taskhound.dpapi.decryptor.info"):
-            cred.dump()  # Should not raise
-
-    def test_dump_quiet_method_exists(self):
-        """dump_quiet() method exists and is callable."""
-        cred = ScheduledTaskCredential(
-            task_name="Test", blob_path="/path", username="user", password="pass"
-        )
-        with patch("taskhound.dpapi.decryptor.status"):
-            cred.dump_quiet()  # Should not raise
-
-
 class TestDPAPIDecryptorInit:
     """Tests for DPAPIDecryptor initialization."""
 
@@ -143,43 +122,6 @@ class TestMasterkeyDecryption:
         result = mk.decrypt(b"fake_dpapi_userkey_")
         assert result is False
         assert mk.key is None
-
-
-class TestCredentialOutput:
-    """Tests for credential output formatting."""
-
-    def test_dump_prints_task_name(self):
-        """dump() includes task name in output."""
-        cred = ScheduledTaskCredential(task_name="ImportantTask", blob_path="/path")
-        with patch("taskhound.dpapi.decryptor.good"), patch("taskhound.dpapi.decryptor.info") as mock_info:
-            cred.dump()
-        # Check info was called with task name
-        info_calls = [str(c) for c in mock_info.call_args_list]
-        assert any("ImportantTask" in str(c) for c in info_calls)
-
-    def test_dump_quiet_format(self):
-        """dump_quiet() formats output correctly."""
-        cred = ScheduledTaskCredential(
-            task_name="MyTask",
-            blob_path="/path",
-            username="admin",
-            password="secret123",
-        )
-        with patch("taskhound.dpapi.decryptor.status") as mock_status:
-            cred.dump_quiet()
-        # Check status was called with expected format
-        mock_status.assert_called_once()
-        call_arg = mock_status.call_args[0][0]
-        assert "SCHED_TASK" in call_arg
-        assert "admin:secret123" in call_arg
-
-    def test_dump_quiet_decryption_failed(self):
-        """dump_quiet() shows DECRYPTION_FAILED when credentials missing."""
-        cred = ScheduledTaskCredential(task_name="MyTask", blob_path="/path")
-        with patch("taskhound.dpapi.decryptor.status") as mock_status:
-            cred.dump_quiet()
-        call_arg = mock_status.call_args[0][0]
-        assert "DECRYPTION_FAILED" in call_arg
 
 
 class TestIsGuid:
@@ -290,57 +232,6 @@ class TestTriageSystemMasterkeys:
             decryptor = DPAPIDecryptor(mock_conn, "0x" + "aa" * 20)
         result = decryptor.triage_system_masterkeys()
         assert result == []
-
-
-class TestDecryptScheduledTaskCredentials:
-    """Tests for decrypt_scheduled_task_credentials method."""
-
-    def test_empty_list(self):
-        """Returns empty list for empty input."""
-        mock_conn = MagicMock()
-        with patch("taskhound.dpapi.decryptor.logging"):
-            decryptor = DPAPIDecryptor(mock_conn, "0x" + "aa" * 20)
-        result = decryptor.decrypt_scheduled_task_credentials([])
-        assert result == []
-
-    def test_skips_missing_blob_bytes(self):
-        """Skips entries without blob_bytes."""
-        mock_conn = MagicMock()
-        with patch("taskhound.dpapi.decryptor.logging"):
-            decryptor = DPAPIDecryptor(mock_conn, "0x" + "aa" * 20)
-
-        blob_list = [
-            {"task_name": "Task1", "blob_path": "path1"},  # No blob_bytes
-        ]
-        result = decryptor.decrypt_scheduled_task_credentials(blob_list)
-        assert result == []
-
-    def test_processes_valid_entries(self):
-        """Processes valid entries through decrypt_credential_blob."""
-        mock_conn = MagicMock()
-        with patch("taskhound.dpapi.decryptor.logging"):
-            decryptor = DPAPIDecryptor(mock_conn, "0x" + "aa" * 20)
-
-        mock_cred = ScheduledTaskCredential(task_name="Task", blob_path="path")
-        with patch.object(decryptor, "decrypt_credential_blob", return_value=mock_cred):
-            blob_list = [
-                {"task_name": "Task1", "blob_path": "path1", "blob_bytes": b"data1"},
-            ]
-            result = decryptor.decrypt_scheduled_task_credentials(blob_list)
-            assert len(result) == 1
-
-    def test_passes_target_to_decrypt(self):
-        """Target parameter is passed to decrypt_credential_blob."""
-        mock_conn = MagicMock()
-        with patch("taskhound.dpapi.decryptor.logging"):
-            decryptor = DPAPIDecryptor(mock_conn, "0x" + "aa" * 20)
-
-        with patch.object(decryptor, "decrypt_credential_blob") as mock_decrypt:
-            mock_decrypt.return_value = ScheduledTaskCredential("T", "P")
-            blob_list = [{"task_name": "T", "blob_path": "P", "blob_bytes": b"d"}]
-            decryptor.decrypt_scheduled_task_credentials(blob_list, target="SERVER01")
-            mock_decrypt.assert_called_once()
-            assert mock_decrypt.call_args.kwargs["target"] == "SERVER01"
 
 
 class TestDecryptCredentialBlob:

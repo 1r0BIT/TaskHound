@@ -32,16 +32,14 @@ from impacket.smbconnection import SMBConnection as ImpacketSMBConnection
 from impacket.uuid import bin_to_string
 
 from ..utils.helpers import is_guid
-from ..utils.logging import good, info, status
 
 
 class MasterkeyInfo:
     """Represents a decrypted DPAPI masterkey"""
 
-    def __init__(self, guid: str, blob: bytes, sid: str = "S-1-5-18"):
+    def __init__(self, guid: str, blob: bytes):
         self.guid = guid.lower()
         self.blob = blob
-        self.sid = sid
         self.key: bytes | None = None
         self._sha1: str | None = None
 
@@ -94,22 +92,6 @@ class ScheduledTaskCredential:
         self.username = username
         self.password = password
         self.target = target
-
-    def dump(self) -> None:
-        """Print credential in detailed format"""
-        good("SCHEDULED TASK CREDENTIAL")
-        info(f"Task Name:     {self.task_name}")
-        info(f"Target:        {self.target or 'N/A'}")
-        if self.username:
-            info(f"Username:      {self.username}")
-        if self.password:
-            info(f"Password:      {self.password}")
-        info(f"Blob Path:     {self.blob_path}")
-
-    def dump_quiet(self) -> None:
-        """Print credential in quiet format"""
-        cred_str = f"{self.username}:{self.password}" if self.username and self.password else "DECRYPTION_FAILED"
-        status(f"[SCHED_TASK] {self.task_name} - {cred_str}")
 
 
 class DPAPIDecryptor:
@@ -290,42 +272,6 @@ class DPAPIDecryptor:
             logging.error(f"Error decrypting credential blob: {e}", exc_info=True)
             return ScheduledTaskCredential(task_name=task_name, blob_path=blob_path, target=target)
 
-    def decrypt_scheduled_task_credentials(
-        self, blob_info_list: list[dict], target: str | None = None
-    ) -> list[ScheduledTaskCredential]:
-        """
-        Decrypt all scheduled task credential blobs
-
-        Args:
-            blob_info_list: List of dicts with keys: 'task_name', 'blob_path', 'blob_bytes'
-            target: Target host identifier
-
-        Returns:
-            List of ScheduledTaskCredential objects
-        """
-        credentials = []
-
-        logging.info(f"Decrypting {len(blob_info_list)} credential blobs...")
-
-        for blob_info in blob_info_list:
-            task_name = blob_info.get("task_name", "UNKNOWN")
-            blob_path = blob_info.get("blob_path", "UNKNOWN")
-            blob_bytes = blob_info.get("blob_bytes")
-
-            if not blob_bytes:
-                logging.warning(f"No blob data for {task_name}")
-                continue
-
-            cred = self.decrypt_credential_blob(
-                blob_bytes=blob_bytes, task_name=task_name, blob_path=blob_path, target=target
-            )
-
-            if cred:
-                credentials.append(cred)
-
-        logging.info(f"Successfully processed {len(credentials)} credentials")
-        return credentials
-
     def _decrypt_blob(self, blob_bytes: bytes, masterkey: MasterkeyInfo) -> bytes | None:
         """
         Low-level DPAPI blob decryption using masterkey
@@ -394,18 +340,4 @@ class DPAPIDecryptor:
         """Compute DPAPI session key from masterkey hash and salt"""
         from Cryptodome.Hash import HMAC
 
-        # Try both session key derivation methods
-        for i in range(2):
-            h = (
-                HMAC.new(key_hash, salt, hash_algo)
-                if i == 0
-                else HMAC.new(salt, key_hash, hash_algo)
-            )
-
-            hmac_result = h.digest()
-
-            # Return first attempt (most common)
-            if i == 0:
-                return hmac_result
-
-        return hmac_result
+        return HMAC.new(key_hash, salt, hash_algo).digest()
