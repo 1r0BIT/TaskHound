@@ -36,7 +36,6 @@ from ..models.service import ServiceRow
 from ..models.task import TaskRow
 from ..utils.console import (
     console,
-    good,
     info,
     print_scan_complete,
     status,
