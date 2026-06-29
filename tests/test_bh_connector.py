@@ -5,9 +5,9 @@ from unittest.mock import MagicMock, patch
 
 from taskhound.connectors.bloodhound import (
     BloodHoundConnector,
-    _get_alternate_protocol_uri,
     _safe_get_sam,
 )
+from taskhound.output.bloodhound import _get_alternate_protocol_uri
 
 
 class TestSafeGetSam:

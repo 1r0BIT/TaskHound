@@ -1160,6 +1160,8 @@ def connect_bloodhound(args) -> tuple[dict[str, Any] | None, BloodHoundConnector
 
     # Connection failed - try alternate protocol (http <-> https)
     if not is_legacy:  # Only for BHCE (Legacy uses bolt://)
+        from ..output.bloodhound import _get_alternate_protocol_uri
+
         alt_uri = _get_alternate_protocol_uri(connector_uri)
         if alt_uri:
             original_scheme = "https" if connector_uri.startswith("https://") else "http"
@@ -1190,29 +1192,3 @@ def connect_bloodhound(args) -> tuple[dict[str, Any] | None, BloodHoundConnector
     return None, None
 
 
-def _get_alternate_protocol_uri(uri: str) -> str | None:
-    """
-    Get the alternate protocol URI (http <-> https).
-
-    Only swaps the protocol, keeps the same port.
-
-    Args:
-        uri: Original URI (e.g., "http://localhost:8080")
-
-    Returns:
-        URI with alternate protocol, or None if not applicable
-    """
-    from urllib.parse import urlparse, urlunparse
-
-    parsed = urlparse(uri)
-
-    if parsed.scheme == "http":
-        # http -> https (keep same port)
-        new_netloc = f"{parsed.hostname}:{parsed.port}" if parsed.port else parsed.hostname
-        return urlunparse(("https", new_netloc, parsed.path, "", "", ""))
-    elif parsed.scheme == "https":
-        # https -> http (keep same port)
-        new_netloc = f"{parsed.hostname}:{parsed.port}" if parsed.port else parsed.hostname
-        return urlunparse(("http", new_netloc, parsed.path, "", "", ""))
-
-    return None
