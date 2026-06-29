@@ -7,6 +7,7 @@
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
 from ..utils.cache_manager import get_cache
+from ..utils.helpers import domain_to_base_dn
 from ..utils.ldap import LDAPConnectionError, get_ldap_connection
 from ..utils.logging import debug
 from .constants import binary_to_sid
@@ -103,7 +104,7 @@ def fetch_tier0_members(
         debug(f"LDAP connection failed for Tier-0 pre-flight: {e}")
         return tier0_cache
 
-    base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
+    base_dn = domain_to_base_dn(domain)
 
     try:
         # Step 1: Get domain SID by querying a domain controller

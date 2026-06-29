@@ -9,6 +9,7 @@ from typing import Any
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
 from ...utils.cache_manager import get_cache
+from ...utils.helpers import domain_to_base_dn
 from ...utils.ldap import LDAPConnectionError, get_ldap_connection
 from ...utils.logging import debug, info, warn
 from ..constants import binary_to_sid, sid_to_binary
@@ -74,7 +75,7 @@ def resolve_sid_via_ldap(
             return None
 
         # Build search base DN from domain
-        base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
+        base_dn = domain_to_base_dn(domain)
         debug(f"Using LDAP base DN: {base_dn}")
 
         # Create search filter using string SID format
@@ -224,7 +225,7 @@ def resolve_name_to_sid_via_ldap(
         debug(f"Successfully bound to LDAP server {dc_ip}")
 
         # Build search base DN from domain
-        base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
+        base_dn = domain_to_base_dn(domain)
         debug(f"Using LDAP base DN: {base_dn}")
 
         # Create search filter based on object type
@@ -385,7 +386,7 @@ def batch_get_user_attributes(
         return results
 
     # Build base DN
-    base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
+    base_dn = domain_to_base_dn(domain)
 
     # Query users in batches using OR filter
     BATCH_SIZE = 20

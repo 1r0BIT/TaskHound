@@ -5,6 +5,7 @@
 
 from typing import Any
 
+from ..utils.helpers import domain_to_base_dn
 from ..utils.logging import debug
 
 # Module-level state
@@ -163,7 +164,7 @@ def _load_netbios_cache_from_ldap() -> None:
             kerberos=kerberos,
         )
 
-        base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
+        base_dn = domain_to_base_dn(domain)
 
         # Query 1: crossRef objects (own forest domains)
         config_dn = f"CN=Partitions,CN=Configuration,{base_dn}"

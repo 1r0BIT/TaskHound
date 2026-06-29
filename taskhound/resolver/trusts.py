@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
+from ..utils.helpers import domain_to_base_dn
 from ..utils.logging import debug, info
 from .constants import WELL_KNOWN_LOCAL_RIDS, binary_to_sid, get_domain_sid_prefix
 
@@ -272,7 +273,7 @@ def fetch_known_domain_sids_via_ldap(
             kerberos=kerberos,
         )
 
-        base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
+        base_dn = domain_to_base_dn(domain)
 
         # Query 1: Get own domain's SID from the domain object
         # Own domain is always intra-forest (it's our forest!)

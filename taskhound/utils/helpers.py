@@ -8,6 +8,11 @@ import re
 import uuid
 
 
+def domain_to_base_dn(domain: str) -> str:
+    """Build an LDAP base DN ("DC=corp,DC=local") from a dotted domain name."""
+    return ",".join(f"DC={part}" for part in domain.split("."))
+
+
 def is_ipv4(host: str) -> bool:
     # Fast, permissive IPv4 string check (no regex).
     #

@@ -8,7 +8,7 @@ import socket
 
 from impacket.ldap import ldap as ldap_impacket
 
-from .helpers import parse_ntlm_hashes
+from .helpers import domain_to_base_dn, parse_ntlm_hashes
 from .logging import debug
 
 
@@ -149,7 +149,7 @@ def get_ldap_connection(
         debug(f"LDAP: Auto-discovered DC: {dc_ip}")
 
     # Build base DN from domain
-    base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
+    base_dn = domain_to_base_dn(domain)
 
     # Parse hashes
     lmhash, nthash = parse_ntlm_hashes(hashes)
@@ -445,7 +445,7 @@ def get_global_catalog_connection(
 
     # Global Catalog uses empty base DN (forest-wide search)
     # or we can use the forest root DN
-    base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
+    base_dn = domain_to_base_dn(domain)
 
     # Parse hashes
     lmhash, nthash = parse_ntlm_hashes(hashes)

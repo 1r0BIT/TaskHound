@@ -2,6 +2,7 @@ import sys
 
 from ..resolver import extract_domain_sid_from_hv
 from ..resolver.backends import resolve_sid_via_ldap
+from .helpers import domain_to_base_dn
 from .logging import good, info, warn
 
 
@@ -113,7 +114,7 @@ def preflight_credential_check(
     try:
         from impacket.ldap import ldap as ldap_mod
 
-        base_dn = ",".join(f"DC={part}" for part in eff_ldap_domain.split("."))
+        base_dn = domain_to_base_dn(eff_ldap_domain)
         conn = ldap_mod.LDAPConnection(f"ldap://{ldap_target}", base_dn)
         conn.login(eff_ldap_user, eff_ldap_pass or "", eff_ldap_domain)
         # Quick search to confirm we have read access

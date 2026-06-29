@@ -9,6 +9,7 @@ from ..utils import logging as log_utils
 from ..utils.console import console
 from ..utils.credentials import find_password_for_user
 from ..utils.date_parser import parse_iso_date
+from ..utils.helpers import domain_to_base_dn
 from . import COLORS
 
 
@@ -215,7 +216,7 @@ def _query_gmsa_ldap(
         )
 
         # Build search base from domain
-        search_base = ",".join(f"DC={part}" for part in domain.split("."))
+        search_base = domain_to_base_dn(domain)
 
         # Search for the account by sAMAccountName, request objectClass
         search_filter = f"(sAMAccountName={sam_account_name})"
