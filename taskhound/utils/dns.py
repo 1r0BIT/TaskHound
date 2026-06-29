@@ -146,46 +146,6 @@ def resolve_hostname(
     return None
 
 
-def reverse_lookup(
-    ip: str,
-    nameserver: str | None = None,
-    use_tcp: bool = False,
-    timeout: int = DEFAULT_DNS_TIMEOUT,
-) -> str | None:
-    """
-    Perform reverse DNS lookup (PTR record).
-
-    Args:
-        ip: IP address to lookup
-        nameserver: Optional DNS server to use
-        use_tcp: Force DNS queries over TCP
-        timeout: DNS query timeout in seconds
-
-    Returns:
-        Hostname (FQDN), or None if lookup fails
-    """
-    try:
-        if nameserver:
-            import dns.resolver
-            import dns.reversename
-
-            resolver = dns.resolver.Resolver(configure=False)
-            resolver.nameservers = [nameserver]
-            resolver.timeout = timeout
-            resolver.lifetime = timeout
-
-            rev_name = dns.reversename.from_address(ip)
-            answers = resolver.resolve(rev_name, "PTR", tcp=use_tcp)
-            if answers:
-                return str(answers[0]).rstrip(".")
-        else:
-            return socket.gethostbyaddr(ip)[0]
-    except Exception as e:
-        debug(f"DNS: Reverse lookup for {ip} failed: {e}")
-
-    return None
-
-
 def _is_ip_address(hostname: str) -> bool:
     """Check if a string is an IPv4 address."""
     parts = hostname.split(".")

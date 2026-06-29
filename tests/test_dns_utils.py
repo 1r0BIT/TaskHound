@@ -13,7 +13,6 @@ from taskhound.utils.dns import (
     discover_domain_controllers,
     get_working_dc,
     resolve_hostname,
-    reverse_lookup,
 )
 
 
@@ -172,28 +171,6 @@ class TestResolveHostname:
         mock_gethostbyname.side_effect = socket.gaierror("DNS failed")
 
         result = resolve_hostname("nonexistent.local")
-
-        assert result is None
-
-
-class TestReverseLookup:
-    """Tests for reverse_lookup function."""
-
-    @patch("socket.gethostbyaddr")
-    def test_reverse_lookup_success(self, mock_gethostbyaddr):
-        """Should resolve IP to hostname."""
-        mock_gethostbyaddr.return_value = ("dc.corp.local", [], ["192.168.1.1"])
-
-        result = reverse_lookup("192.168.1.1")
-
-        assert result == "dc.corp.local"
-
-    @patch("socket.gethostbyaddr")
-    def test_reverse_lookup_failure(self, mock_gethostbyaddr):
-        """Should return None on failure."""
-        mock_gethostbyaddr.side_effect = socket.herror("Not found")
-
-        result = reverse_lookup("192.168.1.1")
 
         assert result is None
 
