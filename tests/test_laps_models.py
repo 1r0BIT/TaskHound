@@ -283,36 +283,6 @@ class TestLAPSCache:
         assert stats["legacy"] == 5
         assert stats["mslaps"] == 3
 
-    def test_normalize_key_uppercase(self):
-        """Should normalize key to uppercase"""
-        result = LAPSCache._normalize_key("ws01")
-
-        assert result == "WS01"
-
-    def test_normalize_key_strips_dollar(self):
-        """Should strip trailing $"""
-        result = LAPSCache._normalize_key("WS01$")
-
-        assert result == "WS01"
-
-    def test_normalize_key_with_domain(self):
-        """Should include domain in key"""
-        result = LAPSCache._normalize_key("ws01", "EXAMPLE")
-
-        assert result == "EXAMPLE\\WS01"
-
-    def test_normalize_key_extracts_from_fqdn(self):
-        """Should extract short name from FQDN"""
-        result = LAPSCache._normalize_key("ws01.example.com")
-
-        assert result == "WS01"
-
-    def test_normalize_key_with_existing_domain_prefix(self):
-        """Should strip existing domain prefix and re-add."""
-        result = LAPSCache._normalize_key("OLDDOM\\WS01", "NEWDOM")
-        assert result == "NEWDOM\\WS01"
-
-
 # ============================================================================
 # Test: LAPSCache persistence methods
 # ============================================================================

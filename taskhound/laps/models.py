@@ -111,20 +111,6 @@ class LAPSCache:
         if persist and not cred.encrypted:
             self._persist_credential(key, cred)
 
-    @staticmethod
-    def _normalize_key(hostname: str, domain: str | None = None) -> str:
-        """Normalize hostname to uppercase cache key, optionally with domain."""
-        normalized = hostname.upper().rstrip("$")
-        # Strip any existing domain prefix and re-add if domain specified
-        if "\\" in normalized:
-            normalized = normalized.split("\\")[-1]
-        if "." in normalized:
-            # Could be FQDN - extract short name
-            normalized = normalized.split(".")[0]
-        if domain:
-            return f"{domain.upper()}\\{normalized}"
-        return normalized
-
     def _persist_credential(self, key: str, cred: LAPSCredential) -> None:
         """Save credential to persistent SQLite cache"""
         cache = get_cache()
@@ -325,28 +311,6 @@ class LAPSCache:
         except Exception as e:
             debug(f"LAPS: Failed to load from persistent cache: {e}")
             return None
-
-    def save_to_persistent_cache(self) -> int:
-        """
-        Save all credentials to persistent cache.
-
-        Returns:
-            Number of credentials saved
-        """
-        sqlite_cache = get_cache()
-        if not sqlite_cache or not sqlite_cache.persistent_enabled:
-            return 0
-
-        saved = 0
-        for key, cred in self._cache.items():
-            try:
-                self._persist_credential(key, cred)
-                saved += 1
-            except Exception as e:
-                debug(f"LAPS: Failed to save {key} to cache: {e}")
-
-        return saved
-
 
 @dataclass
 class LAPSFailure:

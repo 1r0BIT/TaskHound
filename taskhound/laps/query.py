@@ -232,14 +232,6 @@ def query_laps_passwords(
     if stats["encrypted"] > 0:
         warn(f"LAPS:   - Encrypted (failed): {stats['encrypted']}", verbose_only=True)
 
-    # Save to persistent cache for future runs
-    if save_to_cache:
-        try:
-            cache.save_to_persistent_cache()
-            debug(f"LAPS: Saved {stats['total']} credentials to persistent cache")
-        except Exception as e:
-            debug(f"LAPS: Failed to save to persistent cache: {e}")
-
     return cache
 
 
