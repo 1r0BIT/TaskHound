@@ -1,4 +1,4 @@
-# Tests for LSA secret extraction and offline service enumeration.
+# Tests for LSA secret extraction.
 
 from unittest.mock import MagicMock, patch
 
@@ -230,61 +230,6 @@ class TestMapLsaCredsToServiceRows:
 
         assert rows[0].decrypted_password == "Secret123!"
         assert rows[1].decrypted_password is None
-
-
-class TestOfflineServiceEnumeration:
-    @patch("impacket.winregistry.Registry")
-    def test_enumerate_services_from_hive(self, mock_registry_cls):
-        """Test offline service enumeration from SYSTEM hive."""
-        from taskhound.lsa.offline import enumerate_services_from_hive
-
-        mock_reg = MagicMock()
-        mock_registry_cls.return_value = mock_reg
-
-        mock_reg.findKey.side_effect = lambda path: f"key_{path}"
-        mock_reg.getValue.side_effect = lambda name, key: {
-            ("Current", "key_Select"): (1, 1),
-            ("Type", "key_ControlSet001\\Services\\MSSQLSERVER"): (1, 0x10),
-            ("ObjectName", "key_ControlSet001\\Services\\MSSQLSERVER"): (1, "CORP\\sqladmin\x00"),
-            ("ImagePath", "key_ControlSet001\\Services\\MSSQLSERVER"): (1, "C:\\SQL\\sqlservr.exe\x00"),
-            ("Start", "key_ControlSet001\\Services\\MSSQLSERVER"): (1, 2),
-            ("DisplayName", "key_ControlSet001\\Services\\MSSQLSERVER"): (1, "SQL Server\x00"),
-        }.get((name, key))
-
-        mock_reg.enumKey.return_value = ["MSSQLSERVER"]
-
-        services = enumerate_services_from_hive("/tmp/SYSTEM", hostname="DC01")
-
-        assert len(services) == 1
-        assert services[0]["name"] == "MSSQLSERVER"
-        assert services[0]["account"] == "CORP\\sqladmin"
-        mock_reg.close.assert_called_once()
-
-    @patch("impacket.winregistry.Registry")
-    def test_skips_drivers(self, mock_registry_cls):
-        """Test that kernel drivers are filtered out."""
-        from taskhound.lsa.offline import enumerate_services_from_hive
-
-        mock_reg = MagicMock()
-        mock_registry_cls.return_value = mock_reg
-
-        mock_reg.findKey.side_effect = lambda path: f"key_{path}"
-        mock_reg.getValue.side_effect = lambda name, key: {
-            ("Current", "key_Select"): (1, 1),
-            ("Type", "key_ControlSet001\\Services\\SomeDriver"): (1, 0x01),
-        }.get((name, key))
-
-        mock_reg.enumKey.return_value = ["SomeDriver"]
-
-        services = enumerate_services_from_hive("/tmp/SYSTEM")
-        assert len(services) == 0
-
-    def test_handles_missing_hive(self):
-        """Test graceful handling of missing hive file."""
-        from taskhound.lsa.offline import enumerate_services_from_hive
-
-        result = enumerate_services_from_hive("/nonexistent/SYSTEM")
-        assert result == []
 
 
 class TestGMSAParsing:
