@@ -10,7 +10,7 @@ from ..utils.console import console
 from ..utils.credentials import find_password_for_user
 from ..utils.date_parser import parse_iso_date
 from ..utils.helpers import domain_to_base_dn
-from . import COLORS
+from . import COLORS, cred_status_display
 
 
 def print_task_table(
@@ -568,21 +568,7 @@ def format_block(
         cred_last_run = cred_validation.get("cred_last_run")
 
         # Build status display
-        if cred_status == "unknown":
-            if password_analysis and "GOOD" in password_analysis.upper():
-                status_display = "LIKELY VALID (password newer than pwdLastSet)"
-            elif password_analysis and "BAD" in password_analysis.upper():
-                status_display = "LIKELY INVALID (password older than pwdLastSet)"
-            else:
-                status_display = "UNKNOWN"
-        elif cred_valid is True:
-            status_display = "VALID" if cred_hijackable else f"VALID (restricted: {cred_status})"
-        elif cred_status == "invalid":
-            status_display = "INVALID (wrong password)"
-        elif cred_status == "blocked":
-            status_display = "BLOCKED (account disabled/expired)"
-        else:
-            status_display = f"{cred_status} ({cred_code})"
+        status_display = cred_status_display(cred_status, cred_valid, cred_hijackable, cred_code, password_analysis)
 
         rows.append(("Cred Validation", status_display))
 

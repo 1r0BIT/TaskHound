@@ -11,7 +11,7 @@ from rich.table import Table
 
 from ..smb.tasks import strip_task_root
 from ..utils.logging import good
-from . import COLORS
+from . import COLORS, cred_status_display
 
 
 def _rows_to_dicts(rows: list[Any]) -> list[dict]:
@@ -118,21 +118,7 @@ def _format_task_table(row_dict: dict[str, Any], hostname: str | None = None) ->
         password_analysis = row_dict.get("password_analysis")
 
         # Build status display matching printer.py verbose output format
-        if cred_status == "unknown":
-            if password_analysis and "GOOD" in password_analysis.upper():
-                status_display = "LIKELY VALID (password newer than pwdLastSet)"
-            elif password_analysis and "BAD" in password_analysis.upper():
-                status_display = "LIKELY INVALID (password older than pwdLastSet)"
-            else:
-                status_display = "UNKNOWN"
-        elif cred_valid is True:
-            status_display = "VALID" if cred_hijackable else f"VALID (restricted: {cred_status})"
-        elif cred_status == "invalid":
-            status_display = "INVALID (wrong password)"
-        elif cred_status == "blocked":
-            status_display = "BLOCKED (account disabled/expired)"
-        else:
-            status_display = f"{cred_status} ({cred_code})"
+        status_display = cred_status_display(cred_status, cred_valid, cred_hijackable, cred_code, password_analysis)
 
         # Color based on status
         if cred_valid:
