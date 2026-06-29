@@ -2,21 +2,13 @@ import argparse
 import os
 import subprocess
 import sys
+import tomllib
 import traceback
 from typing import Any
 
 from rich.console import Console
 from rich.table import Table
 from rich_argparse import RichHelpFormatter
-
-try:
-    import tomllib
-except ImportError:
-    # Fallback for older Python versions if needed
-    try:
-        import tomli as tomllib  # type: ignore[no-redef]  # conditional import fallback
-    except ImportError:
-        tomllib = None  # type: ignore[assignment]  # conditional import fallback
 
 from .utils.helpers import is_ipv4
 
@@ -142,9 +134,6 @@ def load_config() -> dict[str, Any]:
     2. ./config/taskhound.toml
     3. ~/.config/taskhound/taskhound.toml
     """
-    if not tomllib:
-        return {}
-
     paths = ["taskhound.toml", "config/taskhound.toml", os.path.expanduser("~/.config/taskhound/taskhound.toml")]
 
     config_data = {}
