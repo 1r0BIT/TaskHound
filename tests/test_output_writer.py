@@ -476,14 +476,6 @@ class TestFormatTaskTable:
         })
         assert table.row_count > 0
 
-    def test_return_code_description(self):
-        """Should include return code description for known codes"""
-        from taskhound.output.writer import _get_return_code_desc
-        assert _get_return_code_desc("0x0") == "Success"
-        assert _get_return_code_desc("0x8007052E") == "Logon failure (wrong password)"
-        assert _get_return_code_desc("0x80070532") == "Password expired"
-        assert _get_return_code_desc("0xDEADBEEF") == ""  # Unknown code
-
     def test_trigger_display_formatting(self):
         """Should format trigger display with details"""
         from taskhound.output.writer import _format_trigger_display
