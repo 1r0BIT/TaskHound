@@ -247,7 +247,7 @@ def _handle_exports(
     laps_successes: int,
     laps_failures: list[LAPSFailure],
     service_rows: list | None = None,
-) -> tuple:
+) -> str | None:
     """Handle all export formats and summary output.
 
     Returns:
