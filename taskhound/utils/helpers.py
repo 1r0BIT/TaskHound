@@ -131,17 +131,6 @@ def normalize_targets(targets: list[str], domain: str) -> list[str]:
     return out
 
 
-BANNER = r"""
-TTTTT  AAA   SSS  K   K H   H  OOO  U   U N   N DDDD
-  T   A   A S     K  K  H   H O   O U   U NN  N D   D
-  T   AAAAA  SSS  KKK   HHHHH O   O U   U N N N D   D
-  T   A   A     S K  K  H   H O   O U   U N  NN D   D
-  T   A   A SSSS  K   K H   H  OOO   UUU  N   N DDDD
-
-                     by 0xr0BIT
-"""
-
-
 def sanitize_json_string(json_str: str) -> str:
     """
     Sanitize JSON string to handle unescaped backslashes that break JSON parsing.
