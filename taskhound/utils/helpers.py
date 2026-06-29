@@ -13,6 +13,11 @@ def domain_to_base_dn(domain: str) -> str:
     return ",".join(f"DC={part}" for part in domain.split("."))
 
 
+def netbios_from_fqdn(domain: str) -> str:
+    """Return the uppercase NETBIOS short name from a (possibly dotted) domain."""
+    return domain.split(".")[0].upper()
+
+
 def is_ipv4(host: str) -> bool:
     # Fast, permissive IPv4 string check (no regex).
     #

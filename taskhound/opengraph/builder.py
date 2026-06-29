@@ -12,6 +12,7 @@ from bhopengraph import Edge, Node, Properties
 from ..resolver import resolve_name_to_sid_via_ldap
 from ..smb.tasks import strip_task_root
 from ..utils.cache_manager import get_cache
+from ..utils.helpers import netbios_from_fqdn
 from ..utils.logging import debug, good, info, warn
 from .schema import (
     EDGE_HAS_SERVICE_WITH_CREDS,
@@ -281,14 +282,14 @@ def _create_principal_id(runas_user: str, local_domain: str, task: dict, bh_conn
         if local_netbios:
             local_domain_short = local_netbios.upper()
         else:
-            local_domain_short = local_domain.split(".")[0].upper() if "." in local_domain else local_domain.upper()
+            local_domain_short = netbios_from_fqdn(local_domain)
 
         # Extract first part of domain_prefix for comparison (may be FQDN like THESIMPSONS.SPRINGFIELD.LOCAL)
         domain_prefix_short = domain_prefix.split(".")[0] if "." in domain_prefix else domain_prefix
 
         # Extract hostname from FQDN for local account detection (e.g., CLIENT01.DOMAIN.LAB -> CLIENT01)
         hostname_fqdn = task.get("host", "")
-        hostname_short = hostname_fqdn.split(".")[0].upper() if "." in hostname_fqdn else hostname_fqdn.upper()
+        hostname_short = netbios_from_fqdn(hostname_fqdn)
 
         # Check if it's a local account (NETBIOS domain matches hostname)
         is_local_account = (domain_prefix_short == hostname_short)

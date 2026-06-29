@@ -36,7 +36,7 @@ from .utils.console import (
     print_opengraph_section,
 )
 from .utils.date_parser import parse_timestamp
-from .utils.helpers import normalize_targets
+from .utils.helpers import netbios_from_fqdn, normalize_targets
 from .utils.logging import debug, good, info, set_verbosity, status, warn
 from .utils.network import preflight_credential_check, verify_ldap_connection
 
@@ -86,7 +86,7 @@ def _handle_opengraph(
 
     # Fallback: derive from FQDN first part
     if not netbios_name and args.domain:
-        netbios_name = args.domain.split(".")[0].upper()
+        netbios_name = netbios_from_fqdn(args.domain)
         debug(f"NetBIOS domain name (derived from FQDN): {netbios_name}")
 
     # Extract computer SIDs from task rows

@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from ..utils.helpers import netbios_from_fqdn
+
 
 @dataclass
 class SeverityScore:
@@ -96,7 +98,7 @@ def _normalize_username(username: str) -> str:
         elif "@" in u:
             # UPN — derive netbios from FQDN domain part (first component)
             fqdn_domain = u.split("@", 1)[1]
-            domain_part = fqdn_domain.split(".")[0].upper() if "." in fqdn_domain else fqdn_domain.upper()
+            domain_part = netbios_from_fqdn(fqdn_domain)
         elif _report_netbios_domain:
             domain_part = _report_netbios_domain.upper()
         else:
@@ -2491,7 +2493,7 @@ def generate_html_report(
     # Set module-level netbios domain for username normalization
     global _report_netbios_domain
     if domain:
-        _report_netbios_domain = domain.split(".")[0].upper() if "." in domain else domain.upper()
+        _report_netbios_domain = netbios_from_fqdn(domain)
     else:
         _report_netbios_domain = None
 

@@ -7,6 +7,7 @@ import os
 import traceback
 from typing import Any
 
+from ..utils.helpers import netbios_from_fqdn
 from ..utils.logging import good, info, warn
 
 
@@ -618,7 +619,7 @@ def _map_lsa_creds_to_service_rows(
     if gmsa_credentials and domain:
         # Derive NetBIOS domain name from FQDN (first component)
         # e.g., "ludus.domain" -> "LUDUS"
-        netbios = domain.split(".")[0].upper() if "." in domain else domain.upper()
+        netbios = netbios_from_fqdn(domain)
 
         for row in service_rows:
             if not row.is_gmsa or not row.start_name:
