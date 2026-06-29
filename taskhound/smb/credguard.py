@@ -22,6 +22,7 @@ from impacket.dcerpc.v5 import rrp, scmr, transport
 from impacket.dcerpc.v5.rpcrt import DCERPCException
 
 from ..utils.logging import debug as log_debug
+from .svcctl import _close_dce_pipe
 
 
 class RemoteRegistryOps:
@@ -132,35 +133,15 @@ class RemoteRegistryOps:
         """Get the RRP DCE connection for registry operations"""
         return self._rrp
 
-    @staticmethod
-    def _close_dce_pipe(dce) -> None:
-        """Close the named-pipe handle inside a DCE/RPC transport.
-
-        Impacket's ``SMBTransport.disconnect()`` calls ``disconnectTree()``
-        **without** first calling ``closeFile()``, and then disconnects the
-        IPC$ tree.  When two transports share the same SMB connection
-        (svcctl + winreg here), this corrupts state for later pipe users.
-
-        We close only the file handle and leave the IPC$ tree intact so
-        that subsequent named-pipe opens (e.g. SAMR) work correctly.
-        """
-        tp = dce.get_rpc_transport()
-        smb_conn = tp.get_smb_connection()
-        tid = getattr(tp, "_SMBTransport__tid", 0)
-        handle = getattr(tp, "_SMBTransport__handle", 0)
-        if smb_conn and tid and handle:
-            with contextlib.suppress(Exception):
-                smb_conn.closeFile(tid, handle)
-
     def finish(self):
         """Cleanup: restore service state, close pipe handles."""
         self._restore()
         if self._rrp is not None:
             with contextlib.suppress(Exception):
-                self._close_dce_pipe(self._rrp)
+                _close_dce_pipe(self._rrp)
         if self._scmr is not None:
             with contextlib.suppress(Exception):
-                self._close_dce_pipe(self._scmr)
+                _close_dce_pipe(self._scmr)
 
 
 def check_credential_guard(smb_conn, host) -> bool | None:
