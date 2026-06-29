@@ -449,16 +449,6 @@ def format_runas_with_sid_resolution(
     local_domain_sid_prefix: str | None = None,
     known_domain_prefixes: dict[str, TrustData] | None = None,
     gc_server: str | None = None,
-    # Legacy parameters (accepted but ignored for compatibility)
-    ldap_connection: Any | None = None,
-    no_bloodhound: bool = False,
-    bh_url: str | None = None,
-    bh_token_id: str | None = None,
-    bh_token_key: str | None = None,
-    use_gc: bool = True,
-    machine_name: str | None = None,
-    trust_data: TrustData | None = None,
-    check_foreign: bool = True,
 ) -> tuple[str, str | None]:
     """
     Format a RunAs value with SID resolution if applicable.
