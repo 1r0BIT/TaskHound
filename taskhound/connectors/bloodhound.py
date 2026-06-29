@@ -41,19 +41,6 @@ def _safe_get_sam(data: dict, key: str) -> str:
     return str(value).lower()
 
 
-def _sanitize_string_value(value: str) -> str:
-    """
-    Sanitize individual string values that might contain problematic backslashes.
-    This is for processing individual field values from databases/APIs.
-    """
-    if not isinstance(value, str):
-        return value
-
-    # For individual string values, we just need to ensure they're properly handled
-    # when converting to JSON later. The main issue is with JSON parsing, not storage.
-    return value
-
-
 class BloodHoundConnector:
     """Simple BloodHound connector for both BHCE and Legacy"""
 
@@ -478,46 +465,6 @@ class BloodHoundConnector:
             "pwdlastset": all_props.get("pwdlastset"),
             "lastlogon": all_props.get("lastlogon"),
         }
-
-    def search_node_by_name(self, name: str, node_type: str = "Computer") -> dict[str, str] | None:
-        """
-        Search for a node in BloodHound by name and return its node_id and objectId.
-
-        Args:
-            name: Node name to search for (e.g., "DC01.DOMAIN.LOCAL" or "ADMIN@DOMAIN.LOCAL")
-            node_type: Type of node ("Computer" or "User")
-
-        Returns:
-            Dict with 'node_id' and 'object_id' keys, or None if not found
-            Example: {"node_id": "19", "object_id": "S-1-5-21-...-1105"}
-        """
-        if self.bh_type != "bhce":
-            warn("search_node_by_name only supported for BHCE")
-            return None
-
-        query = f'MATCH (n:{node_type} {{name: "{name}"}}) RETURN n'
-
-        try:
-            data = self.run_cypher_query(query)
-
-            if data:
-                nodes = data.get("data", {}).get("nodes", {})
-
-                if nodes:
-                    # Get first (and should be only) node
-                    node_id = list(nodes.keys())[0]
-                    node_data = nodes[node_id]
-
-                    return {
-                        "node_id": node_id,
-                        "object_id": node_data.get("objectId", ""),
-                        "label": node_data.get("label", ""),
-                    }
-            return None
-
-        except Exception as e:
-            warn(f"Error searching for {node_type} {name}: {e}")
-            return None
 
     def get_all_computers(self) -> dict[str, str]:
         """

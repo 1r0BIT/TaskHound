@@ -7,7 +7,6 @@ from taskhound.connectors.bloodhound import (
     BloodHoundConnector,
     _get_alternate_protocol_uri,
     _safe_get_sam,
-    _sanitize_string_value,
 )
 
 
@@ -55,34 +54,6 @@ class TestSafeGetSam:
         result = _safe_get_sam(data, "SamAccountName")
 
         assert result == ""
-
-
-class TestSanitizeStringValue:
-    """Tests for _sanitize_string_value helper function"""
-
-    def test_returns_string_unchanged(self):
-        """Should return string as-is"""
-        result = _sanitize_string_value("test value")
-
-        assert result == "test value"
-
-    def test_handles_non_string(self):
-        """Should return non-string values unchanged"""
-        result = _sanitize_string_value(123)
-
-        assert result == 123
-
-    def test_handles_none(self):
-        """Should return None unchanged"""
-        result = _sanitize_string_value(None)
-
-        assert result is None
-
-    def test_handles_backslashes(self):
-        """Should handle strings with backslashes"""
-        result = _sanitize_string_value("C:\\Windows\\System32")
-
-        assert "Windows" in result
 
 
 class TestBloodHoundConnectorInit:
