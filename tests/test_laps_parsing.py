@@ -4,7 +4,6 @@ import pytest
 
 from taskhound.laps.exceptions import LAPSParseError
 from taskhound.laps.parsing import (
-    _looks_like_base64,
     parse_filetime,
     parse_mslaps_password,
 )
@@ -81,34 +80,6 @@ class TestParseMslapsPassword:
         password, username, is_encrypted = parse_mslaps_password(json_data)
 
         assert password == "Pass123"
-
-
-class TestLooksLikeBase64:
-    """Tests for _looks_like_base64 function."""
-
-    def test_valid_base64(self):
-        """Test valid base64 string."""
-        assert _looks_like_base64("SGVsbG8gV29ybGQ=") is True
-
-    def test_base64_without_padding(self):
-        """Test base64 string without padding."""
-        assert _looks_like_base64("SGVsbG8gV29ybGQ") is True
-
-    def test_not_base64_special_chars(self):
-        """Test string with special chars is not base64."""
-        assert _looks_like_base64("Hello@World!") is False
-
-    def test_not_base64_spaces(self):
-        """Test string with spaces is not base64."""
-        assert _looks_like_base64("Hello World") is False
-
-    def test_not_base64_password(self):
-        """Test typical password is not detected as base64."""
-        assert _looks_like_base64("P@ssw0rd!") is False
-
-    def test_empty_string(self):
-        """Test empty string."""
-        assert _looks_like_base64("") is False
 
 
 class TestParseFiletime:

@@ -47,18 +47,9 @@ def parse_mslaps_password(json_data: str, default_username: str | None = None) -
     # Check if encrypted
     # Encrypted passwords are base64-encoded blobs, plaintext are readable strings
     # Heuristic: if it looks like base64 and is long, it's probably encrypted
-    is_encrypted = False
-    if len(password) > 50 and _looks_like_base64(password):
-        is_encrypted = True
+    is_encrypted = len(password) > 50 and bool(re.match(r"^[A-Za-z0-9+/]+=*$", password))
 
     return password, username, is_encrypted
-
-
-def _looks_like_base64(s: str) -> bool:
-    """Heuristic check if string looks like base64-encoded data"""
-    # Base64 pattern: alphanumeric + /+ with optional = padding
-    # Additional check: typical passwords have special chars that aren't in base64
-    return bool(re.match(r"^[A-Za-z0-9+/]+=*$", s))
 
 
 # Alias for backward compatibility - parse_filetime_hex imported from utils.date_parser

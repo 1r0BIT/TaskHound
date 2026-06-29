@@ -98,7 +98,6 @@ def generate_opengraph_files(
     computer_names: set[str] = set()
     user_names: set[str] = set()
 
-    _extract_domain = extract_domain_from_fqdn
 
     info("Collecting unique principals for resolution...")
     for task in valid_tasks:
@@ -111,7 +110,7 @@ def generate_opengraph_files(
         runas = (task.get("runas") or "").strip()
         if runas and runas != "N/A":
             # Use helper to normalize principal ID
-            fqdn_domain = _extract_domain(hostname)
+            fqdn_domain = extract_domain_from_fqdn(hostname)
             principal_id = _create_principal_id(runas, fqdn_domain, task, bh_connector, local_netbios=netbios_name)
             if principal_id:
                 user_names.add(principal_id)
@@ -323,7 +322,6 @@ def generate_service_opengraph_files(
     computer_names: set[str] = set()
     user_names: set[str] = set()
 
-    _extract_domain = extract_domain_from_fqdn
 
     for svc in valid_services:
         hostname = (svc.get("host") or "").strip().upper()
@@ -332,7 +330,7 @@ def generate_service_opengraph_files(
 
         start_name = (svc.get("start_name") or "").strip()
         if start_name:
-            fqdn_domain = _extract_domain(hostname)
+            fqdn_domain = extract_domain_from_fqdn(hostname)
             principal_id = _create_principal_id(start_name, fqdn_domain, svc, bh_connector, local_netbios=netbios_name)
             if principal_id:
                 user_names.add(principal_id)

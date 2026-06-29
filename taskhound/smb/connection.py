@@ -7,6 +7,7 @@
 # This is horribly vibe-y but it works. Feel free to PR.
 
 import socket
+import string
 
 from impacket.smbconnection import SMBConnection
 
@@ -32,7 +33,7 @@ def _parse_hashes(password: str):
 
     # If it's hex length 32, treat as NT hash
     p = password.strip()
-    if len(p) == 32 and all(c in "0123456789abcdefABCDEF" for c in p):
+    if len(p) == 32 and all(c in string.hexdigits for c in p):
         return None, "", p
 
     # Otherwise treat as cleartext password

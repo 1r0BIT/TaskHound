@@ -8,31 +8,11 @@ from unittest.mock import MagicMock, patch
 from taskhound.utils.dns import (
     DEFAULT_DNS_TIMEOUT,
     DEFAULT_LDAP_TIMEOUT,
-    _is_ip_address,
     _test_port,
     discover_domain_controllers,
     get_working_dc,
     resolve_hostname,
 )
-
-
-class TestIsIpAddress:
-    """Tests for _is_ip_address helper."""
-
-    def test_valid_ipv4(self):
-        """Should return True for valid IPv4."""
-        assert _is_ip_address("192.168.1.1") is True
-        assert _is_ip_address("10.0.0.1") is True
-        assert _is_ip_address("255.255.255.255") is True
-        assert _is_ip_address("0.0.0.0") is True
-
-    def test_invalid_ipv4(self):
-        """Should return False for invalid IPv4."""
-        assert _is_ip_address("192.168.1.256") is False
-        assert _is_ip_address("192.168.1") is False
-        assert _is_ip_address("hostname") is False
-        assert _is_ip_address("dc.corp.local") is False
-        assert _is_ip_address("") is False
 
 
 class TestTestPort:
