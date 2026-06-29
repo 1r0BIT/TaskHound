@@ -569,13 +569,9 @@ def _compute_gmsa_hmac(domain_netbios: str, account: str) -> str | None:
             digestmod=hashlib.sha256,
         ).digest()
 
-        # Nibble-swapped hex encoding (Windows convention)
-        hex_letters = "0123456789abcdef"
-        result = ""
-        for b in bin_hash:
-            result += hex_letters[b & 0x0F]
-            result += hex_letters[b >> 0x04]
-        return result
+        # Nibble-swapped hex encoding (Windows convention): low nibble before high
+        hex_str = bin_hash.hex()
+        return "".join(hex_str[i + 1] + hex_str[i] for i in range(0, len(hex_str), 2))
     except Exception:
         return None
 
