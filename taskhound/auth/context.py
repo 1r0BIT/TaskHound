@@ -63,45 +63,6 @@ class AuthContext:
     # Global Catalog server (optional, auto-discovers if not set)
     gc_server: str | None = None
 
-    @property
-    def has_credentials(self) -> bool:
-        """Check if valid credentials are configured."""
-        return bool(self.username and (self.password or self.hashes or self.aes_key or self.kerberos))
-
-    @property
-    def ldap_effective_domain(self) -> str:
-        """Get the effective domain for LDAP queries."""
-        return self.ldap_domain or self.domain
-
-    @property
-    def ldap_effective_user(self) -> str:
-        """Get the effective username for LDAP queries."""
-        return self.ldap_user or self.username
-
-    @property
-    def ldap_effective_password(self) -> str | None:
-        """Get the effective password for LDAP queries."""
-        return self.ldap_password or self.password
-
-    @property
-    def ldap_effective_hashes(self) -> str | None:
-        """Get the effective hashes for LDAP queries."""
-        return self.ldap_hashes or self.hashes
-
-    def get_lm_hash(self) -> str:
-        """Extract LM hash from hashes string."""
-        if not self.hashes:
-            return ""
-        parts = self.hashes.split(":")
-        return parts[0] if len(parts) >= 1 else ""
-
-    def get_nt_hash(self) -> str:
-        """Extract NT hash from hashes string."""
-        if not self.hashes:
-            return ""
-        parts = self.hashes.split(":")
-        return parts[1] if len(parts) >= 2 else parts[0] if parts else ""
-
     def __repr__(self) -> str:
         """Safe repr that doesn't expose credentials."""
         return (
