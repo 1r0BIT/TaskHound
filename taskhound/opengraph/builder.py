@@ -5,6 +5,7 @@ Contains logic for building OpenGraph nodes, edges, and resolving identities.
 """
 
 import hashlib
+import traceback
 from typing import Any
 
 from bhopengraph import Edge, Node, Properties
@@ -399,12 +400,7 @@ def _create_relationship_edges(
     task_path = (task.get("path") or "").strip()
     runas_user = (task.get("runas") or "").strip()
 
-    # Helper to extract domain from FQDN
-    fqdn_domain = "WORKGROUP"
-    if "." in hostname:
-        parts = hostname.split(".")
-        if len(parts) >= 2:
-            fqdn_domain = ".".join(parts[1:]).upper()
+    fqdn_domain = extract_domain_from_fqdn(hostname)
 
     debug(f"Creating edges for {task_path} on {hostname}. Allow orphans: {allow_orphans}")
 
@@ -685,7 +681,6 @@ def resolve_object_ids_chunked(
                 return {}
         except Exception as e:
             warn(f"Error querying BloodHound with SID validation: {e}")
-            import traceback
             debug(traceback.format_exc())
             return {}
 
@@ -731,7 +726,6 @@ def resolve_object_ids_chunked(
 
         except Exception as e:
             warn(f"BloodHound API query failed: {e}")
-            import traceback
             debug(traceback.format_exc())
             return {}
 
@@ -774,7 +768,6 @@ def resolve_object_ids_chunked(
 
         except Exception as e:
             warn(f"BloodHound API query failed: {e}")
-            import traceback
             debug(traceback.format_exc())
             return {}
 
