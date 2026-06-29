@@ -380,16 +380,7 @@ class BloodHoundConnector:
             RETURN g
             """
 
-            # Use run_cypher_query which handles auth automatically
-            # Note: run_cypher_query expects just the query string, not the full body
-            # But wait, run_cypher_query wraps it in {"query": query}.
-            # However, here we might need "include_properties": True?
-            # run_cypher_query implementation: body = json.dumps({"query": query}, separators=(",", ":")).encode()
-            # It does NOT include "include_properties": True.
-            # BHCE API v2 usually returns properties by default in "nodes" map if we return the node.
-            # Let's check if run_cypher_query is sufficient.
-            # The query returns 'g' (the node).
-
+            # run_cypher_query handles auth and returns the node in the "nodes" map
             data = self.run_cypher_query(group_query)
 
             if data:
@@ -573,19 +564,14 @@ class BloodHoundConnector:
             if data:
                 nodes = data.get("data", {}).get("nodes", {})
 
-                if len(nodes) == 0:
+                if not nodes:
                     return None
-                elif len(nodes) == 1:
-                    # Perfect match!
-                    node = list(nodes.values())[0]
-                    return {"name": node.get("label"), "objectid": node.get("objectId")}
-                else:
-                    # Multiple matches - extremely rare but possible
-                    # Log warning and return first match
+                if len(nodes) > 1:
+                    # Multiple matches - extremely rare but possible; warn and take the first
                     domain_names = [n.get("label") for n in nodes.values()]
                     warn(f"Multiple domains match NETBIOS '{netbios_name}': {domain_names}")
-                    node = list(nodes.values())[0]
-                    return {"name": node.get("label"), "objectid": node.get("objectId")}
+                node = list(nodes.values())[0]
+                return {"name": node.get("label"), "objectid": node.get("objectId")}
             return None
 
         except Exception as e:
@@ -711,19 +697,14 @@ class BloodHoundConnector:
             if data:
                 nodes = data.get("data", {}).get("nodes", {})
 
-                if len(nodes) == 0:
+                if not nodes:
                     return None
-                elif len(nodes) == 1:
-                    # User found!
-                    node_id = list(nodes.keys())[0]
-                    node = list(nodes.values())[0]
-                    return {"name": node.get("label"), "objectid": node.get("objectId"), "node_id": node_id}
-                else:
+                if len(nodes) > 1:
                     # Multiple matches - should never happen for UPN (unique), but handle it
                     warn(f"Multiple users match UPN '{upn}': {[n.get('label') for n in nodes.values()]}")
-                    node_id = list(nodes.keys())[0]
-                    node = list(nodes.values())[0]
-                    return {"name": node.get("label"), "objectid": node.get("objectId"), "node_id": node_id}
+                node_id = list(nodes.keys())[0]
+                node = list(nodes.values())[0]
+                return {"name": node.get("label"), "objectid": node.get("objectId"), "node_id": node_id}
             return None
 
         except Exception as e:
