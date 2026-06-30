@@ -577,6 +577,13 @@ def resolve_object_ids_chunked(
         items_list = sorted(items)  # Sort for consistent ordering
         return [items_list[i:i + size] for i in range(0, len(items_list), size)]
 
+    def _fetch_nodes(node_type: str, field: str, values) -> dict:
+        """Run `MATCH (n:{node_type}) WHERE n.{field} IN [...] RETURN n` and return its BHCE nodes map."""
+        values_str = ', '.join([f'"{v}"' for v in values])
+        query = f'MATCH (n:{node_type}) WHERE n.{field} IN [{values_str}] RETURN n'
+        data = bh_connector.run_cypher_query(query)
+        return (data or {}).get("data", {}).get("nodes", {})
+
     def _query_bloodhound_with_sid_validation(names_with_sids: dict[str, str], node_type: str) -> dict[str, tuple[str, str, str]]:
         """
         Query BloodHound API by name but VALIDATE with SID for correctness.
@@ -599,19 +606,12 @@ def resolve_object_ids_chunked(
         if not names_with_sids:
             return {}
 
-        # Build Cypher query with WHERE IN clause for names
-        names_list = list(names_with_sids.keys())
-        names_list_str = ', '.join([f'"{name}"' for name in names_list])
-        query = f'MATCH (n:{node_type}) WHERE n.name IN [{names_list_str}] RETURN n'
-
         try:
             debug(f"Querying {node_type} chunk with SID validation: {len(names_with_sids)} items")
 
-            data = bh_connector.run_cypher_query(query)
+            nodes = _fetch_nodes(node_type, "name", list(names_with_sids.keys()))
 
-            if data:
-                nodes = data.get("data", {}).get("nodes", {})
-
+            if nodes:
                 # Group nodes by name to detect duplicates
                 nodes_by_name: dict[str, list[tuple[str, str, str]]] = {}
                 for node_id, node in nodes.items():
@@ -675,18 +675,12 @@ def resolve_object_ids_chunked(
         """
         mapping = {}
 
-        # Build Cypher query with WHERE IN clause
-        names_list_str = ', '.join([f'"{name}"' for name in names])
-        query = f'MATCH (n:{node_type}) WHERE n.name IN [{names_list_str}] RETURN n'
-
         try:
             debug(f"Querying {node_type} chunk: {len(names)} items")
 
-            data = bh_connector.run_cypher_query(query)
+            nodes = _fetch_nodes(node_type, "name", names)
 
-            if data:
-                nodes = data.get("data", {}).get("nodes", {})
-
+            if nodes:
                 # Nodes are returned as dict keyed by node ID (THIS is the graph database ID!)
                 for node_id, node in nodes.items():
                     # Properties are at top level of node, not nested
@@ -720,18 +714,12 @@ def resolve_object_ids_chunked(
         """
         mapping = {}
 
-        # Build Cypher query with WHERE IN clause
-        sids_list_str = ', '.join([f'"{sid}"' for sid in sids])
-        query = f'MATCH (n:{node_type}) WHERE n.objectid IN [{sids_list_str}] RETURN n'
-
         try:
             debug(f"Querying {node_type} chunk by SID: {len(sids)} items")
 
-            data = bh_connector.run_cypher_query(query)
+            nodes = _fetch_nodes(node_type, "objectid", sids)
 
-            if data:
-                nodes = data.get("data", {}).get("nodes", {})
-
+            if nodes:
                 for node_id, node in nodes.items():
                     object_id = node.get("objectId")
                     name = node.get("label")
