@@ -24,6 +24,16 @@ from ..utils.helpers import sanitize_json_string
 from ..utils.logging import debug, good, status, warn
 
 
+def _bhce_nodes(data: dict | None) -> dict:
+    """Return the nodes map from a BHCE cypher response (data["data"]["nodes"]), or {}."""
+    return (data or {}).get("data", {}).get("nodes", {})
+
+
+def _first_node(nodes: dict) -> dict:
+    """Return the first node from a BHCE nodes map. Caller must ensure nodes is non-empty."""
+    return list(nodes.values())[0]
+
+
 def _safe_get_sam(data: dict, key: str) -> str:
     """
     Safely extract SAM account name from data, handling None values.
@@ -479,7 +489,7 @@ class BloodHoundConnector:
                 data = self.run_cypher_query(query)
 
                 if data:
-                    nodes = data.get("data", {}).get("nodes", {})
+                    nodes = _bhce_nodes(data)
 
                     for _, node_data in nodes.items():
                         object_id = node_data.get("objectId", "")
@@ -559,7 +569,7 @@ class BloodHoundConnector:
             data = self.run_cypher_query(query)
 
             if data:
-                nodes = data.get("data", {}).get("nodes", {})
+                nodes = _bhce_nodes(data)
 
                 if not nodes:
                     return None
@@ -567,7 +577,7 @@ class BloodHoundConnector:
                     # Multiple matches - extremely rare but possible; warn and take the first
                     domain_names = [n.get("label") for n in nodes.values()]
                     warn(f"Multiple domains match NETBIOS '{netbios_name}': {domain_names}")
-                node = list(nodes.values())[0]
+                node = _first_node(nodes)
                 return {"name": node.get("label"), "objectid": node.get("objectId")}
             return None
 
@@ -604,7 +614,7 @@ class BloodHoundConnector:
 
             if data:
                 # Parse nodes from BHCE response format (same as other methods)
-                nodes = data.get("data", {}).get("nodes", {})
+                nodes = _bhce_nodes(data)
 
                 for _, node_data in nodes.items():
                     # Extract name (label) and objectId from node
@@ -692,7 +702,7 @@ class BloodHoundConnector:
             data = self.run_cypher_query(query)
 
             if data:
-                nodes = data.get("data", {}).get("nodes", {})
+                nodes = _bhce_nodes(data)
 
                 if not nodes:
                     return None
@@ -700,7 +710,7 @@ class BloodHoundConnector:
                     # Multiple matches - should never happen for UPN (unique), but handle it
                     warn(f"Multiple users match UPN '{upn}': {[n.get('label') for n in nodes.values()]}")
                 node_id = list(nodes.keys())[0]
-                node = list(nodes.values())[0]
+                node = _first_node(nodes)
                 return {"name": node.get("label"), "objectid": node.get("objectId"), "node_id": node_id}
             return None
 
@@ -769,10 +779,10 @@ class BloodHoundConnector:
             data = self.run_cypher_query(query)
 
             if data:
-                nodes = data.get("data", {}).get("nodes", {})
+                nodes = _bhce_nodes(data)
 
                 if nodes:
-                    node_data = list(nodes.values())[0]
+                    node_data = _first_node(nodes)
                     properties = node_data.get("properties", {})
 
                     return {
@@ -883,7 +893,7 @@ class BloodHoundConnector:
             data = self.run_cypher_query(query)
 
             if data:
-                nodes = data.get("data", {}).get("nodes", {})
+                nodes = _bhce_nodes(data)
 
                 if nodes:
                     # Get first matching user
@@ -948,7 +958,7 @@ class BloodHoundConnector:
             data = self.run_cypher_query(query)
 
             if data:
-                nodes = data.get("data", {}).get("nodes", {})
+                nodes = _bhce_nodes(data)
                 return len(nodes) > 0
 
             return False
