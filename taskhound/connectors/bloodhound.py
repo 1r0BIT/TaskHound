@@ -29,7 +29,7 @@ def _bhce_nodes(data: dict | None) -> dict:
     return (data or {}).get("data", {}).get("nodes", {})
 
 
-def _first_node(nodes: dict) -> dict:
+def _first_node(nodes: dict) -> Any:
     """Return the first node from a BHCE nodes map. Caller must ensure nodes is non-empty."""
     return list(nodes.values())[0]
 
