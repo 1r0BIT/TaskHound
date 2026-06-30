@@ -496,7 +496,9 @@ _SERVICE_CSV_FIELDS = [
 
 def write_csv(path: str, rows: list[Any]):
     with open(path, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=_TASK_CSV_FIELDS)
+        # extrasaction="ignore": TaskRow carries fields not in _TASK_CSV_FIELDS
+        # (e.g. resolved_runas_sid); drop them instead of raising (matches write_service_csv).
+        w = csv.DictWriter(f, fieldnames=_TASK_CSV_FIELDS, extrasaction="ignore")
         w.writeheader()
         w.writerows(_rows_to_dicts(rows))
     good(f"Wrote CSV results to {path}")
