@@ -6,6 +6,7 @@ from taskhound.dpapi.decryptor import (
     DPAPIDecryptor,
     MasterkeyInfo,
     ScheduledTaskCredential,
+    _parse_credential_blob,
 )
 from taskhound.utils.helpers import is_guid
 
@@ -276,20 +277,65 @@ class TestDecryptCredentialBlob:
             assert result.username is None
 
 
-class TestComputeSessionKey:
-    """Tests for _compute_session_key method."""
+class TestParseCredentialBlob:
+    """Tests for the shared _parse_credential_blob field extractor.
 
-    def test_computes_session_key(self):
-        """_compute_session_key returns bytes."""
-        mock_conn = MagicMock()
-        with patch("taskhound.dpapi.decryptor.logging"):
-            decryptor = DPAPIDecryptor(mock_conn, "0x" + "aa" * 20)
+    Online and offline both route decrypted bytes through this function; these
+    cover the positive extraction path the wrapper tests skip.
+    """
 
-        from Cryptodome.Hash import SHA1
-        result = decryptor._compute_session_key(
-            key_hash=b"0123456789abcdef0123",
-            salt=b"salt_value_here_",
-            hash_algo=SHA1,
+    @staticmethod
+    def _build_credential_blob(target: str, username: str, password: str) -> bytes:
+        """Lay out a CREDENTIAL_BLOB as raw bytes (the production parse path).
+
+        Hand-built because impacket's CREDENTIAL_BLOB has a duplicate 'Unknown3'
+        field name that breaks fresh getData() packing.
+        """
+        import struct
+
+        def u16(s: str) -> bytes:
+            return s.encode("utf-16-le") + b"\x00\x00"
+
+        tgt, usr, pwd = u16(target), u16(username), u16(password)
+        return b"".join([
+            struct.pack("<L", 0),  # Flags
+            struct.pack("<L", 0),  # Size
+            struct.pack("<L", 0),  # Unknown0
+            struct.pack("<L", 0),  # Type
+            struct.pack("<L", 0),  # Flags2
+            struct.pack("<Q", 0),  # LastWritten
+            struct.pack("<L", 0),  # Unknown2
+            struct.pack("<L", 0),  # Persist
+            struct.pack("<L", 0),  # AttrCount
+            struct.pack("<Q", 0),  # Unknown3 (the <Q field, not the password)
+            struct.pack("<L", len(tgt)), tgt,
+            struct.pack("<L", 0),  # TargetAlias
+            struct.pack("<L", 0),  # Description
+            struct.pack("<L", 0),  # Unknown
+            struct.pack("<L", len(usr)), usr,
+            struct.pack("<L", len(pwd)), pwd,
+        ])
+
+    def test_extracts_username_password_and_task_guid(self):
+        """Extracts username, password, and the task GUID from the Target field."""
+        raw = self._build_credential_blob(
+            "Domain:batch=TaskScheduler:Task:{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}",
+            "LUDUS\\svc_backup",
+            "Sup3rS3cret!",
         )
-        assert isinstance(result, bytes)
-        assert len(result) > 0
+        cred = _parse_credential_blob(raw, blob_path="ABC123")
+        assert cred.username == "LUDUS\\svc_backup"
+        assert cred.password == "Sup3rS3cret!"
+        assert cred.task_name == "Task:{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}"
+        assert cred.blob_path == "ABC123"
+        assert cred.target == "Domain:batch=TaskScheduler:Task:{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}"
+
+    def test_provided_task_name_is_preserved(self):
+        """An explicit task_name is not overwritten by the Target GUID."""
+        raw = self._build_credential_blob(
+            "Domain:batch=TaskScheduler:Task:{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}",
+            "user",
+            "pass",
+        )
+        cred = _parse_credential_blob(raw, blob_path="x", task_name="ExplicitTask")
+        assert cred.task_name == "ExplicitTask"

@@ -94,6 +94,99 @@ class ScheduledTaskCredential:
         self.target = target
 
 
+def _decrypt_dpapi_blob(blob_bytes: bytes, masterkey: MasterkeyInfo) -> bytes | None:
+    """
+    Low-level DPAPI blob decryption using a decrypted masterkey.
+
+    Shared by the online decryptor (DPAPIDecryptor.decrypt_credential_blob) and the
+    offline looter path (looter._decrypt_credential_blob_offline). Returns the
+    decrypted cleartext, or None on failure.
+    """
+    from Cryptodome.Cipher import AES, DES3
+    from Cryptodome.Hash import HMAC, SHA1, SHA512
+    from Cryptodome.Util.Padding import unpad
+
+    try:
+        blob = DPAPI_BLOB(blob_bytes)
+
+        # CryptAlgo -> (key bits, cipher, mode, block size)
+        ALGORITHMS_DATA = {
+            0x6603: (168, DES3, DES3.MODE_CBC, 8),  # CALG_3DES
+            0x6611: (128, AES, AES.MODE_CBC, 16),  # CALG_AES_128
+            0x660E: (128, AES, AES.MODE_CBC, 16),  # CALG_AES_128 (alt)
+            0x660F: (192, AES, AES.MODE_CBC, 16),  # CALG_AES_192
+            0x6610: (256, AES, AES.MODE_CBC, 16),  # CALG_AES_256
+        }
+        HASH_ALGOS = {
+            0x8004: SHA1,  # CALG_SHA1
+            0x800E: SHA512,  # CALG_SHA_512
+        }
+
+        hash_algo = HASH_ALGOS.get(blob["HashAlgo"], SHA1)
+
+        # Derive the session key from the masterkey SHA1 and the blob salt
+        if masterkey.sha1 is None:
+            return None
+        key_hash = unhexlify(masterkey.sha1)
+        session_key = HMAC.new(key_hash, blob["Salt"], hash_algo).digest()
+        derived_key = blob.deriveKey(session_key)
+
+        crypto_info = ALGORITHMS_DATA.get(blob["CryptAlgo"])
+        if not crypto_info:
+            logging.error(f"Unsupported crypto algorithm: {blob['CryptAlgo']:#x}")
+            return None
+
+        key_len, cipher_algo, mode, block_size = crypto_info
+        cipher = cipher_algo.new(derived_key[: key_len // 8], mode=mode, iv=b"\x00" * block_size)
+        cleartext = cipher.decrypt(blob["Data"])
+
+        # Remove padding
+        with contextlib.suppress(ValueError):
+            cleartext = unpad(cleartext, block_size)
+
+        return cleartext
+
+    except Exception as e:
+        logging.debug(f"Blob decryption failed: {e}")
+        return None
+
+
+def _parse_credential_blob(
+    decrypted: bytes, blob_path: str, task_name: str = "", target: str | None = None
+) -> ScheduledTaskCredential:
+    """
+    Parse a decrypted DPAPI CREDENTIAL_BLOB into a ScheduledTaskCredential.
+
+    Shared by the online and offline credential paths. Extracts the task GUID from
+    the Target field (only when task_name is not already known), the Username, and
+    the password (stored in the Unknown3 field). Falls back to the provided target
+    identifier when the blob carries no Target.
+    """
+    cred_blob = CREDENTIAL_BLOB(decrypted)
+
+    # Target format: "Domain:batch=TaskScheduler:Task:{GUID}"
+    target_str = None
+    if cred_blob["Target"]:
+        target_str = cred_blob["Target"].decode("utf-16-le", errors="ignore").rstrip("\x00")
+        if "Task:{" in target_str and "}" in target_str:
+            task_guid = target_str.split("Task:{")[1].split("}")[0]
+            if not task_name:
+                task_name = f"Task:{{{task_guid}}}"
+
+    username = None
+    password = None
+    # Username field (not UserName!) holds domain\username in UTF-16LE
+    if cred_blob["Username"]:
+        username = cred_blob["Username"].decode("utf-16-le", errors="ignore").rstrip("\x00")
+    # Password is stored in the Unknown3 field (UTF-16LE)
+    if cred_blob["Unknown3"]:
+        password = cred_blob["Unknown3"].decode("utf-16-le", errors="ignore").rstrip("\x00")
+
+    return ScheduledTaskCredential(
+        task_name=task_name, blob_path=blob_path, username=username, password=password, target=target_str or target
+    )
+
+
 class DPAPIDecryptor:
     """
     Decrypts DPAPI credential blobs from scheduled tasks using SYSTEM masterkeys
@@ -225,119 +318,16 @@ class DPAPIDecryptor:
                 logging.warning(f"Masterkey {masterkey_guid} not found for blob {blob_path}")
                 return ScheduledTaskCredential(task_name=task_name, blob_path=blob_path, target=target)
 
-            # Decrypt blob with masterkey
-            decrypted = self._decrypt_blob(dpapi_blob_bytes, mk_info)
+            # Decrypt blob with masterkey, then parse the credential fields
+            decrypted = _decrypt_dpapi_blob(dpapi_blob_bytes, mk_info)
             if not decrypted:
                 logging.warning(f"Failed to decrypt blob {blob_path}")
                 return ScheduledTaskCredential(task_name=task_name, blob_path=blob_path, target=target)
 
-            # Parse decrypted credential
-            cred_blob = CREDENTIAL_BLOB(decrypted)
-
-            # Extract task name/GUID from Target field
-            # Format: "Domain:batch=TaskScheduler:Task:{GUID}"
-            target_str = None
-            if cred_blob["Target"]:
-                target_str = cred_blob["Target"].decode("utf-16-le", errors="ignore").rstrip("\x00")
-                # Extract GUID from "Domain:batch=TaskScheduler:Task:{GUID}"
-                if "Task:{" in target_str and "}" in target_str:
-                    task_guid = target_str.split("Task:{")[1].split("}")[0]
-                    # Use GUID as task name if no task_name provided
-                    if not task_name:
-                        task_name = f"Task:{{{task_guid}}}"
-
-            # Extract username and password
-            username = None
-            password = None
-
-            # Username field (not UserName!) contains domain\username in UTF-16LE
-            if cred_blob["Username"]:
-                username = cred_blob["Username"].decode("utf-16-le", errors="ignore").rstrip("\x00")
-
-            # Password is stored in Unknown3 field (UTF-16LE encoded)
-            if cred_blob["Unknown3"]:
-                password = cred_blob["Unknown3"].decode("utf-16-le", errors="ignore").rstrip("\x00")
-
-            logging.info(f"Successfully decrypted credential for task: {task_name}")
-
-            return ScheduledTaskCredential(
-                task_name=task_name,
-                blob_path=blob_path,
-                username=username,
-                password=password,
-                target=target_str or target,
-            )
+            cred = _parse_credential_blob(decrypted, blob_path, task_name, target)
+            logging.info(f"Successfully decrypted credential for task: {cred.task_name}")
+            return cred
 
         except Exception as e:
             logging.error(f"Error decrypting credential blob: {e}", exc_info=True)
             return ScheduledTaskCredential(task_name=task_name, blob_path=blob_path, target=target)
-
-    def _decrypt_blob(self, blob_bytes: bytes, masterkey: MasterkeyInfo) -> bytes | None:
-        """
-        Low-level DPAPI blob decryption using masterkey
-
-        Args:
-            blob_bytes: Raw DPAPI blob bytes
-            masterkey: Decrypted MasterkeyInfo object
-
-        Returns:
-            Decrypted bytes or None
-        """
-        from Cryptodome.Cipher import AES, DES3
-        from Cryptodome.Hash import SHA1, SHA512
-        from Cryptodome.Util.Padding import unpad
-
-        try:
-            blob = DPAPI_BLOB(blob_bytes)
-
-            # Get algorithm info
-            ALGORITHMS_DATA = {
-                0x6603: (168, DES3, DES3.MODE_CBC, 8),  # CALG_3DES
-                0x6611: (128, AES, AES.MODE_CBC, 16),  # CALG_AES_128
-                0x660E: (128, AES, AES.MODE_CBC, 16),  # CALG_AES_128 (alt)
-                0x660F: (192, AES, AES.MODE_CBC, 16),  # CALG_AES_192
-                0x6610: (256, AES, AES.MODE_CBC, 16),  # CALG_AES_256
-            }
-
-            # Hash algorithms
-            HASH_ALGOS = {
-                0x8004: SHA1,  # CALG_SHA1
-                0x800E: SHA512,  # CALG_SHA_512
-            }
-
-            hash_algo = HASH_ALGOS.get(blob["HashAlgo"], SHA1)
-
-            # Derive session key
-            if masterkey.sha1 is None:
-                return None
-            key_hash = unhexlify(masterkey.sha1)
-            session_key = self._compute_session_key(key_hash=key_hash, salt=blob["Salt"], hash_algo=hash_algo)
-
-            # Derive encryption key from session key
-            derived_key = blob.deriveKey(session_key)
-
-            # Decrypt data
-            crypto_info = ALGORITHMS_DATA.get(blob["CryptAlgo"])
-            if not crypto_info:
-                logging.error(f"Unsupported crypto algorithm: {blob['CryptAlgo']:#x}")
-                return None
-
-            key_len, cipher_algo, mode, block_size = crypto_info
-            cipher = cipher_algo.new(derived_key[: key_len // 8], mode=mode, iv=b"\x00" * block_size)
-            cleartext = cipher.decrypt(blob["Data"])
-
-            # Remove padding
-            with contextlib.suppress(ValueError):
-                cleartext = unpad(cleartext, block_size)
-
-            return cleartext
-
-        except Exception as e:
-            logging.debug(f"Blob decryption failed: {e}")
-            return None
-
-    def _compute_session_key(self, key_hash: bytes, salt: bytes, hash_algo) -> bytes:
-        """Compute DPAPI session key from masterkey hash and salt"""
-        from Cryptodome.Hash import HMAC
-
-        return HMAC.new(key_hash, salt, hash_algo).digest()

