@@ -115,6 +115,20 @@ class BloodHoundConnector:
             warn(f"Error executing Cypher query: {e}")
             return None
 
+    @contextlib.contextmanager
+    def _legacy_driver(self):
+        """Yield a Neo4j driver for the legacy bolt connection (port 7687); always closes it.
+
+        Callers must still guard `if GraphDatabase is None` first — the no-driver
+        return value differs per caller. The try/finally here guarantees the driver
+        is closed even when a caller returns from inside a `with driver.session()`.
+        """
+        driver = GraphDatabase.driver(f"bolt://{self.ip}:7687", auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
+        try:
+            yield driver
+        finally:
+            driver.close()
+
     def _run_cypher_query_legacy(self, query: str) -> dict | None:
         """
         Execute Cypher query against Legacy BloodHound via Neo4j Bolt.
@@ -126,15 +140,10 @@ class BloodHoundConnector:
             return None
 
         try:
-            uri = f"bolt://{self.ip}:7687"
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
-
-            with driver.session() as session:
+            with self._legacy_driver() as driver, driver.session() as session:
                 result = session.run(query)
                 # Convert Neo4j records to list of dicts
                 records = [dict(record) for record in result]
-
-            driver.close()
 
             # Return in BHCE-compatible format
             # BHCE returns: {"data": {"data": [...], "nodes": {...}}}
@@ -289,31 +298,6 @@ class BloodHoundConnector:
             warn("Install with: pip install neo4j")
             return False
 
-        # Legacy BloodHound typically uses port 7687
-        uri = f"bolt://{self.ip}:7687"
-
-        try:
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
-
-            # Test connection
-            with driver.session() as session:
-                result = session.run("MATCH (n) RETURN count(n) LIMIT 1")
-                record = result.single()
-                if record is None:
-                    return False
-                record[0]  # This will raise an exception if connection fails
-
-            status(f"[+] Connected to Legacy BloodHound at {self.ip}:7687")
-            status("[*] Collecting high-value user data from BloodHound (be patient)")
-
-        except Exception as e:
-            if "authentication" in str(e).lower() or "credentials" in str(e).lower():
-                warn("BloodHound login failed - invalid credentials")
-            else:
-                warn(f"BloodHound Legacy connection failed at {self.ip}:7687")
-                warn("Check if Neo4j is running and accessible")
-            return False
-
         # Comprehensive query for both high-value and Tier 0 users
         # This combines high-value detection with Tier 0 group membership
         comprehensive_query = """
@@ -341,30 +325,48 @@ class BloodHoundConnector:
         """
 
         try:
-            with driver.session() as session:
-                users_found: set[str] = set()
-
-                # Single comprehensive query instead of multiple queries
+            with self._legacy_driver() as driver:
+                # Test connection
                 try:
-                    result = session.run(comprehensive_query)
-                    for record in result:
-                        self._process_legacy_user(record, users_found)
+                    with driver.session() as session:
+                        result = session.run("MATCH (n) RETURN count(n) LIMIT 1")
+                        record = result.single()
+                        if record is None:
+                            return False
+                        record[0]  # This will raise an exception if connection fails
 
-                    if len(users_found) == 0:
-                        warn("No high-value or Tier 0 users found in Legacy BloodHound")
-                    else:
-                        good(f"Retrieved {len(users_found)} high-value users from Legacy BloodHound")
+                    status(f"[+] Connected to Legacy BloodHound at {self.ip}:7687")
+                    status("[*] Collecting high-value user data from BloodHound (be patient)")
 
                 except Exception as e:
-                    warn(f"Legacy BloodHound query failed: {e}")
+                    if "authentication" in str(e).lower() or "credentials" in str(e).lower():
+                        warn("BloodHound login failed - invalid credentials")
+                    else:
+                        warn(f"BloodHound Legacy connection failed at {self.ip}:7687")
+                        warn("Check if Neo4j is running and accessible")
                     return False
 
-            driver.close()
-            return True
+                with driver.session() as session:
+                    users_found: set[str] = set()
+
+                    # Single comprehensive query instead of multiple queries
+                    try:
+                        result = session.run(comprehensive_query)
+                        for record in result:
+                            self._process_legacy_user(record, users_found)
+
+                        if len(users_found) == 0:
+                            warn("No high-value or Tier 0 users found in Legacy BloodHound")
+                        else:
+                            good(f"Retrieved {len(users_found)} high-value users from Legacy BloodHound")
+
+                    except Exception as e:
+                        warn(f"Legacy BloodHound query failed: {e}")
+                        return False
+
+                return True
 
         except Exception as e:
-            with contextlib.suppress(Exception):
-                driver.close()
             warn(f"BloodHound query execution failed: {e}")
             return False
 
@@ -502,10 +504,7 @@ class BloodHoundConnector:
                     warn("neo4j library not installed - required for Legacy BloodHound")
                     return computers
 
-                uri = f"bolt://{self.ip}:7687"
-                driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
-
-                with driver.session() as session:
+                with self._legacy_driver() as driver, driver.session() as session:
                     result = session.run(query)
                     for record in result:
                         node = record["c"]
@@ -525,8 +524,6 @@ class BloodHoundConnector:
                         hostname = hostname.upper()
                         if hostname:
                             computers[hostname] = object_id.upper()
-
-                driver.close()
 
             debug(f"BloodHound: Loaded {len(computers)} computer SIDs")
             return computers
@@ -803,10 +800,7 @@ class BloodHoundConnector:
             debug("neo4j library not installed - cannot query Legacy BloodHound")
             return None
 
-        uri = f"bolt://{self.ip}:7687"
-
         try:
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
             identifier = identifier.strip()
 
             # Determine query type based on identifier format
@@ -827,7 +821,7 @@ class BloodHoundConnector:
                 debug(f"WARNING: Querying by sAMAccountName alone is ambiguous: {identifier}")
                 query = f"MATCH (u:User) WHERE toLower(u.samaccountname) = '{identifier.lower()}' RETURN u LIMIT 1"
 
-            with driver.session() as session:
+            with self._legacy_driver() as driver, driver.session() as session:
                 result = session.run(query)
                 record = result.single()
 
@@ -845,7 +839,6 @@ class BloodHoundConnector:
                         "domain": properties.get("domain", ""),
                     }
 
-            driver.close()
             return None
 
         except Exception as e:
@@ -991,10 +984,7 @@ class BloodHoundConnector:
             # Build query - search by samaccountname (more reliable than UPN)
             query = f"MATCH (u:User) WHERE toLower(u.samaccountname) = '{query_username.lower()}' RETURN u"
 
-            uri = f"bolt://{self.ip}:7687"
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
-
-            with driver.session() as session:
+            with self._legacy_driver() as driver, driver.session() as session:
                 result = session.run(query)
                 record = result.single()
 
@@ -1034,7 +1024,6 @@ class BloodHoundConnector:
                         "objectid": properties.get("objectid", ""),
                     }
 
-            driver.close()
             return None
 
         except Exception as e:

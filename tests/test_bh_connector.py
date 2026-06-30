@@ -3,6 +3,8 @@ Tests for BloodHound connector module.
 """
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from taskhound.connectors.bloodhound import (
     BloodHoundConnector,
     _safe_get_sam,
@@ -145,6 +147,40 @@ class TestBloodHoundConnectorRunCypherQuery:
 
         assert result == {"data": {"nodes": []}}
         connector.authenticator.request.assert_called_once()
+
+    @patch.object(BloodHoundConnector, '__init__', lambda x, **kwargs: None)
+    @patch('taskhound.connectors.bloodhound.GraphDatabase')
+    def test_legacy_driver_closes_on_success(self, mock_graph_db):
+        """_legacy_driver yields the bolt-URI/auth driver and closes it on exit (U-40)."""
+        connector = BloodHoundConnector.__new__(BloodHoundConnector)
+        connector.ip = "10.0.0.1"
+        connector.username = "neo4j"
+        connector.password = "pw"
+        mock_driver = MagicMock()
+        mock_graph_db.driver.return_value = mock_driver
+
+        with connector._legacy_driver() as driver:
+            assert driver is mock_driver
+
+        mock_graph_db.driver.assert_called_once_with("bolt://10.0.0.1:7687", auth=("neo4j", "pw"))
+        mock_driver.close.assert_called_once()
+
+    @patch.object(BloodHoundConnector, '__init__', lambda x, **kwargs: None)
+    @patch('taskhound.connectors.bloodhound.GraphDatabase')
+    def test_legacy_driver_closes_on_exception(self, mock_graph_db):
+        """Driver is closed even when the body raises — the leak fix that motivated U-40."""
+        connector = BloodHoundConnector.__new__(BloodHoundConnector)
+        connector.ip = "10.0.0.1"
+        connector.username = "neo4j"
+        connector.password = "pw"
+        mock_driver = MagicMock()
+        mock_graph_db.driver.return_value = mock_driver
+
+        with pytest.raises(RuntimeError):
+            with connector._legacy_driver():
+                raise RuntimeError("boom")
+
+        mock_driver.close.assert_called_once()
 
     @patch.object(BloodHoundConnector, '__init__', lambda x, **kwargs: None)
     @patch('taskhound.connectors.bloodhound.GraphDatabase')
