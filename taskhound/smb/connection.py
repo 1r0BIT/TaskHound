@@ -56,29 +56,9 @@ def smb_connect(
     # falls back to a cleartext password. For Kerberos mode we delegate to
     # Impacket's kerberosLogin (which supports a KDC host if provided).
     # If an AES key is provided, Kerberos authentication is used automatically.
-    smb = SMBConnection(remoteName=target, remoteHost=target, sess_port=445, timeout=timeout)
-
-    pwd, lmhash, nthash = _parse_hashes(password or "")
-
-    # AES key implies Kerberos authentication
-    if kerberos or aes_key:
-        smb.kerberosLogin(
-            user=username,
-            password=pwd,
-            domain=domain,
-            lmhash=lmhash,
-            nthash=nthash,
-            aesKey=aes_key or "",
-            TGT=None,
-            TGS=None,
-            kdcHost=dc_ip,
-        )
-    else:
-        if lmhash or nthash:
-            # When presenting hashes to SMB, the cleartext password is empty
-            smb.login(username, "", domain, lmhash=lmhash, nthash=nthash)
-        else:
-            smb.login(username, pwd, domain)
+    # smb_connect is the one-shot form of the two-phase negotiate+login pair below.
+    smb = smb_negotiate(target, timeout)
+    smb_login(smb, domain, username, password=password, kerberos=kerberos, dc_ip=dc_ip, aes_key=aes_key)
     return smb
 
 
