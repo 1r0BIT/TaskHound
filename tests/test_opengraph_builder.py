@@ -437,6 +437,37 @@ class TestCreatePrincipalId:
 
         assert mock_warn.called
 
+    def test_cross_domain_validated_returns_name(self):
+        """Connector-validated cross-domain user returns the BH principal name.
+
+        Covers the shared _resolve_cross_domain_user happy path for both UPN and
+        NETBIOS callers (consolidated in U-57)."""
+        from unittest.mock import MagicMock
+
+        conn = MagicMock()
+        conn.validate_and_resolve_cross_domain_user.return_value = {
+            "name": "ADMIN@OTHER.LAB", "domain_fqdn": "OTHER.LAB", "objectid": "S-1-5-21-9-9-9-500",
+        }
+        task = {"host": "DC01.DOMAIN.LAB", "path": "\\T"}
+
+        # NETBIOS branch
+        assert _create_principal_id("OTHER\\admin", "DOMAIN.LAB", task, bh_connector=conn) == "ADMIN@OTHER.LAB"
+        conn.validate_and_resolve_cross_domain_user.assert_called_with("OTHER", "ADMIN")
+        # UPN branch
+        assert _create_principal_id("admin@other.lab", "DOMAIN.LAB", task, bh_connector=conn) == "ADMIN@OTHER.LAB"
+        conn.validate_and_resolve_cross_domain_user.assert_called_with("OTHER", "ADMIN")
+
+    def test_cross_domain_validation_failure_returns_none(self):
+        """error_reason from the connector (domain/user not found) yields None."""
+        from unittest.mock import MagicMock
+
+        conn = MagicMock()
+        conn.validate_and_resolve_cross_domain_user.return_value = {"error_reason": "domain_not_found"}
+        task = {"host": "DC01.DOMAIN.LAB", "path": "\\T"}
+
+        assert _create_principal_id("OTHER\\admin", "DOMAIN.LAB", task, bh_connector=conn) is None
+        assert _create_principal_id("admin@other.lab", "DOMAIN.LAB", task, bh_connector=conn) is None
+
     def test_domain_with_fqdn_prefix(self):
         """Should handle FQDN-style domain prefix"""
         task = {"host": "DC01.DOMAIN.LAB"}

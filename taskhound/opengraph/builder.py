@@ -168,6 +168,54 @@ def _create_task_node(task: dict) -> Node:
     return node
 
 
+def _resolve_cross_domain_user(
+    bh_connector, netbios_name: str, user: str, runas_display: str, runas_user: str, task: dict
+) -> str | None:
+    """
+    Validate a cross-domain RunAs against BloodHound and return the principal name.
+
+    Shared by the UPN (user@domain) and NETBIOS (DOMAIN\\user) branches of
+    _create_principal_id. Returns the validated BH principal name, or None
+    (logging why: no connector, domain/user not found, or validation failure).
+    """
+    if not bh_connector:
+        # No connector - can't validate, skip for safety
+        warn(f"Cross-domain {runas_user} - skipping (no BloodHound connector)")
+        return None
+
+    task_path = task.get("path", "unknown")
+    hostname = task.get("host", "unknown")
+
+    # Use complete validation workflow: domain + user
+    user_info = bh_connector.validate_and_resolve_cross_domain_user(netbios_name, user)
+
+    if user_info and not user_info.get("error_reason"):
+        # Both domain and user exist! Create edge with validated UPN
+        info(f"Cross-domain task on {hostname}: {task_path}")
+        info(f"  RunAs: {runas_display} → {user_info['name']} (validated in BH)")
+        info(f"  Domain: {user_info['domain_fqdn']}, User SID: {user_info['objectid']}")
+        return user_info["name"]
+
+    # Domain or user doesn't exist in BloodHound
+    error_reason = user_info.get("error_reason") if user_info else "unknown"
+    if error_reason == "domain_not_found":
+        warn(f"Cross-domain task on {hostname}: {task_path}")
+        warn(f"  RunAs: {runas_user}")
+        warn(f"  [-] Domain '{netbios_name}' not found in BloodHound")
+        warn(f"  → Import '{netbios_name}' domain data to BloodHound to enable this edge")
+    elif error_reason == "user_not_found":
+        warn(f"Cross-domain task on {hostname}: {task_path}")
+        warn(f"  RunAs: {runas_user}")
+        warn(f"  [+] Domain '{user_info['domain_fqdn']}' exists")
+        warn(f"  [-] User '{user_info['username']}' not found in domain")
+        warn("  → Likely orphaned task (user deleted) - enable orphaned node creation to capture")
+    else:
+        warn(f"Cross-domain task on {hostname}: {task_path}")
+        warn(f"  RunAs: {runas_user} (validation failed)")
+
+    return None
+
+
 def _create_principal_id(runas_user: str, local_domain: str, task: dict, bh_connector=None, local_netbios: str | None = None) -> str | None:
     """
     Create BloodHound-compatible principal ID from RunAs user.
@@ -222,47 +270,11 @@ def _create_principal_id(runas_user: str, local_domain: str, task: dict, bh_conn
         # Check if domain matches local domain (case-insensitive)
         if domain_part != local_domain.upper():
             # Cross-domain UPN - validate both domain and user exist in BloodHound
-            if bh_connector:
-                # Extract first component of FQDN for NETBIOS lookup
-                netbios_name = domain_part.split(".")[0] if "." in domain_part else domain_part
-
-                # Use complete validation workflow: domain + user
-                user_info = bh_connector.validate_and_resolve_cross_domain_user(netbios_name, user_part)
-
-                if user_info and not user_info.get('error_reason'):
-                    # Both domain and user exist! Create edge with validated UPN
-                    task_path = task.get("path", "unknown")
-                    hostname = task.get("host", "unknown")
-                    info(f"Cross-domain task on {hostname}: {task_path}")
-                    info(f"  RunAs: {user_part}@{domain_part} → {user_info['name']} (validated in BH)")
-                    info(f"  Domain: {user_info['domain_fqdn']}, User SID: {user_info['objectid']}")
-                    return user_info['name']
-                else:
-                    # Domain or user doesn't exist in BloodHound
-                    task_path = task.get("path", "unknown")
-                    hostname = task.get("host", "unknown")
-                    error_reason = user_info.get('error_reason') if user_info else 'unknown'
-
-                    if error_reason == 'domain_not_found':
-                        warn(f"Cross-domain task on {hostname}: {task_path}")
-                        warn(f"  RunAs: {runas_user}")
-                        warn(f"  [-] Domain '{netbios_name}' not found in BloodHound")
-                        warn(f"  → Import '{netbios_name}' domain data to BloodHound to enable this edge")
-                    elif error_reason == 'user_not_found':
-                        warn(f"Cross-domain task on {hostname}: {task_path}")
-                        warn(f"  RunAs: {runas_user}")
-                        warn(f"  [+] Domain '{user_info['domain_fqdn']}' exists")
-                        warn(f"  [-] User '{user_info['username']}' not found in domain")
-                        warn("  → Likely orphaned task (user deleted) - enable orphaned node creation to capture")
-                    else:
-                        warn(f"Cross-domain task on {hostname}: {task_path}")
-                        warn(f"  RunAs: {runas_user} (validation failed)")
-
-                    return None
-            else:
-                # No connector - can't validate, skip for safety
-                warn(f"Cross-domain UPN {runas_user} - skipping (no BloodHound connector)")
-                return None
+            # Extract first component of FQDN for NETBIOS lookup
+            netbios_name = domain_part.split(".")[0] if "." in domain_part else domain_part
+            return _resolve_cross_domain_user(
+                bh_connector, netbios_name, user_part, f"{user_part}@{domain_part}", runas_user, task
+            )
 
         # UPN domain matches - return normalized format
         return f"{user_part}@{local_domain}"
@@ -298,44 +310,9 @@ def _create_principal_id(runas_user: str, local_domain: str, task: dict, bh_conn
         # Check if cross-domain (domain doesn't match local domain AND not a local account)
         if domain_prefix_short != local_domain_short and not is_local_account:
             # Cross-domain task - validate both domain and user exist in BloodHound
-            if bh_connector:
-                # Use complete validation workflow: domain + user
-                user_info = bh_connector.validate_and_resolve_cross_domain_user(domain_prefix_short, user)
-
-                if user_info and not user_info.get('error_reason'):
-                    # Both domain and user exist! Create edge with validated UPN
-                    task_path = task.get("path", "unknown")
-                    hostname = task.get("host", "unknown")
-                    info(f"Cross-domain task on {hostname}: {task_path}")
-                    info(f"  RunAs: {domain_prefix_short}\\{user} → {user_info['name']} (validated in BH)")
-                    info(f"  Domain: {user_info['domain_fqdn']}, User SID: {user_info['objectid']}")
-                    return user_info['name']
-                else:
-                    # Domain or user doesn't exist in BloodHound
-                    task_path = task.get("path", "unknown")
-                    hostname = task.get("host", "unknown")
-                    error_reason = user_info.get('error_reason') if user_info else 'unknown'
-
-                    if error_reason == 'domain_not_found':
-                        warn(f"Cross-domain task on {hostname}: {task_path}")
-                        warn(f"  RunAs: {runas_user}")
-                        warn(f"  [-] Domain '{domain_prefix_short}' not found in BloodHound")
-                        warn(f"  → Import '{domain_prefix_short}' domain data to BloodHound to enable this edge")
-                    elif error_reason == 'user_not_found':
-                        warn(f"Cross-domain task on {hostname}: {task_path}")
-                        warn(f"  RunAs: {runas_user}")
-                        warn(f"  [+] Domain '{user_info['domain_fqdn']}' exists")
-                        warn(f"  [-] User '{user_info['username']}' not found in domain")
-                        warn("  → Likely orphaned task (user deleted) - enable orphaned node creation to capture")
-                    else:
-                        warn(f"Cross-domain task on {hostname}: {task_path}")
-                        warn(f"  RunAs: {runas_user} (validation failed)")
-
-                    return None
-            else:
-                # No connector - can't validate, skip for safety
-                warn(f"Cross-domain task {runas_user} - skipping (no BloodHound connector)")
-                return None
+            return _resolve_cross_domain_user(
+                bh_connector, domain_prefix_short, user, f"{domain_prefix_short}\\{user}", runas_user, task
+            )
 
         # If it's a local account, skip creating edge (local accounts aren't in BloodHound)
         if is_local_account:
