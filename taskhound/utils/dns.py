@@ -4,7 +4,6 @@
 # including DC discovery via SRV records and configurable nameserver support.
 
 import socket
-from typing import List, Optional
 
 from .logging import debug, warn
 
@@ -17,10 +16,10 @@ DEFAULT_LDAP_TIMEOUT = 10
 
 def discover_domain_controllers(
     domain: str,
-    nameserver: Optional[str] = None,
+    nameserver: str | None = None,
     use_tcp: bool = False,
     timeout: int = DEFAULT_DNS_TIMEOUT,
-) -> List[str]:
+) -> list[str]:
     """
     Discover domain controllers via DNS SRV records.
 
@@ -108,10 +107,10 @@ def discover_domain_controllers(
 
 def resolve_hostname(
     hostname: str,
-    nameserver: Optional[str] = None,
+    nameserver: str | None = None,
     use_tcp: bool = False,
     timeout: int = DEFAULT_DNS_TIMEOUT,
-) -> Optional[str]:
+) -> str | None:
     """
     Resolve a hostname to an IP address.
 
@@ -149,10 +148,10 @@ def resolve_hostname(
 
 def reverse_lookup(
     ip: str,
-    nameserver: Optional[str] = None,
+    nameserver: str | None = None,
     use_tcp: bool = False,
     timeout: int = DEFAULT_DNS_TIMEOUT,
-) -> Optional[str]:
+) -> str | None:
     """
     Perform reverse DNS lookup (PTR record).
 
@@ -200,11 +199,11 @@ def _is_ip_address(hostname: str) -> bool:
 
 def get_working_dc(
     domain: str,
-    dc_ip: Optional[str] = None,
-    nameserver: Optional[str] = None,
+    dc_ip: str | None = None,
+    nameserver: str | None = None,
     use_tcp: bool = False,
     timeout: int = DEFAULT_LDAP_TIMEOUT,
-) -> Optional[str]:
+) -> str | None:
     """
     Get a working DC IP for LDAP connections.
 
@@ -275,10 +274,10 @@ def _test_port(host: str, port: int, timeout: int = 3) -> bool:
 
 def discover_global_catalog_servers(
     domain: str,
-    nameserver: Optional[str] = None,
+    nameserver: str | None = None,
     use_tcp: bool = False,
     timeout: int = DEFAULT_DNS_TIMEOUT,
-) -> List[str]:
+) -> list[str]:
     """
     Discover Global Catalog servers via DNS SRV records.
 
@@ -330,11 +329,11 @@ def discover_global_catalog_servers(
 
 def get_working_gc(
     domain: str,
-    gc_server: Optional[str] = None,
-    nameserver: Optional[str] = None,
+    gc_server: str | None = None,
+    nameserver: str | None = None,
     use_tcp: bool = False,
     timeout: int = DEFAULT_LDAP_TIMEOUT,
-) -> Optional[str]:
+) -> str | None:
     """
     Get a working Global Catalog server IP.
 

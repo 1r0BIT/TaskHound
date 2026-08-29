@@ -13,7 +13,7 @@ from .helpers import parse_ntlm_hashes
 from .logging import debug
 
 
-def resolve_dc_hostname(dc_ip: str, domain: str, use_tcp: bool = False) -> Optional[str]:
+def resolve_dc_hostname(dc_ip: str, domain: str, use_tcp: bool = False) -> str | None:
     """
     Resolve DC IP to hostname for Kerberos SPN construction.
 
@@ -54,7 +54,7 @@ def resolve_dc_hostname(dc_ip: str, domain: str, use_tcp: bool = False) -> Optio
                 return hostname
     except ImportError:
         pass  # dnspython not available
-    except (OSError, socket.timeout):
+    except (TimeoutError, OSError):
         pass  # DNS lookup failed: {e}
 
     # Method 2: System reverse DNS lookup
@@ -78,16 +78,16 @@ def resolve_dc_hostname(dc_ip: str, domain: str, use_tcp: bool = False) -> Optio
 
 
 def get_ldap_connection(
-    dc_ip: Optional[str],
+    dc_ip: str | None,
     domain: str,
     username: str,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    aes_key: Optional[str] = None,
-    dc_host: Optional[str] = None,
+    aes_key: str | None = None,
+    dc_host: str | None = None,
     use_tcp: bool = False,
-    nameserver: Optional[str] = None,
+    nameserver: str | None = None,
     timeout: int = 10,
 ) -> ldap_impacket.LDAPConnection:
     """
@@ -240,14 +240,14 @@ def get_ldap_connection(
 
 
 def enumerate_domain_computers(
-    dc_ip: Optional[str],
+    dc_ip: str | None,
     domain: str,
     username: str,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    aes_key: Optional[str] = None,
-    ldap_filter: Optional[str] = None,
+    aes_key: str | None = None,
+    ldap_filter: str | None = None,
     use_tcp: bool = False,
     include_dcs: bool = False,
 ) -> list[str]:
@@ -350,14 +350,14 @@ def enumerate_domain_computers(
 
 
 def enumerate_domain_computers_filtered(
-    dc_ip: Optional[str],
+    dc_ip: str | None,
     domain: str,
     username: str,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    aes_key: Optional[str] = None,
-    ldap_filter: Optional[str] = None,
+    aes_key: str | None = None,
+    ldap_filter: str | None = None,
     use_tcp: bool = False,
     include_dcs: bool = False,
     include_disabled: bool = False,
@@ -497,16 +497,16 @@ def enumerate_domain_computers_filtered(
 
 
 def get_netbios_domain_name(
-    dc_ip: Optional[str],
+    dc_ip: str | None,
     domain: str,
     username: str,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    aes_key: Optional[str] = None,
+    aes_key: str | None = None,
     use_tcp: bool = False,
     ldap_conn: Optional["ldap_impacket.LDAPConnection"] = None,
-) -> Optional[str]:
+) -> str | None:
     """
     Query the NetBIOS domain name from Active Directory.
 
@@ -593,15 +593,15 @@ def get_netbios_domain_name(
 
 
 def get_global_catalog_connection(
-    gc_server: Optional[str],
+    gc_server: str | None,
     domain: str,
     username: str,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    aes_key: Optional[str] = None,
+    aes_key: str | None = None,
     use_tcp: bool = False,
-    nameserver: Optional[str] = None,
+    nameserver: str | None = None,
     timeout: int = 10,
 ) -> ldap_impacket.LDAPConnection:
     """

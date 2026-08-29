@@ -549,12 +549,13 @@ class TestAuditSummary:
         assert scores == sorted(scores, reverse=True)
 
     def test_findings_include_severity_and_row(self, sample_rows):
-        """Each finding should be a tuple of (SeverityScore, row_dict)."""
+        """Each finding should be a tuple of (SeverityScore, row_dict, kind)."""
         _, findings = generate_audit_summary(sample_rows)
 
-        for severity, row in findings:
+        for severity, row, kind in findings:
             assert isinstance(severity, SeverityScore)
             assert isinstance(row, dict)
+            assert kind in ("task", "service")
 
 
 # ============================================================================

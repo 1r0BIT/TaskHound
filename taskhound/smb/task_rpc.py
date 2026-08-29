@@ -67,7 +67,6 @@ import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Optional
 
 from impacket.dcerpc.v5 import transport, tsch
 from impacket.dcerpc.v5.rpcrt import RPC_C_AUTHN_GSS_NEGOTIATE, RPC_C_AUTHN_LEVEL_PKT_PRIVACY
@@ -145,16 +144,16 @@ class CredentialContext:
     """
 
     # From AD/LDAP - when the user's password was last changed
-    pwd_last_set: Optional[datetime] = None
+    pwd_last_set: datetime | None = None
 
     # From task XML - when the task was created/registered
-    task_creation_date: Optional[datetime] = None
+    task_creation_date: datetime | None = None
 
     # From task XML - expected run interval in days (e.g., 1 for daily, 7 for weekly)
-    trigger_interval_days: Optional[int] = None
+    trigger_interval_days: int | None = None
 
     # Current time for staleness calculation (injectable for testing)
-    current_time: Optional[datetime] = field(default_factory=datetime.now)
+    current_time: datetime | None = field(default_factory=datetime.now)
 
 
 @dataclass
@@ -162,7 +161,7 @@ class TaskRunInfo:
     """Information about a task's last execution and credential validation."""
 
     task_path: str
-    last_run: Optional[datetime]
+    last_run: datetime | None
     return_code: int
     credential_status: CredentialStatus
     status_detail: str
@@ -176,7 +175,7 @@ class TaskRunInfo:
 
 def calculate_confidence(
     run_info: TaskRunInfo,
-    context: Optional[CredentialContext] = None,
+    context: CredentialContext | None = None,
 ) -> tuple[CredentialConfidence, str]:
     """
     Calculate credential confidence based on multiple heuristics.
@@ -344,7 +343,7 @@ def calculate_confidence(
 
 def enrich_with_confidence(
     run_info: TaskRunInfo,
-    context: Optional[CredentialContext] = None,
+    context: CredentialContext | None = None,
 ) -> TaskRunInfo:
     """
     Calculate and set confidence on a TaskRunInfo object.
@@ -683,7 +682,7 @@ class TaskSchedulerRPC:
         self.disconnect()
         return False
 
-    def get_task_run_info(self, task_path: str) -> Optional[TaskRunInfo]:
+    def get_task_run_info(self, task_path: str) -> TaskRunInfo | None:
         """
         Query last run information for a specific task.
 
@@ -750,7 +749,7 @@ class TaskSchedulerRPC:
             return None
 
     def _interpret_return_code(
-        self, code: int, last_run: Optional[datetime]
+        self, code: int, last_run: datetime | None
     ) -> tuple[CredentialStatus, bool, bool, str]:
         """
         Interpret return code for credential validation.

@@ -7,13 +7,29 @@
 # single permission issue doesn't abort the entire crawl.
 
 import io
-from typing import List, Tuple
 
 from impacket.smbconnection import SMBConnection
 
 from ..utils.logging import warn
 
 TASK_ROOT = r"\Windows\System32\Tasks"
+
+# Prefix variants (with/without leading backslash) for display stripping
+_TASK_PREFIX = "Windows\\System32\\Tasks\\"
+_TASK_PREFIX_BS = "\\Windows\\System32\\Tasks\\"
+
+
+def strip_task_root(path: str) -> str:
+    """Strip the static ``\\Windows\\System32\\Tasks\\`` prefix for display.
+
+    Handles paths with or without a leading backslash.  Falls back to
+    the original string when the prefix is not found.
+    """
+    if path.startswith(_TASK_PREFIX_BS):
+        return path[len(_TASK_PREFIX_BS):]
+    if path.startswith(_TASK_PREFIX):
+        return path[len(_TASK_PREFIX):]
+    return path
 
 
 def smb_listdir(smb: SMBConnection, share: str, path: str):
@@ -39,12 +55,12 @@ def smb_readfile(smb: SMBConnection, share: str, path: str) -> bytes:
     return buff.getvalue()
 
 
-def crawl_tasks(smb: SMBConnection, include_ms: bool = False) -> List[Tuple[str, bytes]]:
+def crawl_tasks(smb: SMBConnection, include_ms: bool = False) -> list[tuple[str, bytes]]:
     # Recursively crawl the scheduled tasks tree and collect XMLs.
     #
     # By default the large \Microsoft subtree is skipped for speed unless
     # `include_ms` is True.
-    results: List[Tuple[str, bytes]] = []
+    results: list[tuple[str, bytes]] = []
     share = "C$"
 
     # Verify access to root first

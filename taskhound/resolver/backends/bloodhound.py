@@ -2,13 +2,12 @@
 #
 # Resolution via BloodHound offline data and live API queries.
 
-from typing import Optional
 
 from ...parsers.highvalue import HighValueLoader
 from ...utils.logging import debug, info
 
 
-def resolve_sid_from_bloodhound(sid: str, hv_loader: Optional[HighValueLoader]) -> Optional[str]:
+def resolve_sid_from_bloodhound(sid: str, hv_loader: HighValueLoader | None) -> str | None:
     """
     Resolve SID to username using BloodHound offline data.
 
@@ -34,7 +33,7 @@ def resolve_sid_from_bloodhound(sid: str, hv_loader: Optional[HighValueLoader]) 
     return None
 
 
-def resolve_sid_via_bloodhound_api(sid: str, bh_connector) -> Optional[str]:
+def resolve_sid_via_bloodhound_api(sid: str, bh_connector) -> str | None:
     """
     Resolve SID to username using live BloodHound API queries.
 
@@ -74,7 +73,7 @@ def resolve_sid_via_bloodhound_api(sid: str, bh_connector) -> Optional[str]:
     return None
 
 
-def extract_domain_sid_from_hv(hv_loader: Optional[HighValueLoader]) -> Optional[str]:
+def extract_domain_sid_from_hv(hv_loader: HighValueLoader | None) -> str | None:
     """
     Extract domain SID from BloodHound data. Returns Admin SID (RID 500) for testing.
 

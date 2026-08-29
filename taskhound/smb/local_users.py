@@ -3,7 +3,7 @@
 # Uses the existing SMB connection to enumerate local user accounts on a target
 # without code execution. Results are cached per-host to avoid repeated RPC calls.
 
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING
 
 from impacket.dcerpc.v5 import samr, transport
 from impacket.dcerpc.v5.dtypes import MAXIMUM_ALLOWED
@@ -18,7 +18,7 @@ _CACHE_CATEGORY = "local_users"
 _CACHE_TTL_HOURS = 24
 
 
-def enumerate_local_users(smb: "SMBConnection", hostname: str) -> Dict[str, int]:
+def enumerate_local_users(smb: "SMBConnection", hostname: str) -> dict[str, int]:
     """
     Enumerate local user accounts on a Windows host via SAMR (\\pipe\\samr).
 
@@ -73,7 +73,7 @@ def enumerate_local_users(smb: "SMBConnection", hostname: str) -> Dict[str, int]
         # Enumerate all normal user accounts.
         # preferedMaximumLength=0xffffffff fetches all entries in a single call for
         # typical workstation/server account counts (rarely more than a dozen).
-        result: Dict[str, int] = {}
+        result: dict[str, int] = {}
         enum_context = 0
 
         while True:
@@ -133,7 +133,7 @@ def enumerate_local_users(smb: "SMBConnection", hostname: str) -> Dict[str, int]
         return {}
 
 
-def _admin_name(local_users: Dict[str, int]) -> str:
+def _admin_name(local_users: dict[str, int]) -> str:
     """Return the name of the RID-500 account, or 'Administrator' if not found."""
     for name, rid in local_users.items():
         if rid == 500:

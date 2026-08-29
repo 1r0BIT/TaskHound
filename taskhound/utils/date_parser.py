@@ -5,11 +5,10 @@ This module provides centralized date parsing logic to handle various formats
 encountered in Windows Task Scheduler XML and BloodHound data.
 """
 
-from datetime import datetime, timezone
-from typing import Optional, Union
+from datetime import UTC, datetime
 
 
-def parse_timestamp(timestamp_value: Union[str, int, float, None]) -> Optional[datetime]:
+def parse_timestamp(timestamp_value: str | int | float | None) -> datetime | None:
     """
     Convert various timestamp formats to datetime.
     Supports Windows FILETIME, Unix timestamps, and string representations.
@@ -39,15 +38,15 @@ def parse_timestamp(timestamp_value: Union[str, int, float, None]) -> Optional[d
             # Windows FILETIME epoch: January 1, 1601 00:00:00 UTC
             # Convert 100-nanosecond intervals to seconds
             unix_timestamp = (timestamp - 116444736000000000) / 10000000.0
-            return datetime.fromtimestamp(unix_timestamp, tz=timezone.utc)
+            return datetime.fromtimestamp(unix_timestamp, tz=UTC)
         else:  # Likely Unix timestamp
-            return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            return datetime.fromtimestamp(timestamp, tz=UTC)
 
     except (ValueError, OSError, OverflowError):
         return None
 
 
-def parse_iso_date(date_str: str) -> Optional[datetime]:
+def parse_iso_date(date_str: str) -> datetime | None:
     """
     Parse ISO 8601 date strings with various formats.
     Handles 'Z' suffix, timezone offsets, and missing timezones.
@@ -70,7 +69,7 @@ def parse_iso_date(date_str: str) -> Optional[datetime]:
             # Naive datetime, assume UTC
             dt = datetime.fromisoformat(date_str)
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
 
         return dt
     except (ValueError, TypeError):
@@ -84,7 +83,7 @@ def parse_iso_date(date_str: str) -> Optional[datetime]:
 _FILETIME_EPOCH_DIFF = 11644473600
 
 
-def parse_ad_timestamp(timestamp: int) -> Optional[datetime]:
+def parse_ad_timestamp(timestamp: int) -> datetime | None:
     """
     Parse AD timestamp (100-nanosecond intervals since January 1, 1601).
 
@@ -102,12 +101,12 @@ def parse_ad_timestamp(timestamp: int) -> Optional[datetime]:
             return None
 
         unix_timestamp = (timestamp / 10_000_000) - _FILETIME_EPOCH_DIFF
-        return datetime.fromtimestamp(unix_timestamp, tz=timezone.utc)
+        return datetime.fromtimestamp(unix_timestamp, tz=UTC)
     except (ValueError, OSError, OverflowError):
         return None
 
 
-def parse_filetime_hex(filetime_hex: str) -> Optional[datetime]:
+def parse_filetime_hex(filetime_hex: str) -> datetime | None:
     """
     Parse Windows FILETIME from hex string.
 
@@ -127,6 +126,6 @@ def parse_filetime_hex(filetime_hex: str) -> Optional[datetime]:
         # Convert to Unix timestamp
         unix_timestamp = (filetime / 10_000_000) - _FILETIME_EPOCH_DIFF
 
-        return datetime.fromtimestamp(unix_timestamp, tz=timezone.utc)
+        return datetime.fromtimestamp(unix_timestamp, tz=UTC)
     except (ValueError, OSError, OverflowError):
         return None

@@ -1,5 +1,4 @@
 # LAPS Helper Functions
-from typing import List, Optional, Tuple
 
 from ..utils.logging import warn
 from .exceptions import LAPS_ERRORS
@@ -12,7 +11,7 @@ from .models import LAPSCache, LAPSCredential, LAPSFailure
 
 def get_laps_credential_for_host(
     cache: LAPSCache, hostname: str
-) -> Tuple[Optional[LAPSCredential], Optional[LAPSFailure]]:
+) -> tuple[LAPSCredential | None, LAPSFailure | None]:
     """
     Lookup LAPS credential for a hostname with failure tracking.
 
@@ -52,7 +51,7 @@ def get_laps_credential_for_host(
 def print_laps_summary(
     cache: LAPSCache,
     successes: int,
-    failures: List[LAPSFailure],
+    failures: list[LAPSFailure],
 ) -> None:
     """
     Print LAPS authentication summary.

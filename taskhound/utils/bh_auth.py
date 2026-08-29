@@ -1,5 +1,4 @@
 import json
-from typing import Dict, Optional, Union
 
 import requests
 
@@ -16,10 +15,10 @@ class BloodHoundAuthenticator:
     def __init__(
         self,
         base_url: str,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
-        api_key: Optional[str] = None,
-        api_key_id: Optional[str] = None,
+        username: str | None = None,
+        password: str | None = None,
+        api_key: str | None = None,
+        api_key_id: str | None = None,
         timeout: int = 30,
     ):
         self.base_url = base_url.rstrip("/")
@@ -28,9 +27,9 @@ class BloodHoundAuthenticator:
         self.api_key = api_key
         self.api_key_id = api_key_id
         self.timeout = timeout
-        self._token: Optional[str] = None
+        self._token: str | None = None
 
-    def get_token(self) -> Optional[str]:
+    def get_token(self) -> str | None:
         """
         Get a session token using username/password.
         Returns None if authentication fails or if using API key.
@@ -61,8 +60,8 @@ class BloodHoundAuthenticator:
         return None
 
     def request(
-        self, method: str, endpoint: str, body: Optional[Union[Dict, bytes]] = None, headers: Optional[Dict] = None
-    ) -> Optional[requests.Response]:
+        self, method: str, endpoint: str, body: dict | bytes | None = None, headers: dict | None = None
+    ) -> requests.Response | None:
         """
         Make an authenticated request to BloodHound CE.
         Automatically handles API Key signing or Bearer Token injection.

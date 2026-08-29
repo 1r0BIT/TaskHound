@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 import traceback
-from typing import Any, Dict
+from typing import Any
 
 from rich.console import Console
 from rich.table import Table
@@ -133,7 +133,7 @@ class OnceOnly(argparse.Action):
         setattr(namespace, self.dest, values)
 
 
-def load_config() -> Dict[str, Any]:
+def load_config() -> dict[str, Any]:
     """
     Load configuration from TOML files.
 
@@ -297,13 +297,8 @@ def load_config() -> Dict[str, Any]:
     # Note: output_dir is deprecated - OpenGraph now uses {output_dir}/opengraph/
     if "no_upload" in bhog:
         defaults["bh_no_upload"] = bhog["no_upload"]
-    # Note: set_icon removed - icon is now always set on upload
-    if "force_icon" in bhog:
-        defaults["bh_force_icon"] = bhog["force_icon"]
-    if "icon" in bhog:
-        defaults["bh_icon"] = bhog["icon"]
-    if "color" in bhog:
-        defaults["bh_color"] = bhog["color"]
+    # Node icons/colors are now declared in the v9 extension schema (opengraph/schema.py);
+    # the legacy icon/color/force_icon options were removed.
     if "allow_orphans" in bhog:
         defaults["bh_allow_orphans"] = bhog["allow_orphans"]
 
@@ -473,6 +468,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument("--bh-data", help="Path to High Value Target export (csv/json from Neo4j)")
 
+    # Service enumeration options
+    svc_group = ap.add_argument_group("Service Enumeration")
+    svc_group.add_argument(
+        "--services",
+        action="store_true",
+        help="Enable Windows Service enumeration via SVCCTL RPC alongside task scanning. "
+        "Discovers services running as domain accounts with stored credentials.",
+    )
+    svc_group.add_argument(
+        "--services-only",
+        action="store_true",
+        help="Only enumerate services (skip scheduled task scanning). Implies --services.",
+    )
+
     # BloodHound live connection options
     bh_group = ap.add_argument_group("BloodHound Live Connection")
     bh_group.add_argument(
@@ -532,19 +541,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate OpenGraph files but skip automatic upload to BloodHound (files still saved)",
     )
     bhog.add_argument(
-        "--bh-force-icon",
-        action="store_true",
-        help="Force icon update even if ScheduledTask icon already exists (icon is set automatically on upload)",
-    )
-    bhog.add_argument(
-        "--bh-icon", default="clock", help="Font Awesome icon name for ScheduledTask nodes (default: clock)"
-    )
-    bhog.add_argument(
-        "--bh-color",
-        default="#8B5CF6",
-        help="Hex color code for ScheduledTask node icon (default: #8B5CF6 - vibrant purple)",
-    )
-    bhog.add_argument(
         "--bh-allow-orphans",
         action="store_true",
         help="Create edges even when Computer/User nodes are missing from BloodHound (may create orphaned edges)",
@@ -592,6 +588,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable credential validation via Task Scheduler RPC. Reduces RPC traffic.",
     )
 
+    scan.add_argument(
+        "--no-lsa",
+        action="store_true",
+        help="Disable registry-based LSA secret extraction. By default, --loot uses Remote Registry "
+        "to extract service credentials and DPAPI system keys without writing files to disk. "
+        "This is noisier than basic scanning (starts RemoteRegistry, reads LSA policy keys). "
+        "Use this flag if you want DPAPI file collection without LSA extraction.",
+    )
+
     # DPAPI decryption options
     dpapi = ap.add_argument_group("DPAPI Credential Decryption")
     dpapi.add_argument(
@@ -634,6 +639,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--ldap-tier0",
         action="store_true",
         help="Enable LDAP-based Tier-0 detection via group membership queries. Checks if runas accounts are members of privileged groups (Domain Admins, Enterprise Admins, etc.) without requiring BloodHound data.",
+    )
+    ldap.add_argument(
+        "--match-bare-runas",
+        action="store_true",
+        help="Fallback for bare-username RunAs values (no DOMAIN\\ prefix, no UPN @). Online "
+        "scans already resolve bare names to a domain SID via LDAP; this flag additionally "
+        "matches a bare name against domain Tier-0/high-value data when no SID could be resolved "
+        "(offline, --opsec, or --no-ldap). Matches are annotated to verify the account is not a "
+        "same-named local account. Off by default to avoid local-account false positives.",
     )
     ldap.add_argument(
         "--gc-server",
@@ -697,9 +711,20 @@ def build_parser() -> argparse.ArgumentParser:
     misc.add_argument("--verbose", action="store_true", help="Enable verbose output")
     misc.add_argument("--debug", action="store_true", help="Enable debug output (print full stack traces)")
     misc.add_argument(
+        "--debug-log",
+        metavar="PATH",
+        help="Save all console output (including debug) to a timestamped log file. "
+        "Accepts a directory path — file will be named YYYYMMDD_HHMMSS_taskhound_debug.log",
+    )
+    misc.add_argument(
         "--no-confirm",
         action="store_true",
         help="Skip confirmation prompts for noisy operations (useful for automation/CI)",
+    )
+    misc.add_argument(
+        "--no-preflight",
+        action="store_true",
+        help="Skip pre-flight credential validation (for CI/automation with known-good creds)",
     )
     # Load defaults from config file
     defaults = load_config()
@@ -717,6 +742,10 @@ def validate_args(args):
     # Initialize no_rpc if not present (for backwards compatibility)
     if not hasattr(args, 'no_rpc'):
         args.no_rpc = False
+
+    # --services-only implies --services
+    if getattr(args, "services_only", False):
+        args.services = True
 
     # Parse and validate --output formats
     args.output_formats = set()
@@ -1016,16 +1045,18 @@ def validate_args(args):
         print("       Then decrypt offline:    --offline dpapi_loot/<target> --dpapi-key <target_key>")
         sys.exit(1)
 
-    # DPAPI messaging for online mode
+    # Loot messaging for online mode
     if args.loot and not args.offline:
+        no_lsa = getattr(args, "no_lsa", False)
         if args.dpapi_key:
-            # Single target with key: will collect and decrypt
-            print("[*] DPAPI key provided - credentials will be collected and decrypted immediately")
+            print("[*] DPAPI key provided — credentials will be decrypted immediately")
+        elif not no_lsa:
+            print("[*] Credential extraction enabled: LSA secrets (registry-only) + DPAPI collection")
+            print("[*] DPAPI system key will be extracted automatically from LSA — no manual step needed")
+            print("[*] Use --no-loot to disable all extraction, --no-lsa to disable just LSA")
         else:
-            # Multi-target or no key: collect for offline decryption
-            print("[*] DPAPI credential collection enabled (use --no-loot to disable)")
-            print("[*] Credentials will be saved for offline decryption")
-            print("[!] To decrypt immediately, provide --dpapi-key (single target only)")
+            print("[*] DPAPI credential collection enabled (LSA extraction disabled via --no-lsa)")
+            print("[!] Without LSA extraction, provide --dpapi-key manually for decryption")
             print("[!] Obtain dpapi_userkey with: nxc smb <target> -u <user> -p <pass> --lsa")
         print()
 

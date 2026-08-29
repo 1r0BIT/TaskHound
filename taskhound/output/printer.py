@@ -1,9 +1,10 @@
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from rich.table import Table
 
 from ..parsers.highvalue import HighValueLoader
 from ..resolver import format_runas_with_sid_resolution
+from ..smb.tasks import strip_task_root
 from ..utils import logging as log_utils
 from ..utils.console import console
 from ..utils.credentials import find_password_for_user
@@ -14,8 +15,8 @@ from . import COLORS
 def print_task_table(
     kind: str,
     rel_path: str,
-    rows: List[tuple],
-    hostname: Optional[str] = None,
+    rows: list[tuple],
+    hostname: str | None = None,
 ) -> None:
     """
     Print a task as a Rich table with colored borders.
@@ -44,7 +45,8 @@ def print_task_table(
         tag = "[TASK]"
 
     # Build the title with tag, hostname (if provided), and path
-    title = f"[{header_style}]{tag}[/] {hostname} - {rel_path}" if hostname else f"[{header_style}]{tag}[/] {rel_path}"
+    display_path = strip_task_root(rel_path)
+    title = f"[{header_style}]{tag}[/] {hostname} - {display_path}" if hostname else f"[{header_style}]{tag}[/] {display_path}"
 
     # Create a simple two-column table
     table = Table(
@@ -95,7 +97,7 @@ def print_task_table(
     console.print(table)
 
 
-def format_trigger_info(meta: Dict[str, Optional[str]]) -> Optional[str]:
+def format_trigger_info(meta: dict[str, str | None]) -> str | None:
     """Format trigger information for display"""
     trigger_type = meta.get("trigger_type")
     if not trigger_type:
@@ -173,10 +175,10 @@ def _query_gmsa_ldap(
     username: str,
     domain: str,
     dc_ip: str,
-    ldap_user: Optional[str] = None,
-    ldap_password: Optional[str] = None,
-    ldap_hashes: Optional[str] = None,
-) -> Optional[Dict[str, bool]]:
+    ldap_user: str | None = None,
+    ldap_password: str | None = None,
+    ldap_hashes: str | None = None,
+) -> dict[str, bool] | None:
     """
     Query LDAP directly to check if an account is a gMSA or MSA.
 
@@ -258,16 +260,16 @@ def _query_gmsa_ldap(
 
 def _check_gmsa_account(
     display_runas: str,
-    resolved_username: Optional[str] = None,
+    resolved_username: str | None = None,
     bh_connector=None,
     cache_manager=None,
     no_ldap: bool = False,
-    domain: Optional[str] = None,
-    dc_ip: Optional[str] = None,
-    ldap_user: Optional[str] = None,
-    ldap_password: Optional[str] = None,
-    ldap_hashes: Optional[str] = None,
-) -> Optional[str]:
+    domain: str | None = None,
+    dc_ip: str | None = None,
+    ldap_user: str | None = None,
+    ldap_password: str | None = None,
+    ldap_hashes: str | None = None,
+) -> str | None:
     """
     Check if the runas account is a gMSA (Group Managed Service Account).
 
@@ -411,7 +413,7 @@ def _format_gmsa_hint(is_gmsa: bool, is_msa: bool, heuristic: bool = False) -> s
         account_type = "Service Account"
 
     hint = f"{account_type} - credentials stored in LSA secrets, not DPAPI."
-    hint += " Consider LSA dump if you have SYSTEM access."
+    hint += " Run without --no-lsa to extract NTLM hash automatically."
 
     if heuristic:
         hint += " (detected by $ suffix heuristic)"
@@ -426,32 +428,32 @@ def format_block(
     what: str,
     author: str,
     date: str,
-    extra_reason: Optional[str] = None,
-    password_analysis: Optional[str] = None,
-    hv: Optional[HighValueLoader] = None,
+    extra_reason: str | None = None,
+    password_analysis: str | None = None,
+    hv: HighValueLoader | None = None,
     bh_connector=None,
     smb_connection=None,
     no_ldap: bool = False,
-    domain: Optional[str] = None,
-    dc_ip: Optional[str] = None,
-    hostname: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    domain: str | None = None,
+    dc_ip: str | None = None,
+    hostname: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    enabled: Optional[str] = None,
-    ldap_domain: Optional[str] = None,
-    ldap_user: Optional[str] = None,
-    ldap_password: Optional[str] = None,
-    ldap_hashes: Optional[str] = None,
-    meta: Optional[Dict[str, Optional[str]]] = None,
-    decrypted_creds: Optional[List] = None,
+    enabled: str | None = None,
+    ldap_domain: str | None = None,
+    ldap_user: str | None = None,
+    ldap_password: str | None = None,
+    ldap_hashes: str | None = None,
+    meta: dict[str, str | None] | None = None,
+    decrypted_creds: list | None = None,
     concise: bool = False,
-    cred_validation: Optional[Dict[str, Any]] = None,
-    resolved_runas: Optional[str] = None,
-    credential_guard: Optional[bool] = None,
+    cred_validation: dict[str, Any] | None = None,
+    resolved_runas: str | None = None,
+    credential_guard: bool | None = None,
     cache_manager=None,
-) -> List[str]:
+) -> list[str]:
     """
     Format a task block for CLI output.
 
@@ -497,13 +499,15 @@ def format_block(
             ldap_hashes=ldap_hashes,
         )
 
+    display_path = strip_task_root(rel_path)
+
     if concise:
         # Concise output: One line per task
         # Format: [KIND] Hostname - RunAs | Path | What | (optional reason) | (optional password)
         if hostname:
-            line = f"{header} {hostname} - {display_runas} | {rel_path} | {what}"
+            line = f"{header} {hostname} - {display_runas} | {display_path} | {what}"
         else:
-            line = f"{header} {display_runas} | {rel_path} | {what}"
+            line = f"{header} {display_runas} | {display_path} | {what}"
         if extra_reason:
             line += f" | {extra_reason}"
 
@@ -516,7 +520,7 @@ def format_block(
         return [line]
 
     # Build rows for table output: list of (label, value) tuples
-    rows: List[tuple] = []
+    rows: list[tuple] = []
 
     # Add task state information as first field
     if enabled is not None:
@@ -605,20 +609,27 @@ def format_block(
         rows.append(("Decrypted Pwd", decrypted_password))
 
     # gMSA hint - uses multi-tier detection: Cache → BloodHound → LDAP → Heuristic
-    gmsa_hint = _check_gmsa_account(
-        display_runas,
-        resolved_username,
-        bh_connector=bh_connector,
-        cache_manager=cache_manager,
-        no_ldap=no_ldap,
-        domain=ldap_domain or domain,
-        dc_ip=dc_ip,
-        ldap_user=ldap_user or username,
-        ldap_password=ldap_password or password,
-        ldap_hashes=ldap_hashes or hashes,
-    )
-    if gmsa_hint:
-        rows.append(("gMSA Hint", gmsa_hint))
+    # Suppress if we already extracted the NTLM hash (hint is redundant)
+    if not decrypted_password:
+        from ..auth.context import effective_ldap_creds
+
+        eff_domain, eff_user, eff_pass, eff_hashes = effective_ldap_creds(
+            domain, username, password, hashes, ldap_domain, ldap_user, ldap_password, ldap_hashes
+        )
+        gmsa_hint = _check_gmsa_account(
+            display_runas,
+            resolved_username,
+            bh_connector=bh_connector,
+            cache_manager=cache_manager,
+            no_ldap=no_ldap,
+            domain=eff_domain,
+            dc_ip=dc_ip,
+            ldap_user=eff_user,
+            ldap_password=eff_pass,
+            ldap_hashes=eff_hashes,
+        )
+        if gmsa_hint:
+            rows.append(("gMSA Hint", gmsa_hint))
 
     # Credential Guard status (shown when credguard_detect is enabled, which is default)
     if credential_guard is not None:
@@ -640,11 +651,11 @@ def format_block(
             rows.append(("Next Step", "Try DPAPI Dump / Task Manipulation"))
 
     # Print Rich table to console
-    print_task_table(kind, rel_path, rows, hostname=hostname)
+    print_task_table(kind, display_path, rows, hostname=hostname)
 
     # Return text format for file output (backward compatibility)
     # Label width is 18 chars + 1 space before colon = 19 chars total before ":"
-    base = [f"\n{header} {hostname} - {rel_path}"] if hostname else [f"\n{header} {rel_path}"]
+    base = [f"\n{header} {hostname} - {display_path}"] if hostname else [f"\n{header} {display_path}"]
     for label, value in rows:
         base.append(f"        {label:<18} : {value}")
 
@@ -652,11 +663,11 @@ def format_block(
 
 
 def _find_decrypted_password(
-    decrypted_creds: Optional[List],
+    decrypted_creds: list | None,
     runas: str,
     display_runas: str,
-    resolved_username: Optional[str],
-) -> Optional[str]:
+    resolved_username: str | None,
+) -> str | None:
     """Find decrypted password matching the runas user."""
     if not decrypted_creds:
         return None
@@ -664,4 +675,118 @@ def _find_decrypted_password(
     # Use display_runas as primary (may have resolved name), runas as fallback
     primary_username = display_runas if display_runas else runas
     return find_password_for_user(primary_username, decrypted_creds, resolved_username)
+
+
+def format_service_block(
+    kind: str,
+    service_name: str,
+    display_name: str | None = None,
+    start_name: str | None = None,
+    binary_path: str | None = None,
+    start_type: str | None = None,
+    state: str | None = None,
+    is_gmsa: bool = False,
+    hostname: str | None = None,
+    reason: str | None = None,
+    password_analysis: str | None = None,
+    decrypted_password: str | None = None,
+    resolved_runas: str | None = None,
+    credential_guard: bool | None = None,
+) -> list[str]:
+    """
+    Format a Windows service finding for rich console output.
+
+    Returns a list of output lines (for compatibility with the task
+    format_block pattern used by process_target).
+    """
+    # Build row tuples for print_service_table
+    rows: list[tuple] = []
+
+    if display_name:
+        rows.append(("Display Name", display_name))
+    if start_name:
+        account_display = start_name
+        if resolved_runas and resolved_runas != start_name:
+            account_display = f"{resolved_runas} (SID: {start_name})"
+        if is_gmsa:
+            account_display += " \\[gMSA]"
+        rows.append(("Run As", account_display))
+    if binary_path:
+        rows.append(("Binary Path", binary_path))
+    if start_type:
+        rows.append(("Start Type", start_type))
+    if state:
+        rows.append(("State", state))
+    if reason:
+        rows.append(("Reason", reason))
+    if password_analysis:
+        rows.append(("Pwd Analysis", password_analysis))
+    if decrypted_password:
+        rows.append(("Decrypted Pwd", decrypted_password))
+    if credential_guard is True:
+        rows.append(("Cred Guard", "DETECTED - LSA extraction may fail"))
+
+    # Use the same table renderer as tasks
+    print_service_table(kind, service_name, rows, hostname=hostname)
+
+    # Return a summary line for the text output stream
+    tag = f"[{kind} SERVICE]" if kind in ("TIER-0", "PRIV") else "[SERVICE]"
+    account = start_name or "?"
+    if is_gmsa:
+        account += " [gMSA]"
+    line = f"\n{tag} {hostname or ''} - {service_name} (Run As: {account})"
+    return [line]
+
+
+def print_service_table(
+    kind: str,
+    service_name: str,
+    rows: list[tuple],
+    hostname: str | None = None,
+) -> None:
+    """Print a service finding as a Rich table with colored borders."""
+    if not (log_utils._VERBOSE or log_utils._DEBUG):
+        return
+
+    # Select colors based on classification — always include SERVICE in the tag
+    if kind == "TIER-0":
+        header_style = COLORS["tier0_header"]
+        border_style = COLORS["tier0_border"]
+        tag = "[TIER-0 SERVICE]"
+    elif kind == "PRIV":
+        header_style = COLORS["priv_header"]
+        border_style = COLORS["priv_border"]
+        tag = "[PRIV SERVICE]"
+    else:
+        header_style = COLORS["service_header"]
+        border_style = COLORS["service_border"]
+        tag = "[SERVICE]"
+
+    title = f"[{header_style}]{tag}[/] {hostname} - {service_name}" if hostname else f"[{header_style}]{tag}[/] {service_name}"
+
+    table = Table(
+        title=title,
+        title_style=header_style,
+        border_style=border_style,
+        show_header=False,
+        expand=False,
+        padding=(0, 1),
+    )
+
+    table.add_column("Field", style=COLORS["label"], width=18)
+    table.add_column("Value", style=COLORS["value"])
+
+    for label, value in rows:
+        value_style = COLORS["value"]
+        if label == "Decrypted Pwd" and value:
+            value_style = COLORS["password"]
+        elif label == "Pwd Analysis":
+            if "GOOD" in value.upper():
+                value_style = COLORS["success"]
+            elif "BAD" in value.upper():
+                value_style = COLORS["warning"]
+        table.add_row(f"[{COLORS['label']}]{label}[/]", f"[{value_style}]{value}[/]")
+
+    console.print()
+    console.print(table)
 

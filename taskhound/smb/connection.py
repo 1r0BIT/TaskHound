@@ -7,7 +7,6 @@
 # This is horribly vibe-y but it works. Feel free to PR.
 
 import socket
-from typing import Optional, Tuple
 
 from impacket.smbconnection import SMBConnection
 
@@ -44,11 +43,11 @@ def smb_connect(
     target: str,
     domain: str,
     username: str,
-    password: Optional[str] = None,
+    password: str | None = None,
     kerberos: bool = False,
-    dc_ip: Optional[str] = None,
+    dc_ip: str | None = None,
     timeout: int = 60,
-    aes_key: Optional[str] = None,
+    aes_key: str | None = None,
 ) -> SMBConnection:
     # Create and authenticate an SMBConnection to `target`.
     #
@@ -108,10 +107,10 @@ def smb_login(
     smb: SMBConnection,
     domain: str,
     username: str,
-    password: Optional[str] = None,
+    password: str | None = None,
     kerberos: bool = False,
-    dc_ip: Optional[str] = None,
-    aes_key: Optional[str] = None,
+    dc_ip: str | None = None,
+    aes_key: str | None = None,
 ) -> None:
     """
     Authenticate an existing SMBConnection.
@@ -155,12 +154,12 @@ def smb_connect_with_laps(
     laps_cache,  # LAPSCache from laps.py
     fallback_domain: str,
     fallback_username: str,
-    fallback_password: Optional[str] = None,
-    fallback_hashes: Optional[str] = None,
+    fallback_password: str | None = None,
+    fallback_hashes: str | None = None,
     fallback_kerberos: bool = False,
-    dc_ip: Optional[str] = None,
+    dc_ip: str | None = None,
     timeout: int = 60,
-) -> Tuple[SMBConnection, str, Optional[str], bool]:
+) -> tuple[SMBConnection, str, str | None, bool]:
     """
     Connect to target using LAPS credentials if available.
 
@@ -230,13 +229,13 @@ def smb_connect_with_laps(
 
 def get_server_sid(
     smb: SMBConnection,
-    dc_ip: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    dc_ip: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
     hv_loader=None,
-) -> Optional[str]:
+) -> str | None:
     """
     Get the server's machine account SID using a multi-tier fallback chain.
 
@@ -300,7 +299,7 @@ def get_server_sid(
         return None
 
 
-def get_server_fqdn(smb: SMBConnection, target_ip: Optional[str] = None, dc_ip: Optional[str] = None, dns_tcp: bool = False) -> str:
+def get_server_fqdn(smb: SMBConnection, target_ip: str | None = None, dc_ip: str | None = None, dns_tcp: bool = False) -> str:
     """
     Extract the server's FQDN from an established SMB connection.
 
@@ -365,7 +364,7 @@ def get_server_fqdn(smb: SMBConnection, target_ip: Optional[str] = None, dc_ip: 
     return "UNKNOWN_HOST"
 
 
-def _dns_ptr_lookup(ip: str, nameserver: Optional[str] = None, use_tcp: bool = False) -> Optional[str]:
+def _dns_ptr_lookup(ip: str, nameserver: str | None = None, use_tcp: bool = False) -> str | None:
     """
     Perform DNS PTR lookup to resolve IP to hostname.
 
@@ -405,7 +404,7 @@ def _dns_ptr_lookup(ip: str, nameserver: Optional[str] = None, use_tcp: bool = F
             except ImportError:
                 # dnspython not available, fall through to socket method
                 pass
-            except (OSError, socket.timeout):
+            except (TimeoutError, OSError):
                 # DNS query failed, fall through to socket method
                 pass
 

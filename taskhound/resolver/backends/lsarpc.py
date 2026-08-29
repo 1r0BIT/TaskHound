@@ -2,12 +2,11 @@
 #
 # Resolution via LSARPC over SMB to target machine or Domain Controller.
 
-from typing import Optional
 
 from ...utils.logging import debug, info
 
 
-def resolve_sid_via_smb(sid: str, smb_connection) -> Optional[str]:
+def resolve_sid_via_smb(sid: str, smb_connection) -> str | None:
     """
     Resolve SID to username using LSARPC over an existing SMB connection.
 
@@ -89,11 +88,11 @@ def resolve_sid_via_dc_lsarpc(
     dc_ip: str,
     domain: str,
     username: str,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    aes_key: Optional[str] = None,
-) -> Optional[str]:
+    aes_key: str | None = None,
+) -> str | None:
     """
     Resolve SID to username using LSARPC directly to the Domain Controller.
 

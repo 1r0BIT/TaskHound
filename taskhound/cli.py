@@ -2,7 +2,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from rich.panel import Panel
 from rich.prompt import Confirm
@@ -24,7 +24,6 @@ from .laps import (
     print_laps_summary,
 )
 from .opengraph import generate_opengraph_files
-from .output.bloodhound import upload_opengraph_to_bloodhound
 from .output.summary import print_decrypted_credentials, print_summary_table
 from .output.writer import write_csv, write_json, write_rich_plain
 from .parsers.highvalue import HighValueLoader
@@ -39,14 +38,15 @@ from .utils.console import (
 from .utils.date_parser import parse_timestamp
 from .utils.helpers import normalize_targets
 from .utils.logging import debug, good, info, set_verbosity, status, warn
-from .utils.network import verify_ldap_connection
+from .utils.network import preflight_credential_check, verify_ldap_connection
 
 
 def _handle_opengraph(
     args: Any,
-    all_rows: List[Dict],
-    opengraph_json_path: Optional[str],
+    all_rows: list[dict],
+    opengraph_json_path: str | None,
     opengraph_json_overwrites: bool,
+    service_rows: list | None = None,
 ) -> None:
     """Handle BloodHound OpenGraph generation and upload."""
     from .config_model import BloodHoundConfig
@@ -55,9 +55,9 @@ def _handle_opengraph(
     bh_config = BloodHoundConfig.from_args_and_config(args)
 
     # Build LDAP config for fallback resolution
-    ldap_domain = getattr(args, "ldap_domain", None) or args.domain
-    ldap_user = getattr(args, "ldap_user", None) or args.username
-    ldap_password = getattr(args, "ldap_password", None) or args.password
+    ldap_domain = args.ldap_domain or args.domain
+    ldap_user = args.ldap_user or args.username
+    ldap_password = args.ldap_password or args.password
 
     ldap_config = None
     if ldap_domain and ldap_user and (ldap_password or args.hashes):
@@ -115,112 +115,150 @@ def _handle_opengraph(
     # OpenGraph files go to {output_dir}/opengraph/
     opengraph_output_dir = os.path.join(args.output_dir, "opengraph")
 
-    # Generate OpenGraph files
-    generate_opengraph_files(
+    # Generate OpenGraph files for tasks
+    task_og_path = generate_opengraph_files(
         output_dir=opengraph_output_dir,
         tasks=list(all_rows),
         bh_connector=bh_connector,
         ldap_config=ldap_config,
-        allow_orphans=getattr(args, "bh_allow_orphans", False),
+        allow_orphans=args.bh_allow_orphans,
         computer_sids=computer_sids if computer_sids else None,
         netbios_name=netbios_name,
     )
 
-    # Upload to BloodHound if not disabled and we have credentials
-    _upload_opengraph(bh_config, None, opengraph_json_path)
+    # Generate separate OpenGraph files for services (distinct source_kind)
+    svc_og_path = None
+    if service_rows:
+        from .opengraph.writer import generate_service_opengraph_files
+
+        # Also extract computer SIDs from service rows
+        for row in service_rows:
+            row_dict = row.to_dict() if hasattr(row, "to_dict") else row
+            host = (row_dict.get("host") or "").upper()
+            sid = row_dict.get("computer_sid")
+            if host and sid:
+                computer_sids[host] = sid
+
+        svc_og_path = generate_service_opengraph_files(
+            output_dir=opengraph_output_dir,
+            services=list(service_rows),
+            bh_connector=bh_connector,
+            ldap_config=ldap_config,
+            allow_orphans=args.bh_allow_orphans,
+            computer_sids=computer_sids if computer_sids else None,
+            netbios_name=netbios_name,
+        )
+
+    # Upload to BloodHound — single auth session for all files
+    og_files = [f for f in [task_og_path, svc_og_path] if f]
+    _upload_opengraph_batch(bh_config, og_files, opengraph_json_path)
 
 
-def _upload_opengraph(bh_config: Any, opengraph_file: Optional[str], json_data_path: Optional[str] = None) -> None:
-    """Upload OpenGraph data to BloodHound if configured."""
+def _upload_opengraph_batch(
+    bh_config: Any,
+    opengraph_files: list,
+    json_data_path: str | None = None,
+) -> None:
+    """Upload one or more OpenGraph files to BloodHound with a single auth session."""
     import json
 
-    # Read graph stats first
-    node_count = 0
-    edge_count = 0
-    if opengraph_file:
+    from .output.bloodhound import upload_opengraph_batch
+
+    # Gather total stats across all files
+    total_nodes = 0
+    total_edges = 0
+    uploadable = []
+    for og_file in opengraph_files:
         try:
-            with open(opengraph_file) as f:
+            with open(og_file) as f:
                 graph_data = json.load(f)
-            inner_graph = graph_data.get("graph", graph_data)
-            node_count = len(inner_graph.get("nodes", []))
-            edge_count = len(inner_graph.get("edges", []))
+            inner = graph_data.get("graph", graph_data)
+            n = len(inner.get("nodes", []))
+            e = len(inner.get("edges", []))
+            total_nodes += n
+            total_edges += e
+            if n > 0 or e > 0:
+                uploadable.append(og_file)
         except (OSError, json.JSONDecodeError):
-            pass
+            uploadable.append(og_file)  # try anyway
 
-    # Handle no-upload case
-    if bh_config.bh_no_upload:
+    if not uploadable:
+        if opengraph_files:
+            warn(
+                "Skipping BloodHound upload - graph is empty (0 nodes, 0 edges). "
+                "No privileged tasks/services with resolvable principals were found, "
+                "or all edges were skipped (try --bh-allow-orphans)."
+            )
         print_opengraph_section(
-            json_path=json_data_path or opengraph_file or "",
-            uploaded=False,
-            node_count=node_count,
-            edge_count=edge_count,
-        )
-        return
-
-    if not bh_config.has_credentials():
-        warn("No BloodHound credentials available - skipping upload")
-        print_opengraph_section(
-            json_path=json_data_path or opengraph_file or "",
-            uploaded=False,
-            node_count=node_count,
-            edge_count=edge_count,
-        )
-        return
-
-    if not opengraph_file:
-        warn("No OpenGraph file generated - skipping upload")
-        return
-
-    if node_count == 0 and edge_count == 0:
-        info("Skipping BloodHound upload - no data (0 nodes, 0 edges)")
-        print_opengraph_section(
-            json_path=json_data_path or opengraph_file or "",
+            json_path=json_data_path or (opengraph_files[0] if opengraph_files else ""),
             uploaded=False,
             node_count=0,
             edge_count=0,
         )
         return
 
-    success = upload_opengraph_to_bloodhound(
-        opengraph_file=opengraph_file,
+    # Handle no-upload case
+    if bh_config.bh_no_upload:
+        print_opengraph_section(
+            json_path=json_data_path or uploadable[0],
+            uploaded=False,
+            node_count=total_nodes,
+            edge_count=total_edges,
+        )
+        return
+
+    if not bh_config.has_credentials():
+        warn("No BloodHound credentials available - skipping upload")
+        print_opengraph_section(
+            json_path=json_data_path or uploadable[0],
+            uploaded=False,
+            node_count=total_nodes,
+            edge_count=total_edges,
+        )
+        return
+
+    # Single auth, single schema install, upload all files
+    results = upload_opengraph_batch(
+        files=uploadable,
         bloodhound_url=bh_config.bh_connector,
         username=bh_config.bh_username,
         password=bh_config.bh_password,
         api_key=bh_config.bh_api_key,
         api_key_id=bh_config.bh_api_key_id,
-        set_icon=True,
-        force_icon=bh_config.bh_force_icon,
-        icon_name=bh_config.bh_icon,
-        icon_color=bh_config.bh_color,
     )
 
+    all_success = all(results)
     print_opengraph_section(
-        json_path=json_data_path or opengraph_file or "",
-        uploaded=success,
-        node_count=node_count,
-        edge_count=edge_count,
+        json_path=json_data_path or uploadable[0],
+        uploaded=all_success,
+        node_count=total_nodes,
+        edge_count=total_edges,
     )
 
-    if not success:
+    if not all_success:
         warn("OpenGraph upload failed - files are still saved locally")
         warn("You can upload manually via BloodHound UI")
 
 
 def _handle_exports(
     args: Any,
-    all_rows: List[Dict],
+    all_rows: list[dict],
     hv_loaded: bool,
-    laps_cache: Optional[LAPSCache],
+    laps_cache: LAPSCache | None,
     laps_successes: int,
-    laps_failures: List[LAPSFailure],
+    laps_failures: list[LAPSFailure],
+    service_rows: list | None = None,
 ) -> tuple:
     """Handle all export formats and summary output.
 
     Returns:
         Tuple of (opengraph_json_path, opengraph_json_overwrites) for OpenGraph handling.
     """
+    from .output.writer import write_combined_json, write_service_csv
+
     output_dir = args.output_dir
     output_formats = args.output_formats
+    service_rows = service_rows or []
 
     # Track if we need to auto-generate JSON for OpenGraph
     opengraph_json_path = None
@@ -237,7 +275,8 @@ def _handle_exports(
             write_json(opengraph_json_path, all_rows, silent=True)
 
     # Write outputs based on --output formats
-    if all_rows:
+    has_data = all_rows or service_rows
+    if has_data:
         # Plain text output
         if "plain" in output_formats:
             plain_dir = os.path.join(output_dir, "plain")
@@ -247,15 +286,23 @@ def _handle_exports(
         if "json" in output_formats:
             json_dir = os.path.join(output_dir, "json")
             os.makedirs(json_dir, exist_ok=True)
-            json_path = os.path.join(json_dir, "taskhound_results.json")
-            write_json(json_path, all_rows)
+            if service_rows:
+                json_path = os.path.join(json_dir, "taskhound_results.json")
+                write_combined_json(json_path, all_rows, service_rows)
+            elif all_rows:
+                json_path = os.path.join(json_dir, "taskhound_results.json")
+                write_json(json_path, all_rows)
 
         # CSV output
         if "csv" in output_formats:
             csv_dir = os.path.join(output_dir, "csv")
             os.makedirs(csv_dir, exist_ok=True)
-            csv_path = os.path.join(csv_dir, "taskhound_results.csv")
-            write_csv(csv_path, all_rows)
+            if all_rows:
+                csv_path = os.path.join(csv_dir, "taskhound_tasks.csv")
+                write_csv(csv_path, all_rows)
+            if service_rows:
+                svc_csv_path = os.path.join(csv_dir, "taskhound_services.csv")
+                write_service_csv(svc_csv_path, service_rows)
 
         # HTML report output
         if "html" in output_formats:
@@ -263,22 +310,26 @@ def _handle_exports(
             html_dir = os.path.join(output_dir, "html")
             os.makedirs(html_dir, exist_ok=True)
             html_path = os.path.join(html_dir, "taskhound_report.html")
-            generate_html_report(all_rows, html_path)
+            generate_html_report(all_rows, html_path, service_rows=service_rows or None, domain=args.domain)
             print_audit_report_section(html_path)
 
     # Print decrypted credentials summary
-    print_decrypted_credentials(all_rows)
+    print_decrypted_credentials(all_rows, service_rows=service_rows)
 
     # Print summary table
     if not args.no_summary:
         has_tier0_detection = hv_loaded or args.ldap_tier0
-        print_summary_table(all_rows, has_tier0_detection=has_tier0_detection)
+        print_summary_table(
+            all_rows,
+            has_tier0_detection=has_tier0_detection,
+            service_rows=service_rows or None,
+        )
 
         if laps_cache is not None:
             print_laps_summary(laps_cache, laps_successes, laps_failures)
 
     # Print backup section (if backup was enabled and we have backups)
-    if args.backup:
+    if args.backup and not args.services_only:
         backup_dir = os.path.join(output_dir, "raw_backups")
         if os.path.exists(backup_dir):
             print_backup_section(backup_dir)
@@ -286,7 +337,7 @@ def _handle_exports(
     return opengraph_json_path, opengraph_json_overwrites
 
 
-def _auto_discover_targets(args: Any, bh_config: Any) -> List[str]:
+def _auto_discover_targets(args: Any, bh_config: Any) -> list[str]:
     """
     Auto-discover computer targets from BloodHound or LDAP.
 
@@ -305,10 +356,10 @@ def _auto_discover_targets(args: Any, bh_config: Any) -> List[str]:
         List of computer hostnames (FQDNs)
     """
 
-    include_dcs = getattr(args, "include_dcs", False)
-    include_disabled = getattr(args, "include_disabled", False)
-    stale_threshold = getattr(args, "stale_threshold", 60)
-    ldap_filter = getattr(args, "ldap_filter", None)
+    include_dcs = args.include_dcs
+    include_disabled = args.include_disabled
+    stale_threshold = args.stale_threshold
+    ldap_filter = args.ldap_filter
 
     # Resolve filter presets
     ldap_filter_raw = None
@@ -389,9 +440,9 @@ def _enumerate_from_bloodhound(
     include_dcs: bool,
     include_disabled: bool,
     stale_threshold: int,
-    filter_preset: Optional[str],
-    ldap_filter_raw: Optional[str],
-) -> tuple[List[str], Optional[str]]:
+    filter_preset: str | None,
+    ldap_filter_raw: str | None,
+) -> tuple[list[str], str | None]:
     """
     Enumerate computers from BloodHound CE.
 
@@ -497,8 +548,8 @@ def _enumerate_from_ldap(
     include_dcs: bool,
     include_disabled: bool,
     stale_threshold: int,
-    ldap_filter_raw: Optional[str],
-) -> tuple[List[str], Optional[str]]:
+    ldap_filter_raw: str | None,
+) -> tuple[list[str], str | None]:
     """
     Enumerate computers from LDAP with filtering.
 
@@ -511,7 +562,7 @@ def _enumerate_from_ldap(
 
     info("Auto-targets: Querying LDAP...")
 
-    kerberos_enabled = args.kerberos or getattr(args, "aes_key", None) is not None
+    kerberos_enabled = args.kerberos or args.aes_key is not None
 
     # Use LDAP-specific credentials if provided, otherwise fall back to main auth
     effective_domain = args.ldap_domain if args.ldap_domain else args.domain
@@ -526,9 +577,9 @@ def _enumerate_from_ldap(
         password=effective_password,
         hashes=effective_hashes,
         kerberos=kerberos_enabled,
-        aes_key=getattr(args, "aes_key", None),
+        aes_key=args.aes_key,
         ldap_filter=ldap_filter_raw,
-        use_tcp=getattr(args, "dns_tcp", False),
+        use_tcp=args.dns_tcp,
         include_dcs=include_dcs,
         include_disabled=include_disabled,
         stale_threshold=stale_threshold,
@@ -542,24 +593,67 @@ def main():
     ap = build_parser()
     args = ap.parse_args()
 
+    # Enable debug log recording if --debug-log is set
+    debug_log_path = None
+    if args.debug_log:
+        import atexit
+        from datetime import datetime as dt
+
+        from .utils.console import console as _console
+
+        # Enable recording on the global console
+        _console.record = True
+
+        # Build timestamped filename in the target directory
+        log_dir = args.debug_log
+        os.makedirs(log_dir, exist_ok=True)
+        timestamp = dt.now().strftime("%Y%m%d_%H%M%S")
+        debug_log_path = os.path.join(log_dir, f"{timestamp}_taskhound_debug.log")
+
+        # Force verbose + debug when logging
+        args.verbose = True
+        args.debug = True
+
+        def _save_debug_log():
+            try:
+                text = _console.export_text()
+                with open(debug_log_path, "w", encoding="utf-8") as f:
+                    f.write(text)
+                _console.record = False
+                print(f"[*] Debug log saved to: {debug_log_path}")
+            except Exception as e:
+                print(f"[!] Failed to save debug log: {e}")
+
+        atexit.register(_save_debug_log)
+
     # Set verbosity early
     set_verbosity(args.verbose, args.debug)
 
     validate_args(args)
 
-    # Adult check for noisy operations (Credential Guard detection)
-    if args.credguard_detect and not getattr(args, 'no_confirm', False):
-        warning_text = """[bold yellow]WARNING: Credential Guard detection is enabled (default)[/]
+    # Adult check for noisy operations (CredGuard + LSA extraction)
+    has_noisy_ops = (args.credguard_detect or (args.loot and not args.no_lsa))
+    if has_noisy_ops and not args.no_confirm:
+        noisy_items = []
+        if args.loot and not args.no_lsa:
+            noisy_items.append("  [dim]•[/] [bold]LSA secret extraction[/] via Remote Registry ([cyan]\\pipe\\winreg[/]) — reads SECURITY hive keys")
+        if args.credguard_detect:
+            noisy_items.append("  [dim]•[/] Credential Guard detection via Remote Registry ([cyan]\\pipe\\winreg[/])")
+        noisy_items.append("  [dim]•[/] Starting/stopping the [cyan]RemoteRegistry[/] service on targets")
 
-This operation involves:
-  [dim]•[/] Starting/stopping the [cyan]RemoteRegistry[/] service on targets
-  [dim]•[/] Reading registry keys via RPC ([cyan]\\pipe\\winreg[/])
+        noisy_list = "\n".join(noisy_items)
+        warning_text = f"""[bold yellow]WARNING: Noisy operations are enabled by default[/]
 
-[bold red]This is NOISY(!) and may trigger EDR/SOC alerts![/]
+This scan involves:
+{noisy_list}
 
-[dim]To disable this check:[/]
+[bold red]This WILL trigger EDR/SOC alerts on monitored hosts![/]
+
+[dim]To reduce noise:[/]
+  [green]--no-lsa[/]        Skip LSA secret extraction (most noisy)
   [green]--no-credguard[/]  Skip Credential Guard detection
-  [green]--opsec[/]         Disable all noisy operations
+  [green]--no-loot[/]       Skip all credential extraction
+  [green]--opsec[/]         Disable all noisy operations at once
 
 [dim]To skip this prompt in the future:[/]
   [green]--no-confirm[/]    Accept warnings automatically"""
@@ -574,6 +668,32 @@ This operation involves:
         except (KeyboardInterrupt, EOFError):
             console.print("\n[blue][*][/] Aborted.")
             sys.exit(0)
+
+    # Pre-flight credential validation (online mode only)
+    # Validates creds with a single auth attempt BEFORE scanning to prevent
+    # account lockout from repeated bad-password attempts across N targets.
+    if not args.offline and not args.offline_disk and not args.no_preflight and hasattr(args, "username") and args.username:
+        # Build a quick target list for fallback if no --dc-ip
+        quick_targets = []
+        if args.target:
+            quick_targets = [t.strip() for t in args.target.split(",") if t.strip()]
+
+        preflight_credential_check(
+            domain=args.domain,
+            username=args.username,
+            password=args.password,
+            hashes=args.hashes,
+            kerberos=args.kerberos or args.aes_key is not None,
+            dc_ip=args.dc_ip,
+            timeout=args.timeout,
+            aes_key=args.aes_key,
+            ldap_domain=args.ldap_domain,
+            ldap_user=args.ldap_user,
+            ldap_password=args.ldap_password,
+            ldap_hashes=args.ldap_hashes,
+            no_ldap=args.no_ldap,
+            targets=quick_targets,
+        )
 
     # Initialize Cache
     cache_file = Path(args.cache_file) if args.cache_file else None
@@ -714,11 +834,11 @@ This operation involves:
         )
 
     # Initialize LAPS if requested (online mode only)
-    laps_cache: Optional[LAPSCache] = None
-    laps_failures: List[LAPSFailure] = []
+    laps_cache: LAPSCache | None = None
+    laps_failures: list[LAPSFailure] = []
     laps_successes: int = 0
 
-    if getattr(args, "laps", False) and not args.offline:
+    if args.laps and not args.offline:
         info("LAPS mode enabled - querying Active Directory for LAPS passwords...")
         try:
             # Use LDAP-specific credentials if provided, otherwise fall back to main auth
@@ -734,7 +854,7 @@ This operation involves:
                 password=laps_password,
                 hashes=laps_hashes,
                 kerberos=args.kerberos,
-                laps_user_override=getattr(args, "laps_user", None),
+                laps_user_override=args.laps_user,
                 use_cache=not args.no_cache,
             )
             stats = laps_cache.get_statistics()
@@ -758,9 +878,10 @@ This operation involves:
             sys.exit(1)
 
     # Process based on mode
-    all_rows: List[Dict] = []
+    all_rows: list[dict] = []
+    all_service_rows: list = []
 
-    if getattr(args, "offline_disk", None):
+    if args.offline_disk:
         # Offline disk mode: extract from mounted Windows filesystem, then process
         from .engine.disk_loader import extract_dpapi_key_from_registry, find_windows_root, load_from_disk
 
@@ -770,7 +891,7 @@ This operation involves:
         hostname, backup_path = load_from_disk(
             mount_path=args.offline_disk,
             backup_dir=disk_backup_dir,
-            hostname=getattr(args, "disk_hostname", None),
+            hostname=args.disk_hostname,
             no_backup=args.no_backup,
             verbose=args.verbose,
             debug=args.debug,
@@ -804,6 +925,7 @@ This operation involves:
             no_ldap=args.no_ldap,
             dpapi_key=dpapi_key,
             concise=not args.verbose,
+            match_bare_runas=args.match_bare_runas,
         )
 
     elif args.offline:
@@ -818,6 +940,7 @@ This operation involves:
             no_ldap=args.no_ldap,
             dpapi_key=args.dpapi_key,
             concise=not args.verbose,
+            match_bare_runas=args.match_bare_runas,
         )
     else:
         # Online mode: process targets via SMB
@@ -829,7 +952,7 @@ This operation involves:
         targets = []
 
         # Auto-discover targets if requested
-        if getattr(args, "auto_targets", False):
+        if args.auto_targets:
             targets.extend(_auto_discover_targets(args, bh_config))
 
         # Add explicit targets from CLI
@@ -868,27 +991,30 @@ This operation involves:
 
         # Build AuthContext from args
         # AES key implies Kerberos authentication
-        kerberos_enabled = args.kerberos or getattr(args, "aes_key", None) is not None
+        kerberos_enabled = args.kerberos or args.aes_key is not None
         auth = AuthContext(
             username=args.username,
             password=args.password,
             domain=args.domain,
             hashes=args.hashes,
-            aes_key=getattr(args, "aes_key", None),
+            aes_key=args.aes_key,
             kerberos=kerberos_enabled,
             dc_ip=args.dc_ip,
             timeout=args.timeout,
-            dns_tcp=getattr(args, "dns_tcp", False),
-            nameserver=getattr(args, "nameserver", None),
+            dns_tcp=args.dns_tcp,
+            nameserver=args.nameserver,
             ldap_domain=args.ldap_domain,
             ldap_user=args.ldap_user,
             ldap_password=args.ldap_password,
             ldap_hashes=args.ldap_hashes,
-            gc_server=getattr(args, "gc_server", None),
+            gc_server=args.gc_server,
         )
 
         # Compute backup directory path for online scanning
         online_backup_dir = os.path.join(args.output_dir, "raw_backups") if args.backup else None
+
+        # Track service results separately from task results
+        all_service_rows: list = []
 
         # Common kwargs for process_target
         process_kwargs = {
@@ -901,7 +1027,7 @@ This operation involves:
             "backup_dir": online_backup_dir,
             "credguard_detect": args.credguard_detect,
             "no_ldap": args.no_ldap,
-            "no_rpc": getattr(args, 'no_rpc', False),
+            "no_rpc": args.no_rpc,
             "loot": args.loot,
             "dpapi_key": args.dpapi_key,
             "bh_connector": bh_connector,
@@ -910,16 +1036,21 @@ This operation involves:
             "laps_cache": laps_cache,
             "validate_creds": args.validate_creds,
             "ldap_tier0": args.ldap_tier0,
+            "match_bare_runas": args.match_bare_runas,
+            "no_lsa": args.no_lsa,
+            "services": args.services,
+            "services_only": args.services_only,
+            "all_service_rows": all_service_rows,
         }
 
         # Parallel mode (--threads > 1) or sequential with jitter
-        if args.threads > 1 or getattr(args, 'jitter', None):
+        if args.threads > 1 or args.jitter:
             async_config = AsyncConfig(
                 workers=args.threads,
                 rate_limit=args.rate_limit,
                 timeout=args.timeout,
                 show_progress=True,
-                jitter=getattr(args, 'jitter', None),
+                jitter=args.jitter,
             )
             async_engine = AsyncTaskHound(async_config)
 
@@ -928,7 +1059,8 @@ This operation involves:
             _ = (time.perf_counter() - start_time) * 1000  # elapsed_ms for future use
 
             # Aggregate results
-            all_rows, laps_failures, laps_successes = aggregate_results(results)
+            all_rows, agg_service_rows, laps_failures, laps_successes = aggregate_results(results)
+            all_service_rows.extend(agg_service_rows)
 
         else:
             # Sequential mode (default, --threads 1)
@@ -947,9 +1079,10 @@ This operation involves:
 
     # Handle exports and summary
     opengraph_json_path, opengraph_json_overwrites = _handle_exports(
-        args, all_rows, hv_loaded, laps_cache, laps_successes, laps_failures
+        args, all_rows, hv_loaded, laps_cache, laps_successes, laps_failures,
+        service_rows=all_service_rows,
     )
 
     # BloodHound OpenGraph Integration
     if args.bh_opengraph:
-        _handle_opengraph(args, all_rows, opengraph_json_path, opengraph_json_overwrites)
+        _handle_opengraph(args, all_rows, opengraph_json_path, opengraph_json_overwrites, service_rows=all_service_rows)

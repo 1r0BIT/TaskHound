@@ -11,7 +11,6 @@
 
 import threading
 from contextlib import contextmanager
-from typing import Optional
 
 from rich.console import Console
 from rich.live import Live
@@ -34,9 +33,9 @@ console = Console(highlight=False)
 _output_lock = threading.RLock()
 
 # Global progress context for async scanning
-_progress: Optional[Progress] = None
-_progress_task_id: Optional[int] = None
-_live: Optional[Live] = None
+_progress: Progress | None = None
+_progress_task_id: int | None = None
+_live: Live | None = None
 
 
 # =============================================================================
@@ -181,7 +180,7 @@ def scan_progress(total: int, description: str = "Scanning"):
     # Track statistics
     stats = {"success": 0, "failed": 0}
 
-    def update(item: str, success: bool = True, error_msg: Optional[str] = None):
+    def update(item: str, success: bool = True, error_msg: str | None = None):
         """Update progress with current item status."""
         if success:
             stats["success"] += 1
@@ -281,6 +280,10 @@ def print_summary_table(
     total_tier0 = 0
     total_priv = 0
     total_normal = 0
+    total_services = 0
+
+    # Check if any host has service data
+    has_services = any(stats.get("services", 0) > 0 for stats in host_stats.values())
 
     # Print successful hosts table
     if success_hosts:
@@ -295,6 +298,8 @@ def print_summary_table(
         table.add_column("Tier-0", justify="center", style="red")
         table.add_column("Privileged", justify="center", style="yellow")
         table.add_column("Normal", justify="center", style="green")
+        if has_services:
+            table.add_column("Services", justify="center", style="cyan")
 
         for host in sorted(success_hosts.keys()):
             stats = success_hosts[host]
@@ -305,26 +310,34 @@ def print_summary_table(
             total_tier0 += stats["tier0"]
             total_priv += stats["privileged"]
             total_normal += stats["normal"]
+            total_services += stats.get("services", 0)
 
-            table.add_row(host, tier0, priv, normal)
+            row_values = [host, tier0, priv, normal]
+            if has_services:
+                row_values.append(str(stats.get("services", 0)))
+            table.add_row(*row_values)
 
         # Add totals row if multiple hosts
         if len(success_hosts) > 1:
             table.add_section()
             tier0_total = str(total_tier0) if has_hv else "N/A"
             priv_total = str(total_priv) if has_hv else "N/A"
-            table.add_row(
+            row_values = [
                 "[bold]TOTAL[/]",
                 f"[bold]{tier0_total}[/]",
                 f"[bold]{priv_total}[/]",
                 f"[bold]{total_normal}[/]",
-            )
+            ]
+            if has_services:
+                row_values.append(f"[bold]{total_services}[/]")
+            table.add_row(*row_values)
 
+        panel_title = "[bold]TASK & SERVICE SUMMARY[/]" if has_services else "[bold]TASK SUMMARY[/]"
         console.print()
         console.print(
             Panel(
                 table,
-                title="[bold]TASK SUMMARY[/]",
+                title=panel_title,
                 border_style="cyan",
             )
         )
@@ -376,6 +389,10 @@ def print_scan_complete(
     total_time: float,
     avg_time_ms: float,
     skipped: int = 0,
+    task_count: int = 0,
+    service_count: int = 0,
+    tier0_count: int = 0,
+    creds_count: int = 0,
 ):
     """Print scan completion summary."""
     console.print()
@@ -393,6 +410,19 @@ def print_scan_complete(
         f"  [dim]Total time: {total_time:.2f}s[/]",
         f"  [dim]Avg per target: {avg_time_ms:.0f}ms[/]",
     ])
+
+    # Add scan statistics if available
+    if task_count or service_count:
+        stats_parts = []
+        if task_count:
+            stats_parts.append(f"{task_count} tasks")
+        if service_count:
+            stats_parts.append(f"{service_count} services")
+        content_lines.append(f"  [dim]Found: {', '.join(stats_parts)}[/]")
+    if tier0_count:
+        content_lines.append(f"  [bold red]  TIER-0: {tier0_count}[/]")
+    if creds_count:
+        content_lines.append(f"  [bold green]  Decrypted credentials: {creds_count}[/]")
 
     console.print(
         Panel(
@@ -412,7 +442,7 @@ def format_task_line(
     run_as: str,
     is_tier0: bool = False,
     is_privileged: bool = False,
-    command: Optional[str] = None,
+    command: str | None = None,
 ) -> str:
     """Format a single task line with colors."""
     if is_tier0:

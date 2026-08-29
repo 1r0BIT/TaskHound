@@ -32,7 +32,7 @@ class TestConciseOutput:
 
         # Check format: [KIND] RunAs | Path | What
         assert line.startswith("[TASK]")
-        assert f"{runas} | {rel_path} | {what}" in line
+        assert f"{runas} | MyTask | {what}" in line
 
     def test_concise_output_with_reason(self):
         """Verify that concise output includes the reason if provided."""

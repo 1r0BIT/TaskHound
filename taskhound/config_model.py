@@ -1,7 +1,6 @@
 """Configuration model for TaskHound BloodHound integration."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -20,21 +19,16 @@ class BloodHoundConfig:
     bh_no_upload: bool = False
 
     # BloodHound connection
-    bh_connector: Optional[str] = None
-    bh_username: Optional[str] = None
-    bh_password: Optional[str] = None
-    bh_api_key: Optional[str] = None  # API key for BHCE HMAC authentication
-    bh_api_key_id: Optional[str] = None  # API key ID for BHCE HMAC authentication
-    bh_type: Optional[str] = None  # 'bhce' or 'legacy'
-
-    # Icon configuration (icon is always set on upload, force_icon overrides existing)
-    bh_force_icon: bool = False
-    bh_icon: str = "clock"
-    bh_color: str = "#8B5CF6"
+    bh_connector: str | None = None
+    bh_username: str | None = None
+    bh_password: str | None = None
+    bh_api_key: str | None = None  # API key for BHCE HMAC authentication
+    bh_api_key_id: str | None = None  # API key ID for BHCE HMAC authentication
+    bh_type: str | None = None  # 'bhce' or 'legacy'
 
     # Live connection (legacy)
     bh_live: bool = False
-    bh_save: Optional[str] = None
+    bh_save: str | None = None
 
     @classmethod
     def from_args_and_config(cls, args):
@@ -62,10 +56,6 @@ class BloodHoundConfig:
             bh_password=args.bh_password,
             bh_api_key=args.bh_api_key,
             bh_api_key_id=args.bh_api_key_id,
-            # Icon (always set on upload, force_icon for overwrite)
-            bh_force_icon=args.bh_force_icon,
-            bh_icon=args.bh_icon,
-            bh_color=args.bh_color,
             # Live (legacy)
             bh_live=args.bh_live,
             bh_save=args.bh_save,

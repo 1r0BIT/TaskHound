@@ -4,12 +4,9 @@ BloodHound OpenGraph Upload Module
 Handles upload of OpenGraph files to BloodHound CE via API.
 """
 
-import contextlib
-import json
 import time
-from pathlib import Path
-from typing import Optional
 
+from ..opengraph.schema import EXTENSION_SCHEMA
 from ..utils.bh_auth import BloodHoundAuthenticator
 from ..utils.console import spinner
 from ..utils.logging import good, info, status, warn
@@ -108,66 +105,41 @@ def extract_host_from_connector(connector: str) -> str:
         return connector.split(":")[0]
 
 
-def find_model_json() -> Path:
+def _install_schema(authenticator: BloodHoundAuthenticator) -> bool:
+    """Install the OpenGraph extension schema (``PUT /api/v2/extensions``, idempotent upsert).
+
+    Declaring the schema is what makes TaskHound's edges traversable in BloodHound v9+
+    pathfinding (the ``is_traversable`` flags live in the schema, not the edge payload), and
+    must happen *before* the data upload — data ingested before the schema exists stays
+    generic until re-uploaded.
+
+    Returns False on pre-v9 servers (the endpoint 404s) or any error, so the caller falls
+    back to a generic, Cypher-only upload. ``request()`` returns None on transport/auth
+    failure and a real Response (incl. 4xx) otherwise.
     """
-    Find model.json in multiple possible locations.
-
-    Search order:
-    1. config/model.json (primary - new location)
-    2. ~/.config/taskhound/model.json (XDG standard - Linux/macOS)
-    3. ~/.taskhound/model.json (legacy location)
-    4. Current working directory (last resort with warning)
-
-    Returns:
-        Path to model.json
-
-    Raises:
-        FileNotFoundError: If model.json is not found in any location
-    """
-    search_paths = [
-        # 1. Project config directory (relative to this file or CWD)
-        Path(__file__).parent.parent.parent / "config" / "model.json",
-        Path.cwd() / "config" / "model.json",
-        # 2. User config directory (XDG standard for Linux/macOS)
-        Path.home() / ".config" / "taskhound" / "model.json",
-        # 3. Legacy home directory location
-        Path.home() / ".taskhound" / "model.json",
-        # 4. Current working directory (last resort)
-        Path.cwd() / "model.json",
-    ]
-
-    for path in search_paths:
-        if path.exists():
-            # Warn if using CWD (security concern)
-            if path == Path.cwd() / "model.json":
-                warn("WARNING: Using model.json from current directory")
-                warn("This can be a security risk - consider moving to config/model.json")
-            return path
-
-    # None found - provide helpful error message
-    raise FileNotFoundError(
-        "model.json not found. Searched locations:\n"
-        + "\n".join(f"  - {p}" for p in search_paths)
-        + "\n\nCreate config/model.json in your project directory or ~/.config/taskhound/model.json"
-    )
+    resp = authenticator.request("PUT", "/api/v2/extensions", EXTENSION_SCHEMA)
+    if resp is None:
+        return False
+    if resp.status_code in (200, 201):
+        return True
+    warn(f"Schema install failed: HTTP {resp.status_code} {resp.text[:200]}")
+    return False
 
 
 def upload_opengraph_to_bloodhound(
     opengraph_file: str,
     bloodhound_url: str,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    api_key: Optional[str] = None,
-    api_key_id: Optional[str] = None,
-    set_icon: bool = False,
-    force_icon: bool = False,
-    icon_name: str = "clock",
-    icon_color: str = "#8B5CF6",
+    username: str | None = None,
+    password: str | None = None,
+    api_key: str | None = None,
+    api_key_id: str | None = None,
 ) -> bool:
     """
     Upload OpenGraph file to BloodHound Community Edition.
 
     Supports automatic protocol fallback - if http:// fails, tries https:// and vice versa.
+    Installs the v9 extension schema (for traversable edges) before uploading; on pre-v9
+    servers that step is a no-op warning and the edges upload as generic/Cypher-only.
 
     Args:
         opengraph_file: Path to the OpenGraph JSON file (contains both nodes and edges)
@@ -176,10 +148,6 @@ def upload_opengraph_to_bloodhound(
         password: BloodHound password (not needed if api_key/api_key_id provided)
         api_key: BloodHound API key for HMAC authentication (requires api_key_id)
         api_key_id: BloodHound API key ID for HMAC authentication (requires api_key)
-        set_icon: Whether to set custom icon for ScheduledTask nodes
-        force_icon: Force icon update even if already exists (requires set_icon=True)
-        icon_name: Icon name (if set_icon=True)
-        icon_color: Icon color in hex format (if set_icon=True)
 
     Returns:
         True if upload succeeded, False otherwise
@@ -200,9 +168,11 @@ def upload_opengraph_to_bloodhound(
     if not authenticator:
         return False
 
-    # Set custom icon if requested
-    if set_icon:
-        _set_custom_icon(authenticator, icon_name, icon_color, force_icon)
+    # Install the extension schema first so edges ingest as traversable (BH v9+)
+    if _install_schema(authenticator):
+        good("Extension schema installed — TaskHound edges are traversable (BH v9+).")
+    else:
+        warn("Extension schema not installed (pre-v9?); edges will be generic/Cypher-only.")
 
     # Upload the OpenGraph file
     status("[*] Starting upload, be patient")
@@ -211,13 +181,52 @@ def upload_opengraph_to_bloodhound(
     return success
 
 
+def upload_opengraph_batch(
+    files: list[str],
+    bloodhound_url: str,
+    username: str | None = None,
+    password: str | None = None,
+    api_key: str | None = None,
+    api_key_id: str | None = None,
+) -> list[bool]:
+    """Upload multiple OpenGraph files with a single auth session.
+
+    Authenticates once, installs the v9 extension schema once (so edges are traversable),
+    then uploads each file sequentially. Returns a list of success booleans, one per file.
+    """
+    bloodhound_url = normalize_bloodhound_connector(bloodhound_url, is_legacy=False)
+
+    if not HAS_REQUESTS:
+        warn("ERROR: 'requests' library not installed")
+        return [False] * len(files)
+
+    authenticator = _authenticate_with_fallback(
+        bloodhound_url, username, password, api_key, api_key_id
+    )
+    if not authenticator:
+        return [False] * len(files)
+
+    # Install the extension schema once, before any upload, so edges ingest as traversable
+    if _install_schema(authenticator):
+        good("Extension schema installed — TaskHound edges are traversable (BH v9+).")
+    else:
+        warn("Extension schema not installed (pre-v9?); edges will be generic/Cypher-only.")
+
+    results = []
+    for og_file in files:
+        status("[*] Starting upload, be patient")
+        results.append(_upload_file(authenticator, og_file, "OpenGraph"))
+
+    return results
+
+
 def _authenticate_with_fallback(
     bloodhound_url: str,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    api_key: Optional[str] = None,
-    api_key_id: Optional[str] = None,
-) -> Optional[BloodHoundAuthenticator]:
+    username: str | None = None,
+    password: str | None = None,
+    api_key: str | None = None,
+    api_key_id: str | None = None,
+) -> BloodHoundAuthenticator | None:
     """
     Authenticate to BloodHound with automatic protocol fallback.
 
@@ -255,11 +264,11 @@ def _authenticate_with_fallback(
 
 def _try_authenticate(
     url: str,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    api_key: Optional[str] = None,
-    api_key_id: Optional[str] = None,
-) -> Optional[BloodHoundAuthenticator]:
+    username: str | None = None,
+    password: str | None = None,
+    api_key: str | None = None,
+    api_key_id: str | None = None,
+) -> BloodHoundAuthenticator | None:
     """
     Try to authenticate to BloodHound at a specific URL.
 
@@ -293,7 +302,7 @@ def _try_authenticate(
         return None
 
 
-def _get_alternate_protocol_uri(uri: str) -> Optional[str]:
+def _get_alternate_protocol_uri(uri: str) -> str | None:
     """
     Get the alternate protocol URI (http <-> https).
 
@@ -503,108 +512,3 @@ def _upload_file(
     except Exception as e:
         warn(f"Unexpected error uploading {file_type} file: {e}")
         return False
-
-
-def _set_custom_icon(
-    authenticator: BloodHoundAuthenticator,
-    icon_name: str,
-    icon_color: str,
-    force: bool,
-) -> None:
-    """
-    Set custom icon for ScheduledTask nodes in BloodHound CE.
-
-    Args:
-        authenticator: Authenticated BloodHound connection helper
-        icon_name: Font Awesome icon name
-        icon_color: Hex color code
-        force: If True, delete existing icon before creating new one
-    """
-    try:
-        # First, check if icon already exists
-        check_response = authenticator.request("GET", "/api/v2/custom-nodes")
-
-        if check_response and check_response.status_code == 200:
-            response_data = check_response.json()
-            existing = response_data.get("data") if response_data else None
-
-            if existing:
-                for node in existing:
-                    # Case-insensitive check for scheduledtask kind
-                    kind_name = node.get("kindName", "").lower()
-                    if kind_name == "scheduledtask":
-                        node_id = node.get("id")
-                        existing_icon = node.get("config", {}).get("icon", {})
-
-                        # Check if icon matches what we want
-                        if existing_icon.get("name") == icon_name and existing_icon.get("color") == icon_color:
-                            info(f"scheduledtask icon already configured ({icon_name}, {icon_color})")
-                            return
-
-                        # Icon exists but is different
-                        if force:
-                            # Delete existing icon configuration
-                            info("scheduledtask icon exists with different settings - forcing update")
-                            info(f"Current: {existing_icon.get('name')} {existing_icon.get('color')}")
-                            info(f"Requested: {icon_name} {icon_color}")
-                            info("Deleting existing icon configuration...")
-
-                            try:
-                                delete_response = authenticator.request("DELETE", f"/api/v2/custom-nodes/{node_id}")
-
-                                if delete_response and delete_response.status_code in [200, 204]:
-                                    good("Deleted existing icon configuration")
-                                else:
-                                    status_code = delete_response.status_code if delete_response else "Unknown"
-                                    warn(f"Failed to delete icon (status {status_code})")
-                                    warn("Will attempt to create new icon anyway...")
-                            except requests.Timeout:
-                                warn(f"Timeout deleting icon (request took longer than {TIMEOUT}s)")
-                                warn("Will attempt to create new icon anyway...")
-                            except Exception as e:
-                                warn(f"Error deleting icon: {e}")
-                                warn("Will attempt to create new icon anyway...")
-                        else:
-                            info("ScheduledTask icon exists but with different settings")
-                            info(f"Current: {existing_icon.get('name')} {existing_icon.get('color')}")
-                            info(f"Requested: {icon_name} {icon_color}")
-                            info("Keeping existing configuration (use --bh-force-icon to override)")
-                            return
-
-        # Icon doesn't exist (or was just deleted), upload model.json file
-        # Find model.json in standard locations
-        try:
-            model_file = find_model_json()
-            info(f"Loading icon configuration from: {model_file}")
-        except FileNotFoundError as e:
-            warn(f"{e}")
-            # Fallback to hardcoded structure
-            model_data = {
-                "custom_types": {
-                    "ScheduledTask": {"icon": {"type": "font-awesome", "name": icon_name, "color": icon_color}}
-                }
-            }
-        else:
-            # Load model.json (NetworkHound approach)
-            with open(model_file, encoding="utf-8") as f:
-                model_data = json.load(f)
-
-        response = authenticator.request("POST", "/api/v2/custom-nodes", model_data)
-
-        if response and response.status_code in [200, 201]:
-            good(f"Custom icon set for 'ScheduledTask': {icon_name} ({icon_color})")
-        elif response and response.status_code == 409:
-            info("ScheduledTask icon already configured")
-        else:
-            # Non-critical error - print response for debugging
-            status_code = response.status_code if response else "Unknown"
-            warn(f"Could not set custom icon (status {status_code})")
-            with contextlib.suppress(Exception):
-                if response:
-                    warn(f"Response: {response.text}")
-
-    except requests.Timeout:
-        warn(f"Timeout setting custom icon (request took longer than {TIMEOUT}s) (non-critical)")
-    except Exception as e:
-        # Non-critical - don't fail the whole upload
-        warn(f"Failed to set custom icon: {e} (non-critical)")

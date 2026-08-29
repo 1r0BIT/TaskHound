@@ -2,13 +2,13 @@ import base64
 import datetime
 import hashlib
 import hmac
-from typing import Optional
+from datetime import UTC
 
 import requests
 
 
 def bhce_signed_request(
-    method: str, uri: str, base_url: str, api_key: str, api_key_id: str, body: Optional[bytes] = None, timeout: int = 30
+    method: str, uri: str, base_url: str, api_key: str, api_key_id: str, body: bytes | None = None, timeout: int = 30
 ) -> requests.Response:
     """
     Make a signed request to BloodHound CE API using HMAC-SHA256 authentication.
@@ -159,7 +159,7 @@ def get_bloodhound_data_age(computers: list[dict]) -> tuple[int, str]:
         Tuple of (days_old: int, newest_timestamp: str)
         Returns (0, "") if no valid timestamps found
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     newest_ts = None
     newest_str = ""
@@ -188,6 +188,6 @@ def get_bloodhound_data_age(computers: list[dict]) -> tuple[int, str]:
     if newest_ts is None:
         return 0, ""
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     age_days = (now - newest_ts).days
     return age_days, newest_str

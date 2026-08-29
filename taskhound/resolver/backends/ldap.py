@@ -3,8 +3,8 @@
 # Resolution via LDAP queries to domain controllers (port 389/636).
 
 import socket
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Union
+from datetime import UTC, datetime
+from typing import Any
 
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
@@ -17,12 +17,12 @@ from ..constants import binary_to_sid, sid_to_binary
 def resolve_sid_via_ldap(
     sid: str,
     domain: str,
-    dc_ip: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    dc_ip: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-) -> Optional[str]:
+) -> str | None:
     """
     Resolve a SID to a username using LDAP queries to a domain controller.
 
@@ -77,10 +77,10 @@ def resolve_sid_via_ldap(
         base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
         debug(f"Using LDAP base DN: {base_dn}")
 
-        # Create search filter using binary SID
-        # Impacket expects hex-escaped binary format
-        binary_sid_escaped = "".join([f"\\{b:02x}" for b in binary_sid])
-        search_filter = f"(objectSid={binary_sid_escaped})"
+        # Create search filter using string SID format
+        # Impacket's LDAP implementation handles string SIDs correctly
+        # but does NOT handle binary-escaped \xx format
+        search_filter = f"(objectSid={sid})"
         debug(f"LDAP search filter: {search_filter}")
 
         # Perform the search
@@ -134,12 +134,12 @@ def resolve_name_to_sid_via_ldap(
     name: str,
     domain: str,
     is_computer: bool = False,
-    dc_ip: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    dc_ip: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-) -> Optional[str]:
+) -> str | None:
     """
     Resolve a computer name or username to its SID using LDAP.
     Results are cached persistently to avoid redundant LDAP queries.
@@ -250,12 +250,12 @@ def resolve_name_to_sid_via_ldap(
             if search_results:
                 for entry in search_results:
                     if isinstance(entry, ldapasn1_impacket.SearchResultEntry):
-                        attributes: Dict[str, Any] = {}
+                        attributes: dict[str, Any] = {}
                         for attribute in entry["attributes"]:
                             attr_name = str(attribute["type"])
                             # objectSid is binary, keep as bytes
                             if attr_name.lower() == "objectsid":
-                                raw_vals: List[Union[bytes, str]] = [bytes(val) for val in attribute["vals"]]
+                                raw_vals: list[bytes | str] = [bytes(val) for val in attribute["vals"]]
                             else:
                                 raw_vals = [str(val) for val in attribute["vals"]]
                             attributes[attr_name] = raw_vals[0] if len(raw_vals) == 1 else raw_vals
@@ -293,16 +293,16 @@ def resolve_name_to_sid_via_ldap(
 
 
 def batch_get_user_attributes(
-    usernames: List[str],
+    usernames: list[str],
     domain: str,
-    dc_ip: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    dc_ip: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    aes_key: Optional[str] = None,
-    attributes: Optional[List[str]] = None,
-) -> Dict[str, Dict]:
+    aes_key: str | None = None,
+    attributes: list[str] | None = None,
+) -> dict[str, dict]:
     """
     Batch query LDAP for user attributes (pwdLastSet, etc.).
 
@@ -412,8 +412,8 @@ def batch_get_user_attributes(
             if search_results:
                 for entry in search_results:
                     if isinstance(entry, ldapasn1_impacket.SearchResultEntry):
-                        entry_attrs: Dict[str, Any] = {}
-                        sam_name: Optional[str] = None
+                        entry_attrs: dict[str, Any] = {}
+                        sam_name: str | None = None
 
                         for attribute in entry["attributes"]:
                             attr_name = str(attribute["type"])
@@ -426,7 +426,7 @@ def batch_get_user_attributes(
                                     filetime = int(attr_vals[0]) if attr_vals else 0
                                     if filetime > 0:
                                         unix_ts = (filetime - 116444736000000000) / 10000000
-                                        entry_attrs["pwdLastSet"] = datetime.fromtimestamp(unix_ts, tz=timezone.utc)
+                                        entry_attrs["pwdLastSet"] = datetime.fromtimestamp(unix_ts, tz=UTC)
                                 except (ValueError, OSError):
                                     pass
                             elif attr_name.lower() == "lastlogon":
@@ -434,7 +434,7 @@ def batch_get_user_attributes(
                                     filetime = int(attr_vals[0]) if attr_vals else 0
                                     if filetime > 0:
                                         unix_ts = (filetime - 116444736000000000) / 10000000
-                                        entry_attrs["lastLogon"] = datetime.fromtimestamp(unix_ts, tz=timezone.utc)
+                                        entry_attrs["lastLogon"] = datetime.fromtimestamp(unix_ts, tz=UTC)
                                 except (ValueError, OSError):
                                     pass
                             elif attr_name.lower() == "objectsid" and attr_vals:
@@ -469,12 +469,12 @@ def batch_get_user_attributes(
 def get_user_pwd_last_set(
     user: str,
     domain: str,
-    dc_ip: Optional[str] = None,
-    auth_username: Optional[str] = None,
-    auth_password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    dc_ip: str | None = None,
+    auth_username: str | None = None,
+    auth_password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-) -> Optional[datetime]:
+) -> datetime | None:
     """
     Get pwdLastSet for a single user (with caching).
 

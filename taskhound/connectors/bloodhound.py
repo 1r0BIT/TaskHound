@@ -10,7 +10,7 @@ Author: 0xr0BIT
 
 import contextlib
 import json
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any
 
 import requests
 
@@ -61,10 +61,10 @@ class BloodHoundConnector:
         self,
         bh_type: str,
         ip: str,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
-        api_key: Optional[str] = None,
-        api_key_id: Optional[str] = None,
+        username: str | None = None,
+        password: str | None = None,
+        api_key: str | None = None,
+        api_key_id: str | None = None,
         timeout: int = 120,
     ):
         self.bh_type = bh_type  # 'bhce' or 'legacy'
@@ -74,7 +74,7 @@ class BloodHoundConnector:
         self.api_key = api_key
         self.api_key_id = api_key_id
         self.timeout = timeout
-        self.users_data: Dict[str, Any] = {}
+        self.users_data: dict[str, Any] = {}
 
         # Initialize authenticator for BHCE
         # ip can be a full URI (http://host:port) or just hostname
@@ -91,7 +91,7 @@ class BloodHoundConnector:
             timeout=timeout,
         )
 
-    def run_cypher_query(self, query: str) -> Optional[Dict]:
+    def run_cypher_query(self, query: str) -> dict | None:
         """
         Execute a Cypher query against BloodHound CE (API) or Legacy (Neo4j Bolt).
 
@@ -107,7 +107,7 @@ class BloodHoundConnector:
         else:
             return self._run_cypher_query_legacy(query)
 
-    def _run_cypher_query_bhce(self, query: str) -> Optional[Dict]:
+    def _run_cypher_query_bhce(self, query: str) -> dict | None:
         """Execute Cypher query against BHCE via REST API."""
         # Prepare Query Body - include_properties=True ensures node properties are returned
         body = {"query": query, "include_properties": True}
@@ -128,7 +128,7 @@ class BloodHoundConnector:
             warn(f"Error executing Cypher query: {e}")
             return None
 
-    def _run_cypher_query_legacy(self, query: str) -> Optional[Dict]:
+    def _run_cypher_query_legacy(self, query: str) -> dict | None:
         """
         Execute Cypher query against Legacy BloodHound via Neo4j Bolt.
 
@@ -479,7 +479,7 @@ class BloodHoundConnector:
             "lastlogon": all_props.get("lastlogon"),
         }
 
-    def search_node_by_name(self, name: str, node_type: str = "Computer") -> Optional[Dict[str, str]]:
+    def search_node_by_name(self, name: str, node_type: str = "Computer") -> dict[str, str] | None:
         """
         Search for a node in BloodHound by name and return its node_id and objectId.
 
@@ -519,7 +519,7 @@ class BloodHoundConnector:
             warn(f"Error searching for {node_type} {name}: {e}")
             return None
 
-    def get_all_computers(self) -> Dict[str, str]:
+    def get_all_computers(self) -> dict[str, str]:
         """
         Get all computer objects from BloodHound and return hostname -> SID mapping.
 
@@ -529,7 +529,7 @@ class BloodHoundConnector:
             Dict mapping uppercase hostname (without domain suffix) to SID
             Example: {"DC01": "S-1-5-21-...-1001", "FILESERVER": "S-1-5-21-...-1002"}
         """
-        computers: Dict[str, str] = {}
+        computers: dict[str, str] = {}
 
         # Same Cypher query works for both BHCE and Legacy
         query = "MATCH (c:Computer) RETURN c"
@@ -597,7 +597,7 @@ class BloodHoundConnector:
             warn(f"Error querying computers from BloodHound: {e}")
             return computers
 
-    def query_domain_by_netbios(self, netbios_name: str) -> Optional[Dict[str, str]]:
+    def query_domain_by_netbios(self, netbios_name: str) -> dict[str, str] | None:
         """
         Query BloodHound for domain by NETBIOS name using STARTS WITH matching.
 
@@ -645,7 +645,7 @@ class BloodHoundConnector:
             warn(f"Error querying domain '{netbios_name}': {e}")
             return None
 
-    def query_all_domain_sids(self) -> Dict[str, Union[str, TrustInfo]]:
+    def query_all_domain_sids(self) -> dict[str, str | TrustInfo]:
         """
         Query BloodHound for all domain SID prefixes (own domain + trusts).
 
@@ -661,7 +661,7 @@ class BloodHoundConnector:
             Dict mapping domain SID prefix -> TrustInfo (for trusts) or domain FQDN string (for own domain)
             e.g., "S-1-5-21-123-456-789" -> TrustInfo(fqdn="CHILD.CORP.LOCAL", is_intra_forest=True)
         """
-        result: Dict[str, Union[str, TrustInfo]] = {}
+        result: dict[str, str | TrustInfo] = {}
 
         if self.bh_type != "bhce":
             debug("Domain SID query only supported for BloodHound CE")
@@ -737,7 +737,7 @@ class BloodHoundConnector:
 
         return result
 
-    def query_user_by_upn(self, upn: str) -> Optional[Dict[str, str]]:
+    def query_user_by_upn(self, upn: str) -> dict[str, str] | None:
         """
         Query BloodHound for user by UPN (User Principal Name).
 
@@ -783,7 +783,7 @@ class BloodHoundConnector:
             warn(f"Error querying user '{upn}': {e}")
             return None
 
-    def get_user_properties(self, identifier: str) -> Optional[Dict[str, Any]]:
+    def get_user_properties(self, identifier: str) -> dict[str, Any] | None:
         """
         Query BloodHound for a user's properties by SID or UPN.
 
@@ -808,7 +808,7 @@ class BloodHoundConnector:
         else:
             return self._get_user_properties_legacy(identifier)
 
-    def _get_user_properties_bhce(self, identifier: str) -> Optional[Dict[str, Any]]:
+    def _get_user_properties_bhce(self, identifier: str) -> dict[str, Any] | None:
         """Get user properties from BloodHound CE API.
 
         Queries by SID (objectId) when possible, falls back to UPN (name).
@@ -865,7 +865,7 @@ class BloodHoundConnector:
             debug(f"Error querying user properties for '{identifier}': {e}")
             return None
 
-    def _get_user_properties_legacy(self, identifier: str) -> Optional[Dict[str, Any]]:
+    def _get_user_properties_legacy(self, identifier: str) -> dict[str, Any] | None:
         """Get user properties from Legacy BloodHound via Neo4j.
 
         Queries by SID (objectid) when possible, falls back to UPN (name).
@@ -924,7 +924,7 @@ class BloodHoundConnector:
             debug(f"Error querying Legacy BH user properties for '{identifier}': {e}")
             return None
 
-    def get_user_gmsa_status(self, username: str) -> Optional[Dict[str, Any]]:
+    def get_user_gmsa_status(self, username: str) -> dict[str, Any] | None:
         """
         Query BloodHound for user's gMSA/MSA status.
 
@@ -1035,7 +1035,7 @@ class BloodHoundConnector:
             debug(f"Error checking ReadGMSAPassword edge for '{user_name}': {e}")
             return False
 
-    def _get_user_gmsa_status_legacy(self, username: str) -> Optional[Dict[str, Any]]:
+    def _get_user_gmsa_status_legacy(self, username: str) -> dict[str, Any] | None:
         """
         Query Legacy BloodHound (Neo4j) for user's gMSA/MSA status.
 
@@ -1113,7 +1113,7 @@ class BloodHoundConnector:
             debug(f"Error querying Legacy BH gMSA status for '{username}': {e}")
             return None
 
-    def validate_and_resolve_cross_domain_user(self, netbios_domain: str, username: str) -> Optional[Dict[str, Optional[str]]]:
+    def validate_and_resolve_cross_domain_user(self, netbios_domain: str, username: str) -> dict[str, str | None] | None:
         """
         Complete cross-domain user resolution workflow:
         1. Resolve NETBIOS domain to FQDN via BloodHound
@@ -1162,7 +1162,7 @@ class BloodHoundConnector:
             "error_reason": None,  # Success
         }
 
-    def get_users_data(self) -> Dict[str, Any]:
+    def get_users_data(self) -> dict[str, Any]:
         """Get the retrieved users data"""
         return self.users_data
 
@@ -1183,7 +1183,7 @@ class BloodHoundConnector:
             return False
 
 
-def connect_bloodhound(args) -> Tuple[Optional[Dict[str, Any]], Optional[BloodHoundConnector]]:
+def connect_bloodhound(args) -> tuple[dict[str, Any] | None, BloodHoundConnector | None]:
     """
     Connect to BloodHound and retrieve high-value users data.
 
@@ -1262,7 +1262,7 @@ def connect_bloodhound(args) -> Tuple[Optional[Dict[str, Any]], Optional[BloodHo
     return None, None
 
 
-def _get_alternate_protocol_uri(uri: str) -> Optional[str]:
+def _get_alternate_protocol_uri(uri: str) -> str | None:
     """
     Get the alternate protocol URI (http <-> https).
 

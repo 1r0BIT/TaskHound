@@ -11,15 +11,16 @@
 import csv
 import json
 import os
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 from ..utils.date_parser import parse_iso_date, parse_timestamp
 from ..utils.helpers import sanitize_json_string
 from ..utils.logging import good, warn
 
 
-def _analyze_password_freshness(task_date: Optional[str], pwd_change_date: Optional[datetime]) -> Tuple[str, str]:
+def _analyze_password_freshness(task_date: str | None, pwd_change_date: datetime | None) -> tuple[str, str]:
     # Enhanced password analysis relative to task creation date with detailed explanations.
     # Returns (risk_level, explanation) tuple.
     if not task_date or not pwd_change_date:
@@ -72,10 +73,10 @@ class HighValueLoader:
 
     def __init__(self, path: str):
         self.path = path
-        self.hv_users: Dict[str, Dict[str, Any]] = {}
-        self.hv_sids: Dict[str, Dict[str, Any]] = {}
-        self.hv_computers: Dict[str, str] = {}  # hostname -> SID mapping for computers
-        self.hv_domain_sids: Dict[str, str] = {}  # domain SID prefix -> FQDN mapping
+        self.hv_users: dict[str, dict[str, Any]] = {}
+        self.hv_sids: dict[str, dict[str, Any]] = {}
+        self.hv_computers: dict[str, str] = {}  # hostname -> SID mapping for computers
+        self.hv_domain_sids: dict[str, str] = {}  # domain SID prefix -> FQDN mapping
         self.loaded = False
         self.format_type = "unknown"
 
@@ -126,7 +127,7 @@ class HighValueLoader:
         warn("    Optional fields: groups, group_names, pwdlastset, lastlogon")
         warn("    Additional fields: Any BloodHound attribute will be preserved")
 
-    def _parse_list_field(self, data: Any) -> List[str]:
+    def _parse_list_field(self, data: Any) -> list[str]:
         """
         Parse a field that might be a list, a JSON string array, or a simple string.
         Returns a list of strings.
@@ -152,7 +153,7 @@ class HighValueLoader:
                 result = [s]
         return result
 
-    def _process_user_data(self, row: Dict[str, Any]) -> bool:
+    def _process_user_data(self, row: dict[str, Any]) -> bool:
         # Process a single user record from JSON or CSV data.
         # Extracts required fields and preserves all BloodHound attributes.
         # Supports both traditional format and new "all_props" lazy query format.
@@ -163,7 +164,7 @@ class HighValueLoader:
         else:
             return self._process_traditional_format(row)
 
-    def _process_all_props_format(self, row: Dict[str, Any]) -> bool:
+    def _process_all_props_format(self, row: dict[str, Any]) -> bool:
         # Process the new lazy query format with "all_props" object
         # Returns False for invalid records (which will be skipped)
         sam_raw = (row.get("SamAccountName") or "").strip().strip('"').lower()
@@ -253,7 +254,7 @@ class HighValueLoader:
         self.hv_sids[sid]["sam"] = sam
         return True
 
-    def _process_traditional_format(self, row: Dict[str, Any]) -> bool:
+    def _process_traditional_format(self, row: dict[str, Any]) -> bool:
         # Process traditional format (existing logic)
 
         # Extract required fields with fallback names
@@ -347,7 +348,7 @@ class HighValueLoader:
             for node_data in nodes.values()
         )
 
-    def _load_bhce_json(self, data: Dict[str, Any]) -> bool:
+    def _load_bhce_json(self, data: dict[str, Any]) -> bool:
         # Load BloodHound Community Edition format
         nodes = data.get("nodes", {})
         edges = data.get("edges", [])
@@ -425,7 +426,7 @@ class HighValueLoader:
 
         return True
 
-    def _process_bhce_edges(self, nodes: Dict[str, Any], edges: List[Dict[str, Any]]) -> None:
+    def _process_bhce_edges(self, nodes: dict[str, Any], edges: list[dict[str, Any]]) -> None:
         """Process BHCE edges to extract group membership information"""
         # Create a mapping of node IDs to group information
         groups = {}
@@ -486,7 +487,7 @@ class HighValueLoader:
                     self.hv_sids[user_sid]["groups"].append(group_sid)
                     self.hv_sids[user_sid]["group_names"].append(group_name)
 
-    def _load_legacy_json(self, data: List[Dict[str, Any]]) -> bool:
+    def _load_legacy_json(self, data: list[dict[str, Any]]) -> bool:
         # Load legacy BloodHound format
         for row in data:
             self._process_user_data(row)
@@ -509,7 +510,7 @@ class HighValueLoader:
                 self._process_user_data(row)
         return True
 
-    def is_account_enabled(self, runas: str) -> Optional[bool]:
+    def is_account_enabled(self, runas: str) -> bool | None:
         """
         Check if a user account is enabled in Active Directory.
 
@@ -568,6 +569,17 @@ class HighValueLoader:
             sam = val.split("@", 1)[0].lower()
         return sam in self.hv_users
 
+    def check_highvalue_bare(self, sam: str) -> bool:
+        r"""Match a BARE sAMAccountName directly against high-value domain data.
+
+        Bypasses check_highvalue()'s bare-name guard. The caller is responsible for
+        ensuring the bare name is a domain account and not a local one (e.g. via
+        resolver.is_probably_local_bare_name).
+        """
+        if not sam:
+            return False
+        return sam.strip().lower() in self.hv_users
+
     def check_tier0(self, runas: str) -> tuple[bool, list[str]]:
         # Return (True, reasons) if the given RunAs value belongs to Tier 0 groups.
         # Enhanced to include AdminSDHolder detection via admincount=1
@@ -598,6 +610,25 @@ class HighValueLoader:
             sam = val.split("@", 1)[0].lower()
             user_data = self.hv_users.get(sam)
 
+        return self._tier0_from_user_data(user_data)
+
+    def check_tier0_bare(self, sam: str) -> tuple[bool, list[str]]:
+        r"""Match a BARE sAMAccountName directly against Tier-0 domain data.
+
+        Bypasses check_tier0()'s bare-name guard. The caller is responsible for
+        ensuring the bare name is a domain account and not a local one (e.g. via
+        resolver.is_probably_local_bare_name).
+        """
+        if not sam:
+            return False, []
+        return self._tier0_from_user_data(self.hv_users.get(sam.strip().lower()))
+
+    def _tier0_from_user_data(self, user_data: dict | None) -> tuple[bool, list[str]]:
+        """Compute (is_tier0, reasons) from a resolved BloodHound user record.
+
+        Shared by check_tier0() (SID / qualified-name lookup) and check_tier0_bare()
+        (bare sAMAccountName lookup).
+        """
         if not user_data:
             return False, []
 
@@ -611,7 +642,7 @@ class HighValueLoader:
         # Create a mapping of SID to display name for output
         sid_to_name = {}
         if len(group_sids) == len(group_names):
-            sid_to_name = dict(zip(group_sids, group_names))
+            sid_to_name = dict(zip(group_sids, group_names, strict=False))
 
         matching_tier0_groups = []
         has_actual_tier0_groups = False
@@ -677,7 +708,7 @@ class HighValueLoader:
         # This fixes false positives from historical AdminSDHolder protection
         return len(tier0_reasons) > 0, tier0_reasons
 
-    def analyze_password_age(self, runas: str, task_date: str) -> Tuple[str, str]:
+    def analyze_password_age(self, runas: str, task_date: str) -> tuple[str, str]:
         # Simple boolean password analysis for DPAPI dump viability.
         # Returns (status, explanation) tuple.
         #

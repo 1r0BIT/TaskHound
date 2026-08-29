@@ -6,7 +6,6 @@
 import ipaddress
 import re
 import uuid
-from typing import List, Optional, Tuple
 
 
 def is_ipv4(host: str) -> bool:
@@ -22,7 +21,7 @@ def is_ipv4(host: str) -> bool:
         return False
 
 
-def parse_ntlm_hashes(hashes: Optional[str]) -> Tuple[str, str]:
+def parse_ntlm_hashes(hashes: str | None) -> tuple[str, str]:
     """
     Parse NTLM hashes from string format.
 
@@ -61,7 +60,7 @@ def is_guid(value: str) -> bool:
     return bool(_GUID_PATTERN.match(value))
 
 
-def expand_cidr(cidr: str) -> List[str]:
+def expand_cidr(cidr: str) -> list[str]:
     """Expand a CIDR notation to a list of IP addresses.
 
     Args:
@@ -95,7 +94,7 @@ def is_cidr(target: str) -> bool:
         return False
 
 
-def normalize_targets(targets: List[str], domain: str) -> List[str]:
+def normalize_targets(targets: list[str], domain: str) -> list[str]:
     """Normalize a list of targets: expand CIDRs, keep IPs, append domain for short hostnames.
 
     Args:

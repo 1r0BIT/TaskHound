@@ -1,8 +1,8 @@
 # LAPS Data Models
 import contextlib
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Dict, Optional
+from datetime import UTC, datetime
+from typing import Optional
 
 from ..utils.cache_manager import get_cache
 from ..utils.logging import debug
@@ -24,17 +24,17 @@ class LAPSCredential:
     username: str  # From msLAPS-Password JSON, --laps-user, or "Administrator"
     laps_type: str  # "legacy" or "mslaps"
     computer_name: str  # sAMAccountName (e.g., "WS01$")
-    dns_hostname: Optional[str] = None  # FQDN if available
-    expiration: Optional[datetime] = None  # Password expiration time
+    dns_hostname: str | None = None  # FQDN if available
+    expiration: datetime | None = None  # Password expiration time
     encrypted: bool = False  # True if encrypted (not supported yet)
 
     def is_expired(self) -> bool:
         """Check if the LAPS password has expired"""
         if self.expiration is None:
             return False
-        return datetime.now(timezone.utc) > self.expiration
+        return datetime.now(UTC) > self.expiration
 
-    def to_cache_dict(self) -> Dict:
+    def to_cache_dict(self) -> dict:
         """Serialize credential for persistent cache storage"""
         return {
             "password": self.password,
@@ -47,7 +47,7 @@ class LAPSCredential:
         }
 
     @classmethod
-    def from_cache_dict(cls, data: Dict) -> "LAPSCredential":
+    def from_cache_dict(cls, data: dict) -> "LAPSCredential":
         """Deserialize credential from persistent cache"""
         expiration = None
         if data.get("expiration"):
@@ -69,8 +69,8 @@ class LAPSCredential:
 class LAPSCache:
     """In-memory cache for LAPS credentials"""
 
-    _cache: Dict[str, LAPSCredential] = field(default_factory=dict)
-    domain: Optional[str] = None  # Domain for scoping cache keys
+    _cache: dict[str, LAPSCredential] = field(default_factory=dict)
+    domain: str | None = None  # Domain for scoping cache keys
     legacy_count: int = 0
     mslaps_count: int = 0
     encrypted_count: int = 0  # Skipped due to encryption
@@ -112,7 +112,7 @@ class LAPSCache:
             self._persist_credential(key, cred)
 
     @staticmethod
-    def _normalize_key(hostname: str, domain: Optional[str] = None) -> str:
+    def _normalize_key(hostname: str, domain: str | None = None) -> str:
         """Normalize hostname to uppercase cache key, optionally with domain."""
         normalized = hostname.upper().rstrip("$")
         # Strip any existing domain prefix and re-add if domain specified
@@ -135,7 +135,7 @@ class LAPSCache:
         # Default to 8 hours if no expiration (typical LAPS rotation is 24h+)
         if cred.expiration:
             # Use actual expiration, but cap at 24 hours
-            ttl_seconds = (cred.expiration - datetime.now(timezone.utc)).total_seconds()
+            ttl_seconds = (cred.expiration - datetime.now(UTC)).total_seconds()
             ttl_hours = min(max(ttl_seconds / 3600, 0.1), 24)  # Min 6 minutes, max 24 hours
         else:
             ttl_hours = 8  # Default for legacy LAPS without expiration info
@@ -146,7 +146,7 @@ class LAPSCache:
         except Exception as e:
             debug(f"LAPS: Failed to persist {key}: {e}")
 
-    def _load_from_persistent(self, key: str) -> Optional[LAPSCredential]:
+    def _load_from_persistent(self, key: str) -> LAPSCredential | None:
         """Try to load credential from persistent SQLite cache"""
         cache = get_cache()
         if not cache or not cache.persistent_enabled:
@@ -168,7 +168,7 @@ class LAPSCache:
 
         return None
 
-    def get(self, hostname: str) -> Optional[LAPSCredential]:
+    def get(self, hostname: str) -> LAPSCredential | None:
         """
         Lookup LAPS credential by hostname.
 
@@ -230,7 +230,7 @@ class LAPSCache:
         """Count of non-encrypted credentials"""
         return self.legacy_count + self.mslaps_count
 
-    def get_statistics(self) -> Dict[str, int]:
+    def get_statistics(self) -> dict[str, int]:
         """Return cache statistics for display"""
         return {
             "total": len(self._cache),
@@ -242,7 +242,7 @@ class LAPSCache:
         }
 
     @classmethod
-    def load_from_persistent_cache(cls, domain: Optional[str] = None) -> Optional["LAPSCache"]:
+    def load_from_persistent_cache(cls, domain: str | None = None) -> Optional["LAPSCache"]:
         """
         Load all LAPS credentials from persistent SQLite cache.
 
@@ -355,5 +355,5 @@ class LAPSFailure:
     hostname: str
     failure_type: str  # "not_found", "auth_failed", "remote_uac", "encrypted"
     message: str
-    laps_user_tried: Optional[str] = None
-    laps_type_tried: Optional[str] = None
+    laps_user_tried: str | None = None
+    laps_type_tried: str | None = None

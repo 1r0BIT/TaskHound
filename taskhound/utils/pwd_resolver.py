@@ -13,7 +13,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from .logging import debug, info, warn
 
@@ -26,9 +26,9 @@ if TYPE_CHECKING:
 class PwdLastSetResult:
     """Result of pwdLastSet resolution."""
 
-    pwd_last_set: Optional[datetime]
+    pwd_last_set: datetime | None
     source: str  # "cache", "bloodhound", "bloodhound_api", "ldap", "unknown"
-    sid: Optional[str] = None  # Track the SID for future lookups
+    sid: str | None = None  # Track the SID for future lookups
     cached: bool = False
 
 
@@ -57,18 +57,18 @@ class PwdLastSetResolver:
         bh_connector: Optional["BloodHoundConnector"] = None,
         *,
         # LDAP credentials for fallback queries
-        domain: Optional[str] = None,
-        dc_ip: Optional[str] = None,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
-        hashes: Optional[str] = None,
+        domain: str | None = None,
+        dc_ip: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        hashes: str | None = None,
         kerberos: bool = False,
-        aes_key: Optional[str] = None,
+        aes_key: str | None = None,
         # LDAP override credentials (for local admin case)
-        ldap_domain: Optional[str] = None,
-        ldap_user: Optional[str] = None,
-        ldap_password: Optional[str] = None,
-        ldap_hashes: Optional[str] = None,
+        ldap_domain: str | None = None,
+        ldap_user: str | None = None,
+        ldap_password: str | None = None,
+        ldap_hashes: str | None = None,
         # Behavior flags
         no_ldap: bool = False,
         opsec: bool = False,
@@ -99,7 +99,7 @@ class PwdLastSetResolver:
         # Session cache: SID -> PwdLastSetResult (SIDs are globally unique)
         # Note: Persistent caching is handled by existing cache_manager via
         # batch_get_user_attributes which uses "user_attrs" cache namespace
-        self._sid_cache: Dict[str, PwdLastSetResult] = {}
+        self._sid_cache: dict[str, PwdLastSetResult] = {}
 
         # Track SIDs/users we've already tried to query (avoid repeated lookups)
         self._query_attempted: set[str] = set()
@@ -113,7 +113,7 @@ class PwdLastSetResolver:
             "misses": 0,
         }
 
-    def _get_ldap_credentials(self) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    def _get_ldap_credentials(self) -> tuple[str | None, str | None, str | None, str | None]:
         """Get effective LDAP credentials (with override support)."""
         return (
             self.ldap_domain or self.domain,
@@ -122,7 +122,7 @@ class PwdLastSetResolver:
             self.ldap_hashes or self.hashes,
         )
 
-    def _resolve_runas_to_sid(self, runas: str) -> Optional[str]:
+    def _resolve_runas_to_sid(self, runas: str) -> str | None:
         """
         Resolve a runas string (NETBIOS\\sam or user@domain) to a SID.
 
@@ -184,7 +184,7 @@ class PwdLastSetResolver:
 
         return None
 
-    def resolve(self, runas: str, sid: Optional[str] = None) -> PwdLastSetResult:
+    def resolve(self, runas: str, sid: str | None = None) -> PwdLastSetResult:
         """
         Resolve pwdLastSet for a user account.
 
@@ -264,7 +264,7 @@ class PwdLastSetResolver:
             self._sid_cache[sid] = miss_result
         return miss_result
 
-    def _try_bloodhound_data(self, sid: Optional[str]) -> PwdLastSetResult:
+    def _try_bloodhound_data(self, sid: str | None) -> PwdLastSetResult:
         """Try to get pwdLastSet from pre-loaded BloodHound data (by SID)."""
         if not self.hv_loader or not self.hv_loader.loaded:
             return PwdLastSetResult(pwd_last_set=None, source="unknown")
@@ -329,7 +329,7 @@ class PwdLastSetResolver:
 
         return PwdLastSetResult(pwd_last_set=None, source="unknown", sid=sid)
 
-    def _try_ldap(self, runas: str, sid: Optional[str]) -> PwdLastSetResult:
+    def _try_ldap(self, runas: str, sid: str | None) -> PwdLastSetResult:
         """
         Try to get pwdLastSet via LDAP query.
 
@@ -385,7 +385,7 @@ class PwdLastSetResolver:
 
         return PwdLastSetResult(pwd_last_set=None, source="unknown", sid=sid)
 
-    def get_pwd_last_set(self, runas: str, sid: Optional[str] = None) -> Optional[datetime]:
+    def get_pwd_last_set(self, runas: str, sid: str | None = None) -> datetime | None:
         """
         Convenience method to just get the pwdLastSet datetime.
 
@@ -399,7 +399,7 @@ class PwdLastSetResolver:
         result = self.resolve(runas, sid=sid)
         return result.pwd_last_set
 
-    def prefetch_from_tasks(self, items: List[Tuple[str, bytes]]) -> None:
+    def prefetch_from_tasks(self, items: list[tuple[str, bytes]]) -> None:
         """
         Pre-fetch pwdLastSet for all unique users in a list of tasks.
 
@@ -418,7 +418,7 @@ class PwdLastSetResolver:
         from ..resolver import is_sid
 
         # Collect unique runas users not already in cache
-        users_to_fetch: Dict[str, str] = {}  # norm_user -> original_runas
+        users_to_fetch: dict[str, str] = {}  # norm_user -> original_runas
 
         for _rel_path, xml_bytes in items:
             meta = parse_task_xml(xml_bytes)
@@ -467,7 +467,7 @@ class PwdLastSetResolver:
         if not self.no_ldap and not self.opsec:
             self._batch_ldap_fetch(users_to_fetch)
 
-    def _batch_ldap_fetch(self, users_to_fetch: Dict[str, str]) -> None:
+    def _batch_ldap_fetch(self, users_to_fetch: dict[str, str]) -> None:
         """
         Batch fetch pwdLastSet for multiple users via LDAP.
 

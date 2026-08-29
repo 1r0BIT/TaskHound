@@ -5,13 +5,31 @@ Contains logic for building OpenGraph nodes, edges, and resolving identities.
 """
 
 import hashlib
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from bhopengraph import Edge, Node, Properties
 
 from ..resolver import resolve_name_to_sid_via_ldap
+from ..smb.tasks import strip_task_root
 from ..utils.cache_manager import get_cache
 from ..utils.logging import debug, good, info, warn
+from .schema import (
+    EDGE_HAS_SERVICE_WITH_CREDS,
+    EDGE_HAS_TASK,
+    EDGE_HAS_TASK_WITH_CREDS,
+    EDGE_RUNS_AS,
+    NODE_SCHEDULED_TASK,
+    NODE_WINDOWS_SERVICE,
+)
+
+
+def extract_domain_from_fqdn(fqdn: str) -> str:
+    """Extract the domain portion from an FQDN (e.g., 'DC01.CORP.LOCAL' → 'CORP.LOCAL')."""
+    if "." in fqdn:
+        parts = fqdn.split(".")
+        if len(parts) >= 2:
+            return ".".join(parts[1:]).upper()
+    return "WORKGROUP"
 
 
 def _create_task_object_id(hostname: str, task_path: str) -> str:
@@ -42,7 +60,7 @@ def _create_task_object_id(hostname: str, task_path: str) -> str:
     return f"{hostname}_{hash_short}_{task_name}"
 
 
-def _create_task_node(task: Dict) -> Node:
+def _create_task_node(task: dict) -> Node:
     """
     Creates a single ScheduledTask node using bhopengraph.
 
@@ -78,7 +96,7 @@ def _create_task_node(task: Dict) -> Node:
 
     # Build properties dict - bhopengraph Properties class validates schema compliance
     properties_dict = {
-        "name": task_path,
+        "name": strip_task_root(task_path),
         "hostname": hostname,
         "runas": task.get("runas") or "N/A",
         "enabled": str(task.get("enabled", "false")).lower() == "true",
@@ -123,6 +141,10 @@ def _create_task_node(task: Dict) -> Node:
     if password_analysis:
         properties_dict["passwordanalysis"] = password_analysis
 
+    # Add decrypted password if available
+    decrypted_password = task.get("decrypted_password")
+    properties_dict["password"] = decrypted_password or "none"
+
     # Add classification (TIER-0, PRIV, TASK)
     task_type = task.get("type")
     if task_type:
@@ -137,14 +159,14 @@ def _create_task_node(task: Dict) -> Node:
     # NOTE: First kind in array becomes "Primary Kind" in BloodHound UI
     node = Node(
         id=object_id,
-        kinds=["ScheduledTask", "Base", "TaskHound"],
+        kinds=[NODE_SCHEDULED_TASK, "Base", "TaskHound"],
         properties=Properties(**properties_dict)
     )
 
     return node
 
 
-def _create_principal_id(runas_user: str, local_domain: str, task: Dict, bh_connector=None, local_netbios: Optional[str] = None) -> Optional[str]:
+def _create_principal_id(runas_user: str, local_domain: str, task: dict, bh_connector=None, local_netbios: str | None = None) -> str | None:
     """
     Create BloodHound-compatible principal ID from RunAs user.
 
@@ -183,22 +205,9 @@ def _create_principal_id(runas_user: str, local_domain: str, task: Dict, bh_conn
         return runas_user
 
     # Skip built-in accounts that shouldn't have attack paths
-    BUILTIN_ACCOUNTS = {
-        'NT AUTHORITY\\SYSTEM',
-        'NT AUTHORITY\\LOCAL SERVICE',
-        'NT AUTHORITY\\NETWORK SERVICE',
-        'NT AUTHORITY\\LOCALSERVICE',
-        'NT AUTHORITY\\NETWORKSERVICE',
-        'BUILTIN\\ADMINISTRATORS',
-        'BUILTIN\\USERS',
-        'NT AUTHORITY\\ANONYMOUS LOGON',
-        'NT AUTHORITY\\AUTHENTICATED USERS',
-        'SYSTEM',  # Sometimes appears without prefix
-        'LOCAL SERVICE',
-        'NETWORK SERVICE',
-    }
+    from ..parsers.service_filter import is_builtin_account
 
-    if runas_user.upper() in BUILTIN_ACCOUNTS:
+    if is_builtin_account(runas_user):
         return None
 
     # Check if already in UPN format (user@domain.tld)
@@ -368,13 +377,13 @@ def _create_principal_id(runas_user: str, local_domain: str, task: Dict, bh_conn
 
 
 def _create_relationship_edges(
-    task: Dict,
-    computer_map: Dict[str, Optional[Tuple[str, str, str]]],
-    user_map: Dict[str, Optional[Tuple[str, str, str]]],
+    task: dict,
+    computer_map: dict[str, tuple[str, str, str] | None],
+    user_map: dict[str, tuple[str, str, str] | None],
     bh_connector=None,
     allow_orphans: bool = False,
-    netbios_name: Optional[str] = None,
-) -> Tuple[List[Edge], Dict[str, int]]:
+    netbios_name: str | None = None,
+) -> tuple[list[Edge], dict[str, int]]:
     """
     Creates edges for a task:
     1. (Computer)-[HasTask]->(ScheduledTask)
@@ -404,10 +413,10 @@ def _create_relationship_edges(
     # Create deterministic ID for the task node (must match _create_task_node)
     task_object_id = _create_task_object_id(hostname, task_path)
 
-    # 1. Create (Computer)-[HasTask]->(ScheduledTask) edge
-    edge_kind = "HasTask"
+    # 1. Create (Computer)-[TH_HasTask]->(TH_ScheduledTask) edge
+    edge_kind = EDGE_HAS_TASK
     if task.get("credentials_hint") == "stored_credentials":
-        edge_kind = "HasTaskWithStoredCreds"
+        edge_kind = EDGE_HAS_TASK_WITH_CREDS
 
     computer_object_id = None
     computer_match_by = "name"  # Default fallback
@@ -498,7 +507,7 @@ def _create_relationship_edges(
                     runs_as_edge = Edge(
                         start_node=task_object_id,
                         end_node=principal_id,
-                        kind="RunsAs",
+                        kind=EDGE_RUNS_AS,
                         start_match_by="id",
                         end_match_by="name"
                     )
@@ -520,7 +529,7 @@ def _create_relationship_edges(
                 runs_as_edge = Edge(
                     start_node=task_object_id,
                     end_node=user_object_id if user_object_id else principal_id,
-                    kind="RunsAs",
+                    kind=EDGE_RUNS_AS,
                     start_match_by="id",
                     end_match_by=user_match_by
                 )
@@ -538,7 +547,7 @@ def _create_relationship_edges(
                 runs_as_edge = Edge(
                     start_node=task_object_id,
                     end_node=principal_id,
-                    kind="RunsAs",
+                    kind=EDGE_RUNS_AS,
                     start_match_by="id",
                     end_match_by="name"
                 )
@@ -548,13 +557,13 @@ def _create_relationship_edges(
 
 
 def resolve_object_ids_chunked(
-    computer_names: Set[str],
-    user_names: Set[str],
+    computer_names: set[str],
+    user_names: set[str],
     bh_connector,  # BloodHoundConnector instance
-    ldap_config: Optional[Dict] = None,
+    ldap_config: dict | None = None,
     chunk_size: int = 10,
-    computer_sids: Optional[Dict[str, str]] = None
-) -> Tuple[Dict[str, Optional[Tuple[str, str, str]]], Dict[str, Optional[Tuple[str, str, str]]]]:
+    computer_sids: dict[str, str] | None = None
+) -> tuple[dict[str, tuple[str, str, str] | None], dict[str, tuple[str, str, str] | None]]:
     """
     Resolve computer and user names to their node IDs and objectIds (SIDs) using BloodHound API.
     Falls back to LDAP if API queries fail (LDAP only provides objectId, not node_id).
@@ -583,18 +592,18 @@ def resolve_object_ids_chunked(
         Note: If resolved via LDAP fallback, node_id will be empty string: ("", "S-1-5-21-...")
     """
 
-    computer_sid_map: Dict[str, Optional[Tuple[str, str, str]]] = {}
-    user_sid_map: Dict[str, Optional[Tuple[str, str, str]]] = {}
+    computer_sid_map: dict[str, tuple[str, str, str] | None] = {}
+    user_sid_map: dict[str, tuple[str, str, str] | None] = {}
 
     # Initialize cache
     cache = get_cache()
 
-    def _chunk_list(items: Set[str], size: int) -> List[List[str]]:
+    def _chunk_list(items: set[str], size: int) -> list[list[str]]:
         """Split set into chunks of specified size."""
         items_list = sorted(items)  # Sort for consistent ordering
         return [items_list[i:i + size] for i in range(0, len(items_list), size)]
 
-    def _query_bloodhound_with_sid_validation(names_with_sids: Dict[str, str], node_type: str) -> Dict[str, Tuple[str, str, str]]:
+    def _query_bloodhound_with_sid_validation(names_with_sids: dict[str, str], node_type: str) -> dict[str, tuple[str, str, str]]:
         """
         Query BloodHound API by name but VALIDATE with SID for correctness.
 
@@ -630,7 +639,7 @@ def resolve_object_ids_chunked(
                 nodes = data.get("data", {}).get("nodes", {})
 
                 # Group nodes by name to detect duplicates
-                nodes_by_name: Dict[str, List[Tuple[str, str, str]]] = {}
+                nodes_by_name: dict[str, list[tuple[str, str, str]]] = {}
                 for node_id, node in nodes.items():
                     name = node.get("label")
                     object_id = node.get("objectId")
@@ -675,12 +684,11 @@ def resolve_object_ids_chunked(
                 return {}
         except Exception as e:
             warn(f"Error querying BloodHound with SID validation: {e}")
-            if debug:  # type: ignore[truthy-function]  # intentional: guard debug-only traceback
-                import traceback
-                traceback.print_exc()
+            import traceback
+            debug(traceback.format_exc())
             return {}
 
-    def _query_bloodhound_chunk(names: List[str], node_type: str) -> Dict[str, Tuple[str, str, str]]:
+    def _query_bloodhound_chunk(names: list[str], node_type: str) -> dict[str, tuple[str, str, str]]:
         """
         Query BloodHound API for a chunk of names using the connector.
 
@@ -726,7 +734,7 @@ def resolve_object_ids_chunked(
             debug(traceback.format_exc())
             return {}
 
-    def _query_bloodhound_by_sid_chunk(sids: List[str], node_type: str) -> Dict[str, Tuple[str, str, str]]:
+    def _query_bloodhound_by_sid_chunk(sids: list[str], node_type: str) -> dict[str, tuple[str, str, str]]:
         """
         Query BloodHound API for a chunk of SIDs (objectIds).
 
@@ -769,7 +777,7 @@ def resolve_object_ids_chunked(
             debug(traceback.format_exc())
             return {}
 
-    def _ldap_fallback(names: List[str], is_computer: bool) -> Dict[str, Tuple[str, str, str]]:
+    def _ldap_fallback(names: list[str], is_computer: bool) -> dict[str, tuple[str, str, str]]:
         """
         Fallback to LDAP for resolving names to SIDs.
         Note: LDAP can only provide objectId (SID), not the BloodHound node_id.
@@ -1018,3 +1026,197 @@ def resolve_object_ids_chunked(
 
     good(f"Resolution complete: {len(computer_sid_map)} computers, {len(user_sid_map)} users")
     return computer_sid_map, user_sid_map
+
+
+# ---------------------------------------------------------------------------
+# Windows Service OpenGraph builders
+# ---------------------------------------------------------------------------
+
+
+def _create_service_object_id(hostname: str, service_name: str) -> str:
+    """
+    Create unique, deterministic object ID for a Windows service.
+
+    Format: HOSTNAME_HASH_SERVICENAME
+    Same pattern as _create_task_object_id but for services.
+    """
+    identifier = f"{hostname.upper()}|SVC|{service_name.upper()}"
+    hash_short = hashlib.md5(identifier.encode()).hexdigest()[:8].upper()
+    safe_name = service_name.upper().replace(" ", "_")[:40]
+    return f"{hostname}_{hash_short}_{safe_name}"
+
+
+def _create_service_node(svc: dict) -> Node:
+    """
+    Create a WindowsService node for BloodHound OpenGraph.
+
+    Node kinds: [NODE_WINDOWS_SERVICE ("TH_WindowsService"), "Base", "TaskHound"]
+    """
+    hostname = (svc.get("host") or "").strip().upper()
+    service_name = (svc.get("service_name") or "").strip()
+
+    if not hostname:
+        raise ValueError(f"Service missing 'host' field: {svc}")
+    if not service_name:
+        raise ValueError(f"Service missing 'service_name' field: {svc}")
+
+    object_id = _create_service_object_id(hostname, service_name)
+
+    properties_dict: dict[str, Any] = {
+        "name": service_name,
+        "hostname": hostname,
+        "servicename": service_name,
+    }
+
+    # Add optional properties
+    display_name = svc.get("display_name")
+    if display_name:
+        properties_dict["displayname"] = display_name
+
+    start_name = svc.get("start_name")
+    if start_name:
+        properties_dict["startname"] = start_name
+
+    binary_path = svc.get("binary_path")
+    if binary_path:
+        properties_dict["binarypath"] = binary_path
+
+    start_type = svc.get("start_type")
+    if start_type:
+        properties_dict["starttype"] = start_type
+
+    service_type = svc.get("service_type")
+    if service_type:
+        properties_dict["servicetype"] = str(service_type)
+
+    state = svc.get("state")
+    if state:
+        properties_dict["state"] = state
+
+    svc_type = svc.get("type")
+    if svc_type:
+        properties_dict["serviceclassification"] = svc_type
+
+    reason = svc.get("reason")
+    if reason:
+        properties_dict["classification"] = reason
+
+    password_analysis = svc.get("password_analysis")
+    if password_analysis:
+        properties_dict["passwordanalysis"] = password_analysis
+
+    properties_dict["credentialsstored"] = True  # All domain-account services store creds
+    properties_dict["isgmsa"] = svc.get("is_gmsa", False)
+
+    # Add decrypted password if available
+    decrypted_password = svc.get("decrypted_password")
+    properties_dict["password"] = decrypted_password or "none"
+
+    return Node(
+        id=object_id,
+        kinds=[NODE_WINDOWS_SERVICE, "Base", "TaskHound"],
+        properties=Properties(**properties_dict),
+    )
+
+
+def _create_service_edges(
+    svc: dict,
+    computer_map: dict,
+    user_map: dict,
+    bh_connector=None,
+    allow_orphans: bool = False,
+    netbios_name: str | None = None,
+) -> tuple[list["Edge"], dict[str, int]]:
+    """
+    Create edges for a Windows service node.
+
+    Edge types:
+    - TH_HasServiceWithStoredCreds: Computer → TH_WindowsService (all domain-account services)
+    - TH_RunsAs: TH_WindowsService → User
+    """
+    from bhopengraph import Edge
+
+    edges: list[Edge] = []
+    skipped = {"computers": 0, "users": 0}
+
+    hostname = (svc.get("host") or "").strip().upper()
+    service_name = (svc.get("service_name") or "").strip()
+    start_name = (svc.get("start_name") or "").strip()
+
+    if not hostname or not service_name:
+        return edges, skipped
+
+    service_id = _create_service_object_id(hostname, service_name)
+
+    debug(f"Creating service edges for {service_name} on {hostname}. Allow orphans: {allow_orphans}")
+
+    # Edge: Computer → WindowsService (HasServiceWithStoredCreds)
+    computer_info = computer_map.get(hostname)
+    if computer_info:
+        _, computer_sid, *_ = computer_info
+        if computer_sid:
+            debug(f"Using id (objectid) for Computer: {hostname} → {computer_sid}")
+            edges.append(Edge(
+                start_node=computer_sid,
+                end_node=service_id,
+                kind=EDGE_HAS_SERVICE_WITH_CREDS,
+                start_match_by="id",
+                end_match_by="id",
+            ))
+            debug(f"Created HasServiceWithStoredCreds edge: {hostname} → {service_name} (match_by=id)")
+    elif allow_orphans:
+        debug(f"Creating orphaned edge for missing computer: {hostname}")
+        edges.append(Edge(
+            start_node=hostname,
+            end_node=service_id,
+            kind=EDGE_HAS_SERVICE_WITH_CREDS,
+            start_match_by="name",
+            end_match_by="id",
+        ))
+    else:
+        debug(f"Computer {hostname} NOT in map — skipping HasServiceWithStoredCreds edge for {service_name}")
+        skipped["computers"] += 1
+
+    # Edge: WindowsService → User (RunsAs)
+    if start_name:
+        fqdn_domain = extract_domain_from_fqdn(hostname)
+        principal_id = _create_principal_id(start_name, fqdn_domain, svc, bh_connector, local_netbios=netbios_name)
+
+        if principal_id:
+            user_info = user_map.get(principal_id)
+            if user_info:
+                _, user_sid, *_ = user_info
+                if user_sid:
+                    debug(f"Using id (objectid) for User: {principal_id} → {user_sid}")
+                    edges.append(Edge(
+                        start_node=service_id,
+                        end_node=user_sid,
+                        kind=EDGE_RUNS_AS,
+                        start_match_by="id",
+                        end_match_by="id",
+                    ))
+                    debug(f"Created RunsAs edge: {service_name} → {principal_id} (match_by=id)")
+                elif allow_orphans:
+                    edges.append(Edge(
+                        start_node=service_id,
+                        end_node=principal_id,
+                        kind=EDGE_RUNS_AS,
+                        start_match_by="id",
+                        end_match_by="name",
+                    ))
+                else:
+                    debug(f"User {principal_id} has no objectid — skipping RunsAs edge for {service_name}")
+                    skipped["users"] += 1
+            elif allow_orphans:
+                edges.append(Edge(
+                    start_node=service_id,
+                    end_node=principal_id,
+                    kind=EDGE_RUNS_AS,
+                    start_match_by="id",
+                    end_match_by="name",
+                ))
+            else:
+                debug(f"User {principal_id} NOT in map — skipping RunsAs edge for {service_name}")
+                skipped["users"] += 1
+
+    return edges, skipped

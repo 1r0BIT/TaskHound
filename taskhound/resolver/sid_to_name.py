@@ -13,7 +13,8 @@
 #   Tier 4: LDAP (domain controller)
 #   Tier 5: Global Catalog (forest-wide, cross-domain)
 
-from typing import Any, Callable, Dict, Optional, Tuple
+from collections.abc import Callable
+from typing import Any
 
 from ..utils.cache_manager import get_cache
 from ..utils.logging import debug, info
@@ -47,26 +48,26 @@ from .trusts import (
 
 def resolve_sid(
     sid: str,
-    hv_loader: Optional[Any] = None,
-    bh_connector: Optional[Any] = None,
-    smb_connection: Optional[Any] = None,
+    hv_loader: Any | None = None,
+    bh_connector: Any | None = None,
+    smb_connection: Any | None = None,
     no_ldap: bool = False,
     no_rpc: bool = False,
-    domain: Optional[str] = None,
-    dc_ip: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
+    domain: str | None = None,
+    dc_ip: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    hashes: str | None = None,
     kerberos: bool = False,
-    aes_key: Optional[str] = None,
-    ldap_domain: Optional[str] = None,
-    ldap_user: Optional[str] = None,
-    ldap_password: Optional[str] = None,
-    ldap_hashes: Optional[str] = None,
-    local_domain_sid_prefix: Optional[str] = None,
-    known_domain_prefixes: Optional[Dict[str, TrustData]] = None,
-    gc_server: Optional[str] = None,
-) -> Tuple[str, Optional[str]]:
+    aes_key: str | None = None,
+    ldap_domain: str | None = None,
+    ldap_user: str | None = None,
+    ldap_password: str | None = None,
+    ldap_hashes: str | None = None,
+    local_domain_sid_prefix: str | None = None,
+    known_domain_prefixes: dict[str, TrustData] | None = None,
+    gc_server: str | None = None,
+) -> tuple[str, str | None]:
     """
     Comprehensive SID resolution with multi-tier fallback chain.
 
@@ -121,7 +122,7 @@ def resolve_sid(
     # =========================================================================
     # Tier 0: Well-known SIDs (instant, no network)
     # =========================================================================
-    resolved: Optional[str]
+    resolved: str | None
     if sid in WELL_KNOWN_SIDS:
         resolved = WELL_KNOWN_SIDS[sid]
         debug(f"[Tier 0] Well-known SID: {sid} → {resolved}")
@@ -234,10 +235,11 @@ def resolve_sid(
     # =========================================================================
     # Tier 4: LDAP (domain controller)
     # =========================================================================
-    ldap_auth_domain: Optional[str] = ldap_domain or domain
-    ldap_auth_user: Optional[str] = ldap_user or username
-    ldap_auth_password: Optional[str] = ldap_password or password
-    ldap_auth_hashes: Optional[str] = ldap_hashes or hashes
+    from ..auth.context import effective_ldap_creds
+
+    ldap_auth_domain, ldap_auth_user, ldap_auth_password, ldap_auth_hashes = effective_ldap_creds(
+        domain, username, password, hashes, ldap_domain, ldap_user, ldap_password, ldap_hashes
+    )
     use_kerberos_for_ldap = kerberos and not (ldap_password or ldap_hashes)
 
     if not no_ldap and ldap_auth_domain and ldap_auth_user:
@@ -277,26 +279,26 @@ def resolve_sid(
 
 def _resolve_foreign_sid(
     sid: str,
-    sid_prefix: Optional[str],
-    trust_data: Optional[TrustData],
-    known_domain_prefixes: Optional[Dict[str, TrustData]],
+    sid_prefix: str | None,
+    trust_data: TrustData | None,
+    known_domain_prefixes: dict[str, TrustData] | None,
     no_rpc: bool,
     no_ldap: bool,
-    domain: Optional[str],
-    dc_ip: Optional[str],
-    username: Optional[str],
-    password: Optional[str],
-    hashes: Optional[str],
+    domain: str | None,
+    dc_ip: str | None,
+    username: str | None,
+    password: str | None,
+    hashes: str | None,
     kerberos: bool,
-    aes_key: Optional[str],
-    ldap_domain: Optional[str],
-    ldap_user: Optional[str],
-    ldap_password: Optional[str],
-    ldap_hashes: Optional[str],
-    gc_server: Optional[str],
+    aes_key: str | None,
+    ldap_domain: str | None,
+    ldap_user: str | None,
+    ldap_password: str | None,
+    ldap_hashes: str | None,
+    gc_server: str | None,
     cache: Any,
     cache_success: Callable[..., Any],
-) -> Tuple[str, Optional[str]]:
+) -> tuple[str, str | None]:
     """
     Handle resolution for foreign domain SIDs (different domain than local).
 
@@ -306,7 +308,7 @@ def _resolve_foreign_sid(
     - Unknown domain: DC LSARPC → well-known RID fallback
     """
     debug(f"[Foreign] Handling foreign domain SID: {sid}")
-    trust_fqdn: Optional[str]
+    trust_fqdn: str | None
 
     # CASE 1: Known external trust (different forest - GC won't help)
     if trust_data and is_external_trust(trust_data):
@@ -381,10 +383,11 @@ def _resolve_foreign_sid(
             return f"{resolved} ({sid})", resolved
 
     # Try Global Catalog
-    ldap_auth_domain: Optional[str] = ldap_domain or domain
-    ldap_auth_user: Optional[str] = ldap_user or username
-    ldap_auth_password: Optional[str] = ldap_password or password
-    ldap_auth_hashes: Optional[str] = ldap_hashes or hashes
+    from ..auth.context import effective_ldap_creds
+
+    ldap_auth_domain, ldap_auth_user, ldap_auth_password, ldap_auth_hashes = effective_ldap_creds(
+        domain, username, password, hashes, ldap_domain, ldap_user, ldap_password, ldap_hashes
+    )
     use_kerberos_for_ldap = kerberos and not (ldap_password or ldap_hashes)
 
     if not no_ldap and ldap_auth_domain and ldap_auth_user:
@@ -427,36 +430,36 @@ def _resolve_foreign_sid(
 
 def format_runas_with_sid_resolution(
     runas: str,
-    hv_loader: Optional[Any] = None,
-    bh_connector: Optional[Any] = None,
-    smb_connection: Optional[Any] = None,
+    hv_loader: Any | None = None,
+    bh_connector: Any | None = None,
+    smb_connection: Any | None = None,
     no_ldap: bool = False,
     no_rpc: bool = False,
-    domain: Optional[str] = None,
-    dc_ip: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    hashes: Optional[str] = None,
-    aes_key: Optional[str] = None,
+    domain: str | None = None,
+    dc_ip: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    hashes: str | None = None,
+    aes_key: str | None = None,
     kerberos: bool = False,
-    ldap_domain: Optional[str] = None,
-    ldap_user: Optional[str] = None,
-    ldap_password: Optional[str] = None,
-    ldap_hashes: Optional[str] = None,
-    local_domain_sid_prefix: Optional[str] = None,
-    known_domain_prefixes: Optional[Dict[str, TrustData]] = None,
-    gc_server: Optional[str] = None,
+    ldap_domain: str | None = None,
+    ldap_user: str | None = None,
+    ldap_password: str | None = None,
+    ldap_hashes: str | None = None,
+    local_domain_sid_prefix: str | None = None,
+    known_domain_prefixes: dict[str, TrustData] | None = None,
+    gc_server: str | None = None,
     # Legacy parameters (accepted but ignored for compatibility)
-    ldap_connection: Optional[Any] = None,
+    ldap_connection: Any | None = None,
     no_bloodhound: bool = False,
-    bh_url: Optional[str] = None,
-    bh_token_id: Optional[str] = None,
-    bh_token_key: Optional[str] = None,
+    bh_url: str | None = None,
+    bh_token_id: str | None = None,
+    bh_token_key: str | None = None,
     use_gc: bool = True,
-    machine_name: Optional[str] = None,
-    trust_data: Optional[TrustData] = None,
+    machine_name: str | None = None,
+    trust_data: TrustData | None = None,
     check_foreign: bool = True,
-) -> Tuple[str, Optional[str]]:
+) -> tuple[str, str | None]:
     """
     Format a RunAs value with SID resolution if applicable.
 

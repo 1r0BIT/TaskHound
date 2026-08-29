@@ -6,7 +6,7 @@
 import os
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from ..utils.logging import good, info, warn
 
@@ -16,12 +16,12 @@ class ConnectionContext:
     """Context object holding SMB connection state and metadata."""
 
     smb: Any = None
-    server_fqdn: Optional[str] = None
-    server_sid: Optional[str] = None
-    credguard_status: Optional[bool] = None
+    server_fqdn: str | None = None
+    server_sid: str | None = None
+    credguard_status: bool | None = None
     laps_used: bool = False
-    laps_type_used: Optional[str] = None
-    discovered_hostname: Optional[str] = None
+    laps_type_used: str | None = None
+    discovered_hostname: str | None = None
     laps_cred: Any = None  # LAPSCredential if LAPS mode
 
 
@@ -29,14 +29,14 @@ class ConnectionContext:
 class ProcessingContext:
     """Context for task processing with validation and cache data."""
 
-    cred_validation_results: Dict[str, Any] = field(default_factory=dict)
-    decrypted_creds: List[Any] = field(default_factory=list)
-    pwd_cache: Dict[str, Any] = field(default_factory=dict)
-    tier0_cache: Dict[str, Tuple[bool, list]] = field(default_factory=dict)
-    backup_target_dir: Optional[str] = None
+    cred_validation_results: dict[str, Any] = field(default_factory=dict)
+    decrypted_creds: list[Any] = field(default_factory=list)
+    pwd_cache: dict[str, Any] = field(default_factory=dict)
+    tier0_cache: dict[str, tuple[bool, list]] = field(default_factory=dict)
+    backup_target_dir: str | None = None
 
 
-def setup_backup_directory(target: str, backup_dir: Optional[str], debug: bool = False) -> Optional[str]:
+def setup_backup_directory(target: str, backup_dir: str | None, debug: bool = False) -> str | None:
     """
     Create backup directory structure for raw XML files.
 
@@ -70,18 +70,18 @@ def setup_backup_directory(target: str, backup_dir: Optional[str], debug: bool =
 
 def perform_credential_validation(
     target: str,
-    password_task_paths: List[str],
+    password_task_paths: list[str],
     *,
     domain: str,
     username: str,
-    password: Optional[str],
-    hashes: Optional[str],
-    aes_key: Optional[str],
+    password: str | None,
+    hashes: str | None,
+    aes_key: str | None,
     kerberos: bool,
-    dc_ip: Optional[str],
+    dc_ip: str | None,
     opsec: bool,
     debug: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Validate credentials for tasks via Task Scheduler RPC.
 
@@ -119,15 +119,9 @@ def perform_credential_validation(
     info(f"{target}: Querying Task Scheduler RPC for credential validation...")
 
     try:
-        # Parse hashes for RPC auth
-        lm_hash = ""
-        nt_hash = ""
-        if hashes:
-            hash_parts = hashes.split(":")
-            if len(hash_parts) == 2:
-                lm_hash, nt_hash = hash_parts
-            elif len(hash_parts) == 1 and len(hash_parts[0]) == 32:
-                nt_hash = hash_parts[0]
+        from ..utils.helpers import parse_ntlm_hashes
+
+        lm_hash, nt_hash = parse_ntlm_hashes(hashes)
 
         rpc_client = TaskSchedulerRPC(
             target=target,
@@ -176,10 +170,10 @@ def perform_dpapi_looting(
     target: str,
     smb: Any,
     *,
-    dpapi_key: Optional[str],
-    backup_target_dir: Optional[str],
+    dpapi_key: str | None,
+    backup_target_dir: str | None,
     debug: bool = False,
-) -> Tuple[List[Any], List[str]]:
+) -> tuple[list[Any], list[str]]:
     """
     Perform DPAPI credential looting (live or offline collection).
 
@@ -193,8 +187,8 @@ def perform_dpapi_looting(
     Returns:
         Tuple of (decrypted_creds, output_lines)
     """
-    out_lines: List[str] = []
-    decrypted_creds: List[Any] = []
+    out_lines: list[str] = []
+    decrypted_creds: list[Any] = []
 
     if dpapi_key:
         # Mode 1: Live decryption with DPAPI key
@@ -271,24 +265,24 @@ def perform_dpapi_looting(
 
 def prefetch_pwd_last_set(
     target: str,
-    items: List[Tuple[str, bytes]],
+    items: list[tuple[str, bytes]],
     *,
     domain: str,
-    dc_ip: Optional[str],
+    dc_ip: str | None,
     username: str,
-    password: Optional[str],
-    hashes: Optional[str],
+    password: str | None,
+    hashes: str | None,
     kerberos: bool,
-    aes_key: Optional[str],
-    ldap_domain: Optional[str],
-    ldap_user: Optional[str],
-    ldap_password: Optional[str],
-    ldap_hashes: Optional[str],
+    aes_key: str | None,
+    ldap_domain: str | None,
+    ldap_user: str | None,
+    ldap_password: str | None,
+    ldap_hashes: str | None,
     no_ldap: bool,
     opsec: bool,
     hv: Any,
     debug: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Pre-fetch pwdLastSet for all unique users via single LDAP batch query.
 
@@ -317,7 +311,7 @@ def prefetch_pwd_last_set(
     from ..parsers.task_xml import parse_task_xml
     from ..resolver import is_sid
 
-    pwd_cache: Dict[str, Any] = {}
+    pwd_cache: dict[str, Any] = {}
 
     if no_ldap or opsec or (hv and hv.loaded):
         return pwd_cache
@@ -340,12 +334,12 @@ def prefetch_pwd_last_set(
     info(f"{target}: Querying LDAP for password age data ({len(unique_users)} users)...")
 
     try:
+        from ..auth.context import effective_ldap_creds
         from ..resolver import batch_get_user_attributes
 
-        ldap_auth_domain = ldap_domain or domain
-        ldap_auth_user = ldap_user or username
-        ldap_auth_pass = ldap_password or password
-        ldap_auth_hashes = ldap_hashes or hashes
+        ldap_auth_domain, ldap_auth_user, ldap_auth_pass, ldap_auth_hashes = effective_ldap_creds(
+            domain, username, password, hashes, ldap_domain, ldap_user, ldap_password, ldap_hashes
+        )
 
         results = batch_get_user_attributes(
             usernames=list(unique_users),
@@ -382,21 +376,21 @@ def prefetch_tier0_members(
     target: str,
     *,
     domain: str,
-    dc_ip: Optional[str],
+    dc_ip: str | None,
     username: str,
-    password: Optional[str],
-    hashes: Optional[str],
+    password: str | None,
+    hashes: str | None,
     kerberos: bool,
-    aes_key: Optional[str],
-    ldap_domain: Optional[str],
-    ldap_user: Optional[str],
-    ldap_password: Optional[str],
-    ldap_hashes: Optional[str],
+    aes_key: str | None,
+    ldap_domain: str | None,
+    ldap_user: str | None,
+    ldap_password: str | None,
+    ldap_hashes: str | None,
     no_ldap: bool,
     ldap_tier0: bool,
     hv: Any,
     debug: bool = False,
-) -> Dict[str, Tuple[bool, list]]:
+) -> dict[str, tuple[bool, list]]:
     """
     Pre-fetch Tier-0 group members via LDAP.
 
@@ -421,20 +415,20 @@ def prefetch_tier0_members(
     Returns:
         Dict mapping username to (is_tier0, group_list) tuple
     """
-    tier0_cache: Dict[str, Tuple[bool, list]] = {}
+    tier0_cache: dict[str, tuple[bool, list]] = {}
 
-    if not ldap_tier0 or no_ldap or (hv and hv.loaded):
+    if not ldap_tier0 or no_ldap or (hv and hv.loaded and hv.hv_users):
         return tier0_cache
 
     info(f"{target}: Fetching Tier-0 group members via LDAP (pre-flight)...")
 
     try:
+        from ..auth.context import effective_ldap_creds
         from ..resolver import fetch_tier0_members
 
-        ldap_auth_domain = ldap_domain or domain
-        ldap_auth_user = ldap_user or username
-        ldap_auth_pass = ldap_password or password
-        ldap_auth_hashes = ldap_hashes or hashes
+        ldap_auth_domain, ldap_auth_user, ldap_auth_pass, ldap_auth_hashes = effective_ldap_creds(
+            domain, username, password, hashes, ldap_domain, ldap_user, ldap_password, ldap_hashes
+        )
 
         tier0_cache = fetch_tier0_members(
             domain=ldap_auth_domain,
@@ -459,7 +453,232 @@ def prefetch_tier0_members(
     return tier0_cache
 
 
-def sort_tasks_by_priority(lines: List[str]) -> List[str]:
+def perform_service_enumeration(
+    target: str,
+    smb: Any,
+    host: str,
+    *,
+    target_ip: str | None = None,
+    computer_sid: str | None = None,
+    local_accounts: set | None = None,
+    credguard_status: bool | None = None,
+    hv: Any | None = None,
+    bh_connector: Any | None = None,
+    no_ldap: bool = False,
+    no_rpc: bool = False,
+    domain: str | None = None,
+    dc_ip: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    hashes: str | None = None,
+    kerberos: bool = False,
+    aes_key: str | None = None,
+    ldap_domain: str | None = None,
+    ldap_user: str | None = None,
+    ldap_password: str | None = None,
+    ldap_hashes: str | None = None,
+    pwd_cache: dict | None = None,
+    tier0_cache: dict | None = None,
+    match_bare_runas: bool = False,
+    debug: bool = False,
+) -> list[Any]:
+    """
+    Enumerate Windows services via SVCCTL RPC, resolve SIDs, and classify.
+
+    Args:
+        target: Target identifier (for logging)
+        smb: Authenticated SMB connection
+        host: Server FQDN
+        target_ip: Original target IP
+        computer_sid: Computer SID
+        local_accounts: Known local account names (lowercase) from SAMR
+        credguard_status: Credential Guard status for the host
+        hv: HighValueLoader for privilege classification
+        bh_connector: BloodHound connector for SID resolution
+        no_ldap: Disable LDAP queries
+        no_rpc: Disable RPC operations
+        domain: Domain name for SID resolution
+        dc_ip: Domain controller IP
+        username/password/hashes/kerberos/aes_key: Auth for SID resolution
+        ldap_domain/ldap_user/ldap_password/ldap_hashes: LDAP auth overrides
+        pwd_cache: Pre-fetched pwdLastSet data
+        tier0_cache: Pre-fetched Tier-0 membership data
+        debug: Enable debug output
+
+    Returns:
+        List of ServiceRow instances for domain-account services
+    """
+    from ..classification import classify_service
+    from ..models.service import ServiceRow
+    from ..parsers.service_filter import filter_domain_services
+    from ..smb.svcctl import enumerate_services
+
+    try:
+        raw_services = enumerate_services(smb, host)
+    except Exception as e:
+        warn(f"{target}: Service enumeration failed: {e}")
+        if debug:
+            traceback.print_exc()
+        return []
+
+    if not raw_services:
+        info(f"{target}: No Win32 services found")
+        return []
+
+    # Filter to domain accounts only
+    domain_services = filter_domain_services(raw_services, local_accounts=local_accounts)
+
+    if not domain_services:
+        info(f"{target}: No services running as domain accounts")
+        return []
+
+    good(f"{target}: Found {len(domain_services)} services running as domain accounts")
+
+    # Build ServiceRow instances with SID resolution and classification
+    rows = []
+    for svc in domain_services:
+        row = ServiceRow.from_svcctl(
+            host=host,
+            svc=svc,
+            target_ip=target_ip,
+            computer_sid=computer_sid,
+        )
+        row.credential_guard = credguard_status
+
+        account = row.start_name or ""
+
+        # NOTE: No SID resolution needed for services. Windows SCM rejects raw
+        # SIDs as start_name — only DOMAIN\user, user@domain, or .\user are
+        # valid. Classification and OpenGraph handle these formats directly.
+
+        # Classify
+        classify_service(
+            row,
+            account,
+            hv=hv,
+            pwd_cache=pwd_cache,
+            tier0_cache=tier0_cache,
+            resolved_account=row.resolved_runas,
+            match_bare_runas=match_bare_runas,
+        )
+
+        rows.append(row)
+
+    # Summary counts
+    tier0_count = sum(1 for r in rows if r.type == "TIER-0")
+    priv_count = sum(1 for r in rows if r.type == "PRIV")
+    if tier0_count or priv_count:
+        good(f"{target}: Services classified — {tier0_count} TIER-0, {priv_count} PRIV, {len(rows) - tier0_count - priv_count} SERVICE")
+
+    return rows
+
+
+def _compute_gmsa_hmac(domain_netbios: str, account: str) -> str | None:
+    """Compute the HMAC-SHA256 used in _SC_GMSA_ LSA key names.
+
+    Windows computes: HMAC-SHA256(key=empty, msg=UTF16LE(UPPER(netbios_domain + account_without_$)))
+    The resulting hex is nibble-swapped (low nibble first, then high).
+
+    Reference: https://aadinternals.com/post/gmsa/
+    """
+    import hashlib
+    import hmac as hmac_mod
+
+    try:
+        # Strip $ suffix and use NetBIOS domain name (not FQDN)
+        clean_account = account.rstrip("$")
+        gmsa_name = (domain_netbios + clean_account).upper()
+        bin_hash = hmac_mod.new(
+            bytes("", "latin-1"),
+            msg=gmsa_name.encode("utf-16le"),
+            digestmod=hashlib.sha256,
+        ).digest()
+
+        # Nibble-swapped hex encoding (Windows convention)
+        hex_letters = "0123456789abcdef"
+        result = ""
+        for b in bin_hash:
+            result += hex_letters[b & 0x0F]
+            result += hex_letters[b >> 0x04]
+        return result
+    except Exception:
+        return None
+
+
+def _map_lsa_creds_to_service_rows(
+    service_rows: list[Any],
+    credentials: list[Any],
+    target: str,
+    gmsa_credentials: list[Any] | None = None,
+    domain: str | None = None,
+) -> None:
+    """Map already-extracted LSA credentials to service rows (in-place).
+
+    Used when LSA extraction was already performed earlier in process_target
+    (for DPAPI key extraction). Avoids a second LSA extraction pass.
+
+    Also maps gMSA NTLM hashes to gMSA service rows by computing the
+    HMAC-SHA256 of the account name and matching against extracted IDs.
+    """
+    matched = 0
+
+    # Map regular service credentials
+    for cred in credentials:
+        for row in service_rows:
+            if row.is_gmsa:
+                continue
+            if cred.service_name and cred.service_name == row.service_name:
+                row.decrypted_password = cred.password
+                matched += 1
+                break
+            elif cred.account and row.start_name:
+                cred_user = cred.account.split("\\")[-1].lower() if "\\" in cred.account else cred.account.lower()
+                row_user = row.start_name.split("\\")[-1].lower() if "\\" in row.start_name else row.start_name.lower()
+                if cred_user == row_user:
+                    row.decrypted_password = cred.password
+                    matched += 1
+                    break
+
+    # Map gMSA NTLM hashes by computing HMAC from account name
+    gmsa_matched = 0
+    if gmsa_credentials and domain:
+        # Derive NetBIOS domain name from FQDN (first component)
+        # e.g., "ludus.domain" -> "LUDUS"
+        netbios = domain.split(".")[0].upper() if "." in domain else domain.upper()
+
+        for row in service_rows:
+            if not row.is_gmsa or not row.start_name:
+                continue
+
+            # Extract the account name (DOMAIN\account$ or just account$)
+            if "\\" in row.start_name:
+                # Use the prefix from the service account for NetBIOS if available
+                row_netbios = row.start_name.split("\\")[0].upper()
+                account = row.start_name.split("\\")[1]
+            else:
+                row_netbios = netbios
+                account = row.start_name
+
+            # Compute HMAC for this account (uses NetBIOS domain, strips $)
+            expected_hmac = _compute_gmsa_hmac(row_netbios, account)
+            if not expected_hmac:
+                continue
+
+            # Match against extracted gMSA credentials
+            for gmsa_cred in gmsa_credentials:
+                if gmsa_cred.gmsa_id == expected_hmac:
+                    row.decrypted_password = f"NTLM:{gmsa_cred.ntlm_hash}"
+                    row.reason = "[gMSA] NTLM hash extracted from LSA secrets"
+                    gmsa_matched += 1
+                    break
+
+    if matched:
+        good(f"{target}: Matched {matched} LSA credential(s) to service accounts")
+    if gmsa_matched:
+        good(f"{target}: Matched {gmsa_matched} gMSA NTLM hash(es) to service accounts")
+
+
+def sort_tasks_by_priority(lines: list[str]) -> list[str]:
     """
     Sort task blocks by priority: TIER-0 > PRIV > TASK.
 

@@ -17,7 +17,6 @@
 
 import contextlib
 import time
-from typing import Optional
 
 from impacket.dcerpc.v5 import rrp, scmr, transport
 from impacket.dcerpc.v5.rpcrt import DCERPCException
@@ -164,7 +163,7 @@ class RemoteRegistryOps:
                 self._close_dce_pipe(self._scmr)
 
 
-def check_credential_guard(smb_conn, host) -> Optional[bool]:
+def check_credential_guard(smb_conn, host) -> bool | None:
     """
     Check if Credential Guard is enabled on a remote Windows host.
 

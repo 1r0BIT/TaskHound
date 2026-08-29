@@ -525,7 +525,7 @@ class TestLAPSCacheSpecialMethods:
     def test_contains_false(self):
         """__contains__ returns False when hostname not found."""
         cache = LAPSCache()
-        assert "WS01" not in cache
+        assert "NONEXISTENT_HOST_12345" not in cache
 
     def test_total_usable(self):
         """total_usable returns sum of legacy and mslaps counts."""

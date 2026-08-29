@@ -99,7 +99,8 @@ class TestTaskRowToDict:
         # Check all expected keys exist
         expected_keys = {
             "host", "path", "target_ip", "computer_sid", "type", "reason",
-            "password_analysis", "runas", "resolved_runas", "command", "arguments", "author",
+            "password_analysis", "runas", "resolved_runas", "resolved_runas_sid",
+            "command", "arguments", "author",
             "date", "logon_type", "enabled", "trigger_type", "start_boundary",
             "interval", "duration", "days_interval", "credentials_hint",
             "credential_guard", "cred_status", "cred_password_valid",

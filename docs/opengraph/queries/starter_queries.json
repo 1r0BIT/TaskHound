@@ -1,0 +1,167 @@
+[
+  {
+    "name": "All Scheduled Tasks",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "List all scheduled task nodes ingested by TaskHound. Use this to verify OpenGraph data was imported correctly.",
+    "query": "MATCH (t:TH_ScheduledTask)\nRETURN t\nLIMIT 1000",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound"],
+    "acknowledgements": ["SafeHound"]
+  },
+  {
+    "name": "All Windows Services",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "List all Windows service nodes ingested by TaskHound. Use this to verify service OpenGraph data was imported correctly.",
+    "query": "MATCH (s:TH_WindowsService)\nRETURN s\nLIMIT 1000",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound"],
+    "acknowledgements": ["SafeHound"]
+  },
+  {
+    "name": "Tasks with Stored Credentials (Full Path)",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "Show the full attack path: Computer -> Task (with stored creds) -> RunAs User. These are the highest-priority findings -- stored credentials can be extracted with local admin access.",
+    "query": "MATCH p=(c:Computer)-[:TH_HasTaskWithStoredCreds]->(t:TH_ScheduledTask)-[:TH_RunsAs]->(u)\nRETURN p\nLIMIT 1000",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound", "https://attack.mitre.org/techniques/T1003/004/"],
+    "acknowledgements": ["SafeHound"]
+  },
+  {
+    "name": "Services with Stored Credentials (Full Path)",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "Show the full attack path: Computer -> Service (with stored creds) -> RunAs User. All domain-account services store credentials as LSA secrets.",
+    "query": "MATCH p=(c:Computer)-[:TH_HasServiceWithStoredCreds]->(s:TH_WindowsService)-[:TH_RunsAs]->(u)\nRETURN p\nLIMIT 1000",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound", "https://attack.mitre.org/techniques/T1003/004/"],
+    "acknowledgements": ["SafeHound"]
+  },
+  {
+    "name": "TIER-0 Scheduled Tasks",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "Tasks running as Tier-0 principals (Domain Admins, Enterprise Admins, etc.). These represent the most critical privilege escalation opportunities.",
+    "query": "MATCH p=(c:Computer)-[]->(t:TH_ScheduledTask)-[:TH_RunsAs]->(u)\nWHERE t.tasktype = 'TIER-0'\nRETURN p\nLIMIT 1000",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound"],
+    "acknowledgements": ["SafeHound"]
+  },
+  {
+    "name": "TIER-0 Windows Services",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "Services running as Tier-0 principals. Critical findings -- extracting these credentials grants domain admin access.",
+    "query": "MATCH p=(c:Computer)-[]->(s:TH_WindowsService)-[:TH_RunsAs]->(u)\nWHERE s.serviceclassification = 'TIER-0'\nRETURN p\nLIMIT 1000",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound"],
+    "acknowledgements": ["SafeHound"]
+  },
+  {
+    "name": "Tasks with Decrypted Passwords",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "Tasks where TaskHound successfully extracted the stored password via DPAPI. Shows hostname, task name, RunAs account, and the plaintext password.",
+    "query": "MATCH (t:TH_ScheduledTask)\nWHERE t.password <> 'none'\nRETURN t.hostname AS Host, t.name AS Task, t.runas AS RunAs, t.password AS Password\nLIMIT 1000",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound", "https://attack.mitre.org/techniques/T1003/004/"],
+    "acknowledgements": ["SafeHound"]
+  },
+  {
+    "name": "Services with Extracted Credentials",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "Services where TaskHound successfully extracted credentials from LSA secrets. Shows hostname, service name, service account, and the password or NTLM hash.",
+    "query": "MATCH (s:TH_WindowsService)\nWHERE s.password <> 'none'\nRETURN s.hostname AS Host, s.name AS Service, s.startname AS Account, s.password AS Password, s.isgmsa AS gMSA\nLIMIT 1000",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound", "https://attack.mitre.org/techniques/T1003/004/"],
+    "acknowledgements": ["SafeHound"]
+  },
+  {
+    "name": "gMSA Services",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "Services using Group Managed Service Accounts. While gMSA passwords auto-rotate, the current NTLM hash is still extractable from LSA secrets.",
+    "query": "MATCH p=(c:Computer)-[]->(s:TH_WindowsService {isgmsa: true})-[:TH_RunsAs]->(u)\nRETURN p\nLIMIT 1000",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound", "https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/group-managed-service-accounts/group-managed-service-accounts-overview"],
+    "acknowledgements": ["SafeHound"]
+  },
+  {
+    "name": "Tasks Running as Domain Admins",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "Full attack path from Computer through Task to User to Domain Admins group. Shows how local admin on one host leads to domain admin via stored task credentials.",
+    "query": "MATCH p=(c:Computer)-[]->(t:TH_ScheduledTask)-[:TH_RunsAs]->(u)-[:MemberOf*1..]->(g:Group)\nWHERE g.objectid ENDS WITH '-512'\nRETURN p\nLIMIT 1000",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound", "https://attack.mitre.org/techniques/T1053/005/"],
+    "acknowledgements": ["SafeHound"]
+  },
+  {
+    "name": "Services Running as Domain Admins",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "Full attack path from Computer through Service to User to Domain Admins group. Shows how local admin on one host leads to domain admin via extracted service credentials.",
+    "query": "MATCH p=(c:Computer)-[]->(s:TH_WindowsService)-[:TH_RunsAs]->(u)-[:MemberOf*1..]->(g:Group)\nWHERE g.objectid ENDS WITH '-512'\nRETURN p\nLIMIT 1000",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound", "https://attack.mitre.org/techniques/T1543/003/"],
+    "acknowledgements": ["SafeHound"]
+  },
+  {
+    "name": "Hosts with Most Privileged Tasks and Services",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "Rank computers by how many TIER-0 or PRIV tasks and services they host. Prioritize these hosts for remediation.",
+    "query": "MATCH (c:Computer)-[]->(n:TaskHound)\nWHERE n.tasktype IN ['TIER-0', 'PRIV'] OR n.serviceclassification IN ['TIER-0', 'PRIV']\nRETURN c.name AS Computer, count(n) AS PrivilegedCount\nORDER BY PrivilegedCount DESC\nLIMIT 100",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound"],
+    "acknowledgements": ["SafeHound"]
+  },
+  {
+    "name": "Stale Credential Tasks",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "Tasks flagged with stale password analysis. The stored password may no longer be valid, or the password was changed after the task was created.",
+    "query": "MATCH (t:TH_ScheduledTask)\nWHERE t.passwordanalysis IS NOT NULL\nRETURN t.hostname AS Host, t.name AS Task, t.runas AS RunAs, t.passwordanalysis AS Analysis\nLIMIT 1000",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound"],
+    "acknowledgements": ["SafeHound"]
+  },
+  {
+    "name": "Shortest Path: Task Account to Domain Admins",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "Find the shortest path from any scheduled task RunAs account to the Domain Admins group. Combines TaskHound data with BloodHound's standard attack path analysis.",
+    "query": "MATCH (t:TH_ScheduledTask)-[:TH_RunsAs]->(u)\nWITH u\nMATCH p=shortestPath((u)-[*1..]->(g:Group))\nWHERE g.objectid ENDS WITH '-512'\nRETURN p\nLIMIT 50",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound"],
+    "acknowledgements": ["SafeHound"]
+  },
+  {
+    "name": "Shortest Path: Service Account to Domain Admins",
+    "category": "TaskHound",
+    "platforms": ["Active Directory"],
+    "description": "Find the shortest path from any Windows service RunAs account to the Domain Admins group. Combines TaskHound service data with BloodHound's standard attack path analysis.",
+    "query": "MATCH (s:TH_WindowsService)-[:TH_RunsAs]->(u)\nWITH u\nMATCH p=shortestPath((u)-[*1..]->(g:Group))\nWHERE g.objectid ENDS WITH '-512'\nRETURN p\nLIMIT 50",
+    "prebuilt": false,
+    "revision": 1,
+    "resources": ["https://github.com/SafeHound/TaskHound"],
+    "acknowledgements": ["SafeHound"]
+  }
+]

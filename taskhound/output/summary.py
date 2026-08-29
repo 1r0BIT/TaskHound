@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ..utils.console import console
 from ..utils.console import print_summary_table as rich_summary_table
@@ -78,16 +78,22 @@ def _clean_failure_reason(reason: str) -> str:
     return reason
 
 
-def print_summary_table(all_rows: List[Any], backup_dir: Optional[str] = None, has_hv_data: bool = False, has_tier0_detection: bool = False):
-    """Print a nicely formatted summary table showing task counts per host."""
-    if not all_rows:
+def print_summary_table(
+    all_rows: list[Any],
+    backup_dir: str | None = None,
+    has_hv_data: bool = False,
+    has_tier0_detection: bool = False,
+    service_rows: list[Any] | None = None,
+):
+    """Print a nicely formatted summary table showing task/service counts per host."""
+    if not all_rows and not service_rows:
         return
 
     # Support both old and new parameter names
     has_hv = has_hv_data or has_tier0_detection
 
     # Aggregate data by host
-    host_stats: Dict[str, Dict[str, Any]] = {}
+    host_stats: dict[str, dict[str, Any]] = {}
     for row in all_rows:
         # Support both dict and TaskRow objects
         row_dict = row.to_dict() if hasattr(row, "to_dict") else row
@@ -97,7 +103,7 @@ def print_summary_table(all_rows: List[Any], backup_dir: Optional[str] = None, h
         reason = row_dict.get("reason", "")
 
         if host not in host_stats:
-            host_stats[host] = {"tier0": 0, "privileged": 0, "normal": 0, "status": "[+]", "failure_reason": ""}
+            host_stats[host] = {"tier0": 0, "privileged": 0, "normal": 0, "services": 0, "status": "[+]", "failure_reason": ""}
 
         if task_type == "FAILURE":
             host_stats[host]["status"] = "[-]"
@@ -109,6 +115,23 @@ def print_summary_table(all_rows: List[Any], backup_dir: Optional[str] = None, h
         else:
             host_stats[host]["normal"] += 1
 
+    # Aggregate service data
+    if service_rows:
+        for row in service_rows:
+            row_dict = row.to_dict() if hasattr(row, "to_dict") else row
+            host = row_dict.get("host", "Unknown")
+            svc_type = row_dict.get("type", "SERVICE")
+
+            if host not in host_stats:
+                host_stats[host] = {"tier0": 0, "privileged": 0, "normal": 0, "services": 0, "status": "[+]", "failure_reason": ""}
+
+            if svc_type == "TIER-0":
+                host_stats[host]["tier0"] += 1
+            elif svc_type == "PRIV":
+                host_stats[host]["privileged"] += 1
+            else:
+                host_stats[host]["services"] += 1
+
     if not host_stats:
         return
 
@@ -116,7 +139,7 @@ def print_summary_table(all_rows: List[Any], backup_dir: Optional[str] = None, h
     rich_summary_table(host_stats, has_hv_data=has_hv)
 
 
-def print_decrypted_credentials(all_rows: List[Any]) -> int:
+def print_decrypted_credentials(all_rows: list[Any], service_rows: list[Any] | None = None) -> int:
     """
     Print a summary of all decrypted credentials found during the scan.
 
@@ -135,11 +158,8 @@ def print_decrypted_credentials(all_rows: List[Any]) -> int:
 
         decrypted_password = row_dict.get("decrypted_password")
         if decrypted_password:
-            # Use resolved_runas if available, otherwise fall back to runas
             runas = row_dict.get("runas", "Unknown")
             resolved_runas = row_dict.get("resolved_runas")
-
-            # Format display: if we have resolved username for a SID, show "username (SID)"
             display_runas = f"{resolved_runas} ({runas})" if resolved_runas and runas.startswith("S-1-5-") else runas
 
             creds_found.append({
@@ -148,6 +168,26 @@ def print_decrypted_credentials(all_rows: List[Any]) -> int:
                 "runas": display_runas,
                 "password": decrypted_password,
                 "type": row_dict.get("type", "TASK"),
+                "source": "Task",
+            })
+
+    # Also collect service credentials
+    for row in (service_rows or []):
+        row_dict = row.to_dict() if hasattr(row, "to_dict") else row
+
+        decrypted_password = row_dict.get("decrypted_password")
+        if decrypted_password:
+            start_name = row_dict.get("start_name", "Unknown")
+            resolved_runas = row_dict.get("resolved_runas")
+            display_runas = f"{resolved_runas} ({start_name})" if resolved_runas and start_name.startswith("S-1-5-") else start_name
+
+            creds_found.append({
+                "host": row_dict.get("host", "Unknown"),
+                "path": row_dict.get("service_name", "Unknown"),
+                "runas": display_runas,
+                "password": decrypted_password,
+                "type": row_dict.get("type", "SERVICE"),
+                "source": "Service",
             })
 
     if not creds_found:
@@ -163,10 +203,11 @@ def print_decrypted_credentials(all_rows: List[Any]) -> int:
     )
 
     table.add_column("Type", style="dim", width=8)
+    table.add_column("Source", style="dim", width=8)
     table.add_column("Host", style="white")
     table.add_column("RunAs", style="white")
     table.add_column("Password", style="bold green")
-    table.add_column("Task Path", style="dim")
+    table.add_column("Name", style="dim")
 
     for cred in creds_found:
         task_type = cred["type"]
@@ -177,8 +218,12 @@ def print_decrypted_credentials(all_rows: List[Any]) -> int:
         else:
             type_style = "bold green"
 
+        source = cred.get("source", "Task")
+        source_style = "cyan" if source == "Service" else "dim"
+
         table.add_row(
             f"[{type_style}]{task_type}[/]",
+            f"[{source_style}]{source}[/]",
             cred["host"],
             cred["runas"],
             cred["password"],

