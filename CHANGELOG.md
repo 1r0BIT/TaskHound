@@ -4,6 +4,49 @@ All notable changes to TaskHound will be documented in this file.
 
 ---
 
+## [1.2.0] - 2026-08-29
+
+### Highlights
+
+TaskHound now hunts **Windows services** alongside scheduled tasks — enumerating service accounts over SVCCTL, recovering their plaintext from LSA secrets, and extracting **gMSA NTLM hashes** for matching against tasks and services. The HTML report was rebuilt around unified findings with severity scoring, and OpenGraph gains **traversable `TH_`-prefixed edges** for BloodHound v9 pathfinding. Under the hood, a large dead-code cull removed ~2,620 lines of production code with **zero behavioral change**, live-validated against an Active Directory lab.
+
+---
+
+### New Features
+
+- **Windows service enumeration (SVCCTL)** — Discovers services running under privileged or stored-credential accounts via SVCCTL RPC, with the same TIER-0/PRIV/TASK classification and SID resolution as scheduled tasks
+- **LSA secret extraction** — Registry-only LSA extraction recovers service-account plaintext with DPAPI auto-feed; `--no-lsa` disables it
+- **gMSA NTLM extraction** — Recovers gMSA NTLM hashes from `_SC_GMSA_` LSA secrets and matches them to tasks and services
+- **Service OpenGraph** — `TH_WindowsService` nodes and service credential edges with a dedicated BloodHound icon
+- **Traversable OpenGraph edges** — `TH_`-prefixed kinds (`TH_RunsAs`, `TH_HasTask`, `TH_HasTaskWithStoredCreds`, `TH_HasServiceWithStoredCreds`) register as traversable in BloodHound v9 pathfinding
+- **Pre-flight credential validation** — Validates credentials before scanning to prevent account lockout; `--no-preflight` skips it
+- **Bare-username RunAs matching** — Bare-name RunAs accounts are matched against Tier-0 / high-value data
+- **`--debug-log`** — Saves all output to a timestamped log file
+- **Python 3.12+** — Consolidated dependencies and modernized CI
+
+### Improvements
+
+- **HTML report overhaul** — Unified findings with service severity scoring, attack-path summary, credential table, risk matrix, per-host collapsible blocks, print support, and header stats
+- **Service pre-filter and config caching** — Faster scans and cleaner output
+- Single BloodHound auth session reused across the OpenGraph upload
+
+### Fixes
+
+- OpenGraph `source_kind` is now set so BHCE ingests TaskHound nodes
+- UPN normalization in LDAP Tier-0 classification and UPN credential matching
+- Service SID crash, offline `NameError`, and debug-traceback handling
+- Account names normalized to `NETBIOS\sam` in the HTML report
+- gMSA: stale hint suppressed once the NTLM hash is extracted; task mapping corrected
+- Service credentials now included in the DECRYPTED CREDENTIALS summary
+- `write_csv` no longer crashes on extra `TaskRow` fields
+
+### Refactors
+
+- **Dead-code cull (~-2,620 production LOC)** — Removed the legacy `pwd_resolver` (551 lines), `DPAPIBlobParser`, the confidence subsystem, the duplicate offline-LSA path, and dead `AuthContext` / `AsyncConfig` / config members; deduplicated the DPAPI decrypt core, SID/NETBIOS/base-DN/FILETIME helpers, SMB connect composition, the Neo4j legacy-session context manager, and OpenGraph node/query helpers. Zero behavioral change — credential decryption is byte-equivalent and live-validated
+- Test suite: cleared ruff modernization nits and restored three LSA mapping tests that a duplicate class name had silently shadowed
+
+---
+
 ## [1.1.5] - 2026-03-28
 
 ### Highlights
