@@ -14,7 +14,6 @@ from .gc import (
 )
 from .ldap import (
     batch_get_user_attributes,
-    get_user_pwd_last_set,
     resolve_name_to_sid_via_ldap,
     resolve_sid_via_ldap,
 )
@@ -35,7 +34,6 @@ __all__ = [
     "resolve_sid_via_ldap",
     "resolve_name_to_sid_via_ldap",
     "batch_get_user_attributes",
-    "get_user_pwd_last_set",
     # Global Catalog
     "resolve_sid_via_global_catalog",
     "get_discovered_gc_server",

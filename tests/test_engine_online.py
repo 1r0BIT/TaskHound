@@ -7,7 +7,6 @@ Focus areas:
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 from taskhound.engine.online import _match_decrypted_password
 
@@ -16,11 +15,11 @@ from taskhound.engine.online import _match_decrypted_password
 @dataclass
 class MockCredential:
     """Mock credential object for testing."""
-    username: Optional[str]
+    username: str | None
     password: str
     task_name: str = "TestTask"
     blob_path: str = "/path/to/blob"
-    target: Optional[str] = None
+    target: str | None = None
 
 
 class TestMatchDecryptedPassword:

@@ -9,6 +9,7 @@ from typing import Any
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
 from ...utils.cache_manager import get_cache
+from ...utils.helpers import domain_to_base_dn
 from ...utils.ldap import LDAPConnectionError, get_ldap_connection
 from ...utils.logging import debug, info, warn
 from ..constants import binary_to_sid, sid_to_binary
@@ -74,7 +75,7 @@ def resolve_sid_via_ldap(
             return None
 
         # Build search base DN from domain
-        base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
+        base_dn = domain_to_base_dn(domain)
         debug(f"Using LDAP base DN: {base_dn}")
 
         # Create search filter using string SID format
@@ -224,7 +225,7 @@ def resolve_name_to_sid_via_ldap(
         debug(f"Successfully bound to LDAP server {dc_ip}")
 
         # Build search base DN from domain
-        base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
+        base_dn = domain_to_base_dn(domain)
         debug(f"Using LDAP base DN: {base_dn}")
 
         # Create search filter based on object type
@@ -290,6 +291,18 @@ def resolve_name_to_sid_via_ldap(
         warn(f"Unexpected error during LDAP name→SID resolution: {e}")
         debug(f"Full traceback: {e}", exc_info=True)
         return None
+
+
+def _filetime(attr_vals: list[str]) -> datetime | None:
+    """Convert a Windows FILETIME LDAP attribute value to an aware datetime."""
+    try:
+        filetime = int(attr_vals[0]) if attr_vals else 0
+        if filetime > 0:
+            unix_ts = (filetime - 116444736000000000) / 10000000
+            return datetime.fromtimestamp(unix_ts, tz=UTC)
+    except (ValueError, OSError):
+        pass
+    return None
 
 
 def batch_get_user_attributes(
@@ -385,7 +398,7 @@ def batch_get_user_attributes(
         return results
 
     # Build base DN
-    base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
+    base_dn = domain_to_base_dn(domain)
 
     # Query users in batches using OR filter
     BATCH_SIZE = 20
@@ -422,21 +435,11 @@ def batch_get_user_attributes(
                             if attr_name.lower() == "samaccountname":
                                 sam_name = attr_vals[0].lower() if attr_vals else None
                             elif attr_name.lower() == "pwdlastset":
-                                try:
-                                    filetime = int(attr_vals[0]) if attr_vals else 0
-                                    if filetime > 0:
-                                        unix_ts = (filetime - 116444736000000000) / 10000000
-                                        entry_attrs["pwdLastSet"] = datetime.fromtimestamp(unix_ts, tz=UTC)
-                                except (ValueError, OSError):
-                                    pass
+                                if (ts := _filetime(attr_vals)) is not None:
+                                    entry_attrs["pwdLastSet"] = ts
                             elif attr_name.lower() == "lastlogon":
-                                try:
-                                    filetime = int(attr_vals[0]) if attr_vals else 0
-                                    if filetime > 0:
-                                        unix_ts = (filetime - 116444736000000000) / 10000000
-                                        entry_attrs["lastLogon"] = datetime.fromtimestamp(unix_ts, tz=UTC)
-                                except (ValueError, OSError):
-                                    pass
+                                if (ts := _filetime(attr_vals)) is not None:
+                                    entry_attrs["lastLogon"] = ts
                             elif attr_name.lower() == "objectsid" and attr_vals:
                                 try:
                                     binary_sid_data = attribute["vals"][0].asOctets()
@@ -466,59 +469,3 @@ def batch_get_user_attributes(
     return results
 
 
-def get_user_pwd_last_set(
-    user: str,
-    domain: str,
-    dc_ip: str | None = None,
-    auth_username: str | None = None,
-    auth_password: str | None = None,
-    hashes: str | None = None,
-    kerberos: bool = False,
-) -> datetime | None:
-    """
-    Get pwdLastSet for a single user (with caching).
-
-    Convenience wrapper around batch_get_user_attributes for single user lookup.
-
-    Args:
-        user: Username to look up (DOMAIN\\user or just user)
-        domain: Domain name
-        dc_ip: Domain controller IP
-        auth_username: LDAP auth username
-        auth_password: LDAP auth password
-        hashes: NTLM hashes
-        kerberos: Use Kerberos
-
-    Returns:
-        datetime of password last set, or None if not found
-    """
-    # Normalize username
-    norm_user = user.split("\\")[-1].lower() if "\\" in user else user.lower()
-
-    # Check cache first
-    cache = get_cache()
-    if cache:
-        cached = cache.get("user_attrs", norm_user)
-        if cached:
-            pwd_ts = cached.get("pwdLastSet")
-            if pwd_ts:
-                if isinstance(pwd_ts, (int, float)):
-                    return datetime.fromtimestamp(pwd_ts)
-                return pwd_ts
-
-    # Query LDAP
-    results = batch_get_user_attributes(
-        usernames=[user],
-        domain=domain,
-        dc_ip=dc_ip,
-        username=auth_username,
-        password=auth_password,
-        hashes=hashes,
-        kerberos=kerberos,
-        attributes=["pwdLastSet", "sAMAccountName"],
-    )
-
-    if norm_user in results:
-        return results[norm_user].get("pwdLastSet")
-
-    return None

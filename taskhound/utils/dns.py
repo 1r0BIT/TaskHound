@@ -5,6 +5,7 @@
 
 import socket
 
+from .helpers import is_ipv4
 from .logging import debug, warn
 
 # Default timeout for DNS operations (seconds)
@@ -124,7 +125,7 @@ def resolve_hostname(
         IP address string, or None if resolution fails
     """
     # If already an IP, return as-is
-    if _is_ip_address(hostname):
+    if is_ipv4(hostname):
         return hostname
 
     try:
@@ -144,57 +145,6 @@ def resolve_hostname(
         debug(f"DNS: Could not resolve {hostname}: {e}")
 
     return None
-
-
-def reverse_lookup(
-    ip: str,
-    nameserver: str | None = None,
-    use_tcp: bool = False,
-    timeout: int = DEFAULT_DNS_TIMEOUT,
-) -> str | None:
-    """
-    Perform reverse DNS lookup (PTR record).
-
-    Args:
-        ip: IP address to lookup
-        nameserver: Optional DNS server to use
-        use_tcp: Force DNS queries over TCP
-        timeout: DNS query timeout in seconds
-
-    Returns:
-        Hostname (FQDN), or None if lookup fails
-    """
-    try:
-        if nameserver:
-            import dns.resolver
-            import dns.reversename
-
-            resolver = dns.resolver.Resolver(configure=False)
-            resolver.nameservers = [nameserver]
-            resolver.timeout = timeout
-            resolver.lifetime = timeout
-
-            rev_name = dns.reversename.from_address(ip)
-            answers = resolver.resolve(rev_name, "PTR", tcp=use_tcp)
-            if answers:
-                return str(answers[0]).rstrip(".")
-        else:
-            return socket.gethostbyaddr(ip)[0]
-    except Exception as e:
-        debug(f"DNS: Reverse lookup for {ip} failed: {e}")
-
-    return None
-
-
-def _is_ip_address(hostname: str) -> bool:
-    """Check if a string is an IPv4 address."""
-    parts = hostname.split(".")
-    if len(parts) == 4:
-        try:
-            return all(0 <= int(p) <= 255 for p in parts)
-        except (ValueError, TypeError):
-            return False
-    return False
 
 
 def get_working_dc(

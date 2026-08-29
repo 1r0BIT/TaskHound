@@ -10,21 +10,6 @@ from functools import lru_cache
 from ..utils.logging import debug
 
 # =============================================================================
-# Trust Attribute Flags
-# =============================================================================
-# Reference: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/e9a2d23c-c31e-4a6f-88a0-6646c877eb42
-
-TRUST_ATTRIBUTE_NON_TRANSITIVE = 0x1
-TRUST_ATTRIBUTE_UPLEVEL_ONLY = 0x2
-TRUST_ATTRIBUTE_QUARANTINED_DOMAIN = 0x4  # SID filtering enabled
-TRUST_ATTRIBUTE_FOREST_TRANSITIVE = 0x8  # Cross-forest trust
-TRUST_ATTRIBUTE_CROSS_ORGANIZATION = 0x10
-TRUST_ATTRIBUTE_WITHIN_FOREST = 0x20  # Intra-forest trust (parent-child, tree-root)
-TRUST_ATTRIBUTE_TREAT_AS_EXTERNAL = 0x40
-TRUST_ATTRIBUTE_USES_RC4_ENCRYPTION = 0x80
-
-
-# =============================================================================
 # Well-Known SIDs
 # =============================================================================
 # Reference: https://learn.microsoft.com/en-us/windows/win32/secauthz/well-known-sids
@@ -141,53 +126,6 @@ def resolve_special_sid_pattern(sid: str) -> str | None:
         return f"IIS APPPOOL\\<AppPool> ({sid})"
 
     return None
-
-
-def resolve_rid_to_name(sid: str, domain_prefix: str | None = None) -> str | None:
-    """
-    Resolve a SID to a name using well-known RIDs.
-
-    Consolidated function that handles both:
-    - Unknown domain SIDs → "UNKNOWN\\<name>"
-    - Known trust SIDs → "<domain>\\<name>" or "<name>@<domain>"
-
-    Args:
-        sid: SID to resolve (e.g., "S-1-5-21-xxx-xxx-xxx-500")
-        domain_prefix: Optional domain identifier (FQDN or "UNKNOWN")
-                      If None, uses "UNKNOWN"
-
-    Returns:
-        Resolved name or None if RID not recognized
-    """
-    if not sid or not sid.startswith("S-1-5-21-"):
-        return None
-
-    try:
-        parts = sid.split("-")
-        if len(parts) < 8:
-            return None
-
-        rid = int(parts[-1])
-        prefix = domain_prefix or "UNKNOWN"
-
-        # Check well-known RIDs
-        if rid in WELL_KNOWN_LOCAL_RIDS:
-            name = WELL_KNOWN_LOCAL_RIDS[rid]
-            # Use UPN format for FQDNs (contains dot), backslash for NETBIOS/UNKNOWN
-            if "." in prefix:
-                return f"{name}@{prefix}"
-            return f"{prefix}\\{name}"
-
-        # For unknown RIDs >= 1000, show as User-<RID>
-        if rid >= 1000:
-            if "." in prefix:
-                return f"{prefix}\\User-{rid}"
-            return f"{prefix}\\User-{rid}"
-
-        return None
-
-    except (ValueError, IndexError):
-        return None
 
 
 # =============================================================================

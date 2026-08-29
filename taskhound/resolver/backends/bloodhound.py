@@ -101,8 +101,6 @@ def extract_domain_sid_from_hv(hv_loader: HighValueLoader | None) -> str | None:
     # Try other sources (values contain 'objectid' or 'sid' fields)
     sid_sources = [
         getattr(hv_loader, "hv_users", {}),
-        getattr(hv_loader, "tier_zero_users", {}),
-        getattr(hv_loader, "high_value_users", {}),
     ]
 
     for source in sid_sources:

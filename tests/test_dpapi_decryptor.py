@@ -6,6 +6,7 @@ from taskhound.dpapi.decryptor import (
     DPAPIDecryptor,
     MasterkeyInfo,
     ScheduledTaskCredential,
+    _parse_credential_blob,
 )
 from taskhound.utils.helpers import is_guid
 
@@ -14,21 +15,15 @@ class TestMasterkeyInfo:
     """Tests for MasterkeyInfo class."""
 
     def test_init_basic(self):
-        """MasterkeyInfo initializes with guid, blob, and default sid."""
+        """MasterkeyInfo initializes with guid and blob."""
         mk = MasterkeyInfo(guid="12345678-1234-1234-1234-123456789012", blob=b"test_blob")
         assert mk.guid == "12345678-1234-1234-1234-123456789012"
         assert mk.blob == b"test_blob"
-        assert mk.sid == "S-1-5-18"
 
     def test_guid_normalized_to_lowercase(self):
         """GUID is normalized to lowercase."""
         mk = MasterkeyInfo(guid="ABCD1234-ABCD-ABCD-ABCD-ABCD1234ABCD", blob=b"test")
         assert mk.guid == "abcd1234-abcd-abcd-abcd-abcd1234abcd"
-
-    def test_custom_sid(self):
-        """Custom SID can be provided."""
-        mk = MasterkeyInfo(guid="test-guid", blob=b"test", sid="S-1-5-21-custom")
-        assert mk.sid == "S-1-5-21-custom"
 
     def test_key_initially_none(self):
         """Key is None before decryption."""
@@ -80,21 +75,6 @@ class TestScheduledTaskCredential:
         assert cred.password == "P@ssw0rd"
         assert cred.target == "{12345678-1234-1234-1234-123456789012}"
 
-    def test_dump_method_exists(self):
-        """dump() method exists and is callable."""
-        cred = ScheduledTaskCredential(task_name="Test", blob_path="/path")
-        with patch("taskhound.dpapi.decryptor.good"), patch("taskhound.dpapi.decryptor.info"):
-            cred.dump()  # Should not raise
-
-    def test_dump_quiet_method_exists(self):
-        """dump_quiet() method exists and is callable."""
-        cred = ScheduledTaskCredential(
-            task_name="Test", blob_path="/path", username="user", password="pass"
-        )
-        with patch("taskhound.dpapi.decryptor.status"):
-            cred.dump_quiet()  # Should not raise
-
-
 class TestDPAPIDecryptorInit:
     """Tests for DPAPIDecryptor initialization."""
 
@@ -143,43 +123,6 @@ class TestMasterkeyDecryption:
         result = mk.decrypt(b"fake_dpapi_userkey_")
         assert result is False
         assert mk.key is None
-
-
-class TestCredentialOutput:
-    """Tests for credential output formatting."""
-
-    def test_dump_prints_task_name(self):
-        """dump() includes task name in output."""
-        cred = ScheduledTaskCredential(task_name="ImportantTask", blob_path="/path")
-        with patch("taskhound.dpapi.decryptor.good"), patch("taskhound.dpapi.decryptor.info") as mock_info:
-            cred.dump()
-        # Check info was called with task name
-        info_calls = [str(c) for c in mock_info.call_args_list]
-        assert any("ImportantTask" in str(c) for c in info_calls)
-
-    def test_dump_quiet_format(self):
-        """dump_quiet() formats output correctly."""
-        cred = ScheduledTaskCredential(
-            task_name="MyTask",
-            blob_path="/path",
-            username="admin",
-            password="secret123",
-        )
-        with patch("taskhound.dpapi.decryptor.status") as mock_status:
-            cred.dump_quiet()
-        # Check status was called with expected format
-        mock_status.assert_called_once()
-        call_arg = mock_status.call_args[0][0]
-        assert "SCHED_TASK" in call_arg
-        assert "admin:secret123" in call_arg
-
-    def test_dump_quiet_decryption_failed(self):
-        """dump_quiet() shows DECRYPTION_FAILED when credentials missing."""
-        cred = ScheduledTaskCredential(task_name="MyTask", blob_path="/path")
-        with patch("taskhound.dpapi.decryptor.status") as mock_status:
-            cred.dump_quiet()
-        call_arg = mock_status.call_args[0][0]
-        assert "DECRYPTION_FAILED" in call_arg
 
 
 class TestIsGuid:
@@ -292,57 +235,6 @@ class TestTriageSystemMasterkeys:
         assert result == []
 
 
-class TestDecryptScheduledTaskCredentials:
-    """Tests for decrypt_scheduled_task_credentials method."""
-
-    def test_empty_list(self):
-        """Returns empty list for empty input."""
-        mock_conn = MagicMock()
-        with patch("taskhound.dpapi.decryptor.logging"):
-            decryptor = DPAPIDecryptor(mock_conn, "0x" + "aa" * 20)
-        result = decryptor.decrypt_scheduled_task_credentials([])
-        assert result == []
-
-    def test_skips_missing_blob_bytes(self):
-        """Skips entries without blob_bytes."""
-        mock_conn = MagicMock()
-        with patch("taskhound.dpapi.decryptor.logging"):
-            decryptor = DPAPIDecryptor(mock_conn, "0x" + "aa" * 20)
-
-        blob_list = [
-            {"task_name": "Task1", "blob_path": "path1"},  # No blob_bytes
-        ]
-        result = decryptor.decrypt_scheduled_task_credentials(blob_list)
-        assert result == []
-
-    def test_processes_valid_entries(self):
-        """Processes valid entries through decrypt_credential_blob."""
-        mock_conn = MagicMock()
-        with patch("taskhound.dpapi.decryptor.logging"):
-            decryptor = DPAPIDecryptor(mock_conn, "0x" + "aa" * 20)
-
-        mock_cred = ScheduledTaskCredential(task_name="Task", blob_path="path")
-        with patch.object(decryptor, "decrypt_credential_blob", return_value=mock_cred):
-            blob_list = [
-                {"task_name": "Task1", "blob_path": "path1", "blob_bytes": b"data1"},
-            ]
-            result = decryptor.decrypt_scheduled_task_credentials(blob_list)
-            assert len(result) == 1
-
-    def test_passes_target_to_decrypt(self):
-        """Target parameter is passed to decrypt_credential_blob."""
-        mock_conn = MagicMock()
-        with patch("taskhound.dpapi.decryptor.logging"):
-            decryptor = DPAPIDecryptor(mock_conn, "0x" + "aa" * 20)
-
-        with patch.object(decryptor, "decrypt_credential_blob") as mock_decrypt:
-            mock_decrypt.return_value = ScheduledTaskCredential("T", "P")
-            blob_list = [{"task_name": "T", "blob_path": "P", "blob_bytes": b"d"}]
-            decryptor.decrypt_scheduled_task_credentials(blob_list, target="SERVER01")
-            mock_decrypt.assert_called_once()
-            assert mock_decrypt.call_args.kwargs["target"] == "SERVER01"
-
-
 class TestDecryptCredentialBlob:
     """Tests for decrypt_credential_blob method."""
 
@@ -385,20 +277,65 @@ class TestDecryptCredentialBlob:
             assert result.username is None
 
 
-class TestComputeSessionKey:
-    """Tests for _compute_session_key method."""
+class TestParseCredentialBlob:
+    """Tests for the shared _parse_credential_blob field extractor.
 
-    def test_computes_session_key(self):
-        """_compute_session_key returns bytes."""
-        mock_conn = MagicMock()
-        with patch("taskhound.dpapi.decryptor.logging"):
-            decryptor = DPAPIDecryptor(mock_conn, "0x" + "aa" * 20)
+    Online and offline both route decrypted bytes through this function; these
+    cover the positive extraction path the wrapper tests skip.
+    """
 
-        from Cryptodome.Hash import SHA1
-        result = decryptor._compute_session_key(
-            key_hash=b"0123456789abcdef0123",
-            salt=b"salt_value_here_",
-            hash_algo=SHA1,
+    @staticmethod
+    def _build_credential_blob(target: str, username: str, password: str) -> bytes:
+        """Lay out a CREDENTIAL_BLOB as raw bytes (the production parse path).
+
+        Hand-built because impacket's CREDENTIAL_BLOB has a duplicate 'Unknown3'
+        field name that breaks fresh getData() packing.
+        """
+        import struct
+
+        def u16(s: str) -> bytes:
+            return s.encode("utf-16-le") + b"\x00\x00"
+
+        tgt, usr, pwd = u16(target), u16(username), u16(password)
+        return b"".join([
+            struct.pack("<L", 0),  # Flags
+            struct.pack("<L", 0),  # Size
+            struct.pack("<L", 0),  # Unknown0
+            struct.pack("<L", 0),  # Type
+            struct.pack("<L", 0),  # Flags2
+            struct.pack("<Q", 0),  # LastWritten
+            struct.pack("<L", 0),  # Unknown2
+            struct.pack("<L", 0),  # Persist
+            struct.pack("<L", 0),  # AttrCount
+            struct.pack("<Q", 0),  # Unknown3 (the <Q field, not the password)
+            struct.pack("<L", len(tgt)), tgt,
+            struct.pack("<L", 0),  # TargetAlias
+            struct.pack("<L", 0),  # Description
+            struct.pack("<L", 0),  # Unknown
+            struct.pack("<L", len(usr)), usr,
+            struct.pack("<L", len(pwd)), pwd,
+        ])
+
+    def test_extracts_username_password_and_task_guid(self):
+        """Extracts username, password, and the task GUID from the Target field."""
+        raw = self._build_credential_blob(
+            "Domain:batch=TaskScheduler:Task:{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}",
+            "LUDUS\\svc_backup",
+            "Sup3rS3cret!",
         )
-        assert isinstance(result, bytes)
-        assert len(result) > 0
+        cred = _parse_credential_blob(raw, blob_path="ABC123")
+        assert cred.username == "LUDUS\\svc_backup"
+        assert cred.password == "Sup3rS3cret!"
+        assert cred.task_name == "Task:{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}"
+        assert cred.blob_path == "ABC123"
+        assert cred.target == "Domain:batch=TaskScheduler:Task:{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}"
+
+    def test_provided_task_name_is_preserved(self):
+        """An explicit task_name is not overwritten by the Target GUID."""
+        raw = self._build_credential_blob(
+            "Domain:batch=TaskScheduler:Task:{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}",
+            "user",
+            "pass",
+        )
+        cred = _parse_credential_blob(raw, blob_path="x", task_name="ExplicitTask")
+        assert cred.task_name == "ExplicitTask"

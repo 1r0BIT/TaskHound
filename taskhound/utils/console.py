@@ -13,14 +13,10 @@ import threading
 from contextlib import contextmanager
 
 from rich.console import Console
-from rich.live import Live
 from rich.panel import Panel
 from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
     Progress,
     SpinnerColumn,
-    TaskProgressColumn,
     TextColumn,
     TimeElapsedColumn,
 )
@@ -33,9 +29,6 @@ console = Console(highlight=False)
 _output_lock = threading.RLock()
 
 # Global progress context for async scanning
-_progress: Progress | None = None
-_progress_task_id: int | None = None
-_live: Live | None = None
 
 
 # =============================================================================
@@ -142,73 +135,6 @@ def _is_debug() -> bool:
 # =============================================================================
 # Progress Bar for Async Scanning
 # =============================================================================
-
-@contextmanager
-def scan_progress(total: int, description: str = "Scanning"):
-    """
-    Context manager for showing a progress bar during async scanning.
-
-    Usage:
-        with scan_progress(len(targets), "Scanning targets") as update:
-            for target in targets:
-                process(target)
-                update(target)  # Updates progress and shows current target
-
-    Args:
-        total: Total number of items to process
-        description: Description shown in progress bar
-
-    Yields:
-        update function that takes (current_item, success=True, error_msg=None)
-    """
-    global _progress, _progress_task_id, _live
-
-    progress = Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.description}"),
-        BarColumn(bar_width=40),
-        TaskProgressColumn(),
-        MofNCompleteColumn(),
-        TimeElapsedColumn(),
-        TextColumn("[dim]{task.fields[status]}"),
-        console=console,
-        transient=False,
-    )
-
-    task_id = progress.add_task(description, total=total, status="")
-
-    # Track statistics
-    stats = {"success": 0, "failed": 0}
-
-    def update(item: str, success: bool = True, error_msg: str | None = None):
-        """Update progress with current item status."""
-        if success:
-            stats["success"] += 1
-            status_text = f"[green][+][/] {item}"
-        else:
-            stats["failed"] += 1
-            status_text = f"[red][-][/] {item}: {error_msg[:30]}" if error_msg else f"[red][-][/] {item}"
-
-        progress.update(task_id, advance=1, status=status_text)
-
-    _progress = progress
-    _progress_task_id = task_id
-
-    try:
-        with progress:
-            yield update
-    finally:
-        _progress = None
-        _progress_task_id = None
-
-        # Print summary after progress completes
-        total_done = stats["success"] + stats["failed"]
-        if stats["failed"] > 0:
-            console.print(
-                f"\n[green][+] {stats['success']}[/] succeeded, "
-                f"[red][-] {stats['failed']}[/] failed out of {total_done} targets"
-            )
-
 
 @contextmanager
 def spinner(description: str = "Processing"):
@@ -436,32 +362,6 @@ def print_scan_complete(
 # =============================================================================
 # Task Output Formatting
 # =============================================================================
-
-def format_task_line(
-    task_name: str,
-    run_as: str,
-    is_tier0: bool = False,
-    is_privileged: bool = False,
-    command: str | None = None,
-) -> str:
-    """Format a single task line with colors."""
-    if is_tier0:
-        prefix = "[bold red][TIER-0][/]"
-    elif is_privileged:
-        prefix = "[yellow][PRIV][/]"
-    else:
-        prefix = "[dim][TASK][/]"
-
-    line = f"{prefix} {task_name} [dim]→[/] {run_as}"
-
-    if command:
-        # Truncate long commands
-        if len(command) > 60:
-            command = command[:57] + "..."
-        line += f"\n        [dim]{command}[/]"
-
-    return line
-
 
 # =============================================================================
 # Output Section Panels

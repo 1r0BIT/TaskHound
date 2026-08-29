@@ -11,7 +11,7 @@ from rich.table import Table
 
 from ..smb.tasks import strip_task_root
 from ..utils.logging import good
-from . import COLORS
+from . import COLORS, cred_status_display
 
 
 def _rows_to_dicts(rows: list[Any]) -> list[dict]:
@@ -118,21 +118,7 @@ def _format_task_table(row_dict: dict[str, Any], hostname: str | None = None) ->
         password_analysis = row_dict.get("password_analysis")
 
         # Build status display matching printer.py verbose output format
-        if cred_status == "unknown":
-            if password_analysis and "GOOD" in password_analysis.upper():
-                status_display = "LIKELY VALID (password newer than pwdLastSet)"
-            elif password_analysis and "BAD" in password_analysis.upper():
-                status_display = "LIKELY INVALID (password older than pwdLastSet)"
-            else:
-                status_display = "UNKNOWN"
-        elif cred_valid is True:
-            status_display = "VALID" if cred_hijackable else f"VALID (restricted: {cred_status})"
-        elif cred_status == "invalid":
-            status_display = "INVALID (wrong password)"
-        elif cred_status == "blocked":
-            status_display = "BLOCKED (account disabled/expired)"
-        else:
-            status_display = f"{cred_status} ({cred_code})"
+        status_display = cred_status_display(cred_status, cred_valid, cred_hijackable, cred_code, password_analysis)
 
         # Color based on status
         if cred_valid:
@@ -148,9 +134,14 @@ def _format_task_table(row_dict: dict[str, Any], hostname: str | None = None) ->
 
         # Show return code with description if available
         if row_dict.get("cred_return_code"):
+            from ..smb.task_rpc import get_return_code_description
+
             code = row_dict["cred_return_code"]
-            code_desc = _get_return_code_desc(code)
-            add_field("Return Code", f"{code} ({code_desc})" if code_desc else code)
+            try:
+                code_int = int(code, 16) if code.startswith("0x") else int(code)
+                add_field("Return Code", f"{code} ({get_return_code_description(code_int)})")
+            except (ValueError, TypeError):
+                add_field("Return Code", code)
 
     # Credential Guard status - show both enabled and disabled states
     if row_dict.get("credential_guard") is not None:
@@ -208,32 +199,6 @@ def _format_trigger_display(row_dict: dict[str, Any]) -> str:
     if details:
         return f"{trigger_type} ({', '.join(details)})"
     return trigger_type
-
-
-def _get_return_code_desc(code: str) -> str:
-    """Get human-readable description for common return codes."""
-    try:
-        code_int = int(code, 16) if code.startswith("0x") else int(code)
-    except (ValueError, TypeError):
-        return ""
-
-    # Common scheduled task return codes
-    code_map = {
-        0x0: "Success",
-        0x1: "Incorrect function",
-        0x41300: "Task is ready to run",
-        0x41301: "Task is running",
-        0x41302: "Task is disabled",
-        0x41303: "Task not yet run",
-        0x41304: "No more runs scheduled",
-        0x41306: "Task terminated",
-        0x8007052E: "Logon failure (wrong password)",
-        0x80070532: "Password expired",
-        0x80070005: "Access denied",
-        0x80070002: "File not found",
-        0x800704DD: "Service not available",
-    }
-    return code_map.get(code_int, "")
 
 
 def write_rich_plain(outdir: str, all_rows: list[Any], force_color: bool = True):
@@ -531,7 +496,9 @@ _SERVICE_CSV_FIELDS = [
 
 def write_csv(path: str, rows: list[Any]):
     with open(path, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=_TASK_CSV_FIELDS)
+        # extrasaction="ignore": TaskRow carries fields not in _TASK_CSV_FIELDS
+        # (e.g. resolved_runas_sid); drop them instead of raising (matches write_service_csv).
+        w = csv.DictWriter(f, fieldnames=_TASK_CSV_FIELDS, extrasaction="ignore")
         w.writeheader()
         w.writerows(_rows_to_dicts(rows))
     good(f"Wrote CSV results to {path}")

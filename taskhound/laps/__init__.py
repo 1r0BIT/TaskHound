@@ -26,7 +26,6 @@ from .exceptions import (
     LAPSEmptyCacheError,
     LAPSError,
     LAPSParseError,
-    LAPSPermissionError,
 )
 
 # Helper functions
@@ -59,7 +58,6 @@ __all__ = [
     # Exceptions
     "LAPSError",
     "LAPSConnectionError",
-    "LAPSPermissionError",
     "LAPSEmptyCacheError",
     "LAPSParseError",
     "LAPS_ERRORS",

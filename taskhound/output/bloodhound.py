@@ -126,61 +126,6 @@ def _install_schema(authenticator: BloodHoundAuthenticator) -> bool:
     return False
 
 
-def upload_opengraph_to_bloodhound(
-    opengraph_file: str,
-    bloodhound_url: str,
-    username: str | None = None,
-    password: str | None = None,
-    api_key: str | None = None,
-    api_key_id: str | None = None,
-) -> bool:
-    """
-    Upload OpenGraph file to BloodHound Community Edition.
-
-    Supports automatic protocol fallback - if http:// fails, tries https:// and vice versa.
-    Installs the v9 extension schema (for traversable edges) before uploading; on pre-v9
-    servers that step is a no-op warning and the edges upload as generic/Cypher-only.
-
-    Args:
-        opengraph_file: Path to the OpenGraph JSON file (contains both nodes and edges)
-        bloodhound_url: BloodHound connector URI (various formats supported)
-        username: BloodHound username (not needed if api_key/api_key_id provided)
-        password: BloodHound password (not needed if api_key/api_key_id provided)
-        api_key: BloodHound API key for HMAC authentication (requires api_key_id)
-        api_key_id: BloodHound API key ID for HMAC authentication (requires api_key)
-
-    Returns:
-        True if upload succeeded, False otherwise
-    """
-    # Normalize URL to include scheme and port (BHCE only)
-    bloodhound_url = normalize_bloodhound_connector(bloodhound_url, is_legacy=False)
-
-    if not HAS_REQUESTS:
-        warn("ERROR: 'requests' library not installed")
-        warn("Install with: pip install requests")
-        return False
-
-    # Try to authenticate, with protocol fallback
-    authenticator = _authenticate_with_fallback(
-        bloodhound_url, username, password, api_key, api_key_id
-    )
-
-    if not authenticator:
-        return False
-
-    # Install the extension schema first so edges ingest as traversable (BH v9+)
-    if _install_schema(authenticator):
-        good("Extension schema installed — TaskHound edges are traversable (BH v9+).")
-    else:
-        warn("Extension schema not installed (pre-v9?); edges will be generic/Cypher-only.")
-
-    # Upload the OpenGraph file
-    status("[*] Starting upload, be patient")
-    success = _upload_file(authenticator, opengraph_file, "OpenGraph")
-
-    return success
-
-
 def upload_opengraph_batch(
     files: list[str],
     bloodhound_url: str,

@@ -176,6 +176,22 @@ class TestWriteCsv:
     """Tests for write_csv function"""
 
     @patch('taskhound.output.writer.good')
+    def test_extra_field_does_not_crash(self, mock_good, temp_output_dir):
+        """Rows carrying fields absent from _TASK_CSV_FIELDS (e.g. resolved_runas_sid,
+        a TaskRow attribute) must be dropped, not raise. Regression: write_csv used to
+        crash with ValueError on the live task path (missing extrasaction='ignore')."""
+        output_file = temp_output_dir / "output.csv"
+
+        write_csv(str(output_file), [{"host": "DC01", "runas": "svc", "resolved_runas_sid": "S-1-5-21-1-2-3-1104"}])
+
+        assert output_file.exists()
+        with open(output_file) as f:
+            rows = list(csv.DictReader(f))
+        assert len(rows) == 1
+        assert rows[0]["host"] == "DC01"
+        assert "resolved_runas_sid" not in rows[0]  # dropped, not a column
+
+    @patch('taskhound.output.writer.good')
     def test_writes_csv_file(self, mock_good, temp_output_dir, sample_task_dict):
         """Should write CSV file with headers"""
         output_file = temp_output_dir / "output.csv"
@@ -475,14 +491,6 @@ class TestFormatTaskTable:
             "cred_return_code": "0x0"
         })
         assert table.row_count > 0
-
-    def test_return_code_description(self):
-        """Should include return code description for known codes"""
-        from taskhound.output.writer import _get_return_code_desc
-        assert _get_return_code_desc("0x0") == "Success"
-        assert _get_return_code_desc("0x8007052E") == "Logon failure (wrong password)"
-        assert _get_return_code_desc("0x80070532") == "Password expired"
-        assert _get_return_code_desc("0xDEADBEEF") == ""  # Unknown code
 
     def test_trigger_display_formatting(self):
         """Should format trigger display with details"""

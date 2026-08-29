@@ -12,7 +12,6 @@ from .backends import (
     batch_get_user_attributes,
     extract_domain_sid_from_hv,
     get_discovered_gc_server,
-    get_user_pwd_last_set,
     resolve_name_to_sid_via_ldap,
     resolve_sid_from_bloodhound,
     resolve_sid_via_bloodhound_api,
@@ -32,7 +31,6 @@ from .constants import (
     is_probably_local_bare_name,
     is_sid,
     looks_like_domain_user,
-    resolve_rid_to_name,
     resolve_special_sid_pattern,
     sid_to_binary,
 )
@@ -40,7 +38,6 @@ from .name_to_sid import prefetch_computer_sids, resolve_name_to_sid
 
 # NETBIOS resolution
 from .netbios import (
-    add_netbios_mapping,
     get_netbios_cache,
     resolve_netbios_to_fqdn,
     set_netbios_ldap_credentials,
@@ -59,8 +56,6 @@ from .tier0 import (
 
 # Trust handling
 from .trusts import (
-    TRUST_ATTRIBUTE_FOREST_TRANSITIVE,
-    TRUST_ATTRIBUTE_WITHIN_FOREST,
     TrustData,
     TrustInfo,
     fetch_known_domain_sids_via_ldap,
@@ -83,7 +78,6 @@ __all__ = [
     # NETBIOS
     "set_netbios_ldap_credentials",
     "resolve_netbios_to_fqdn",
-    "add_netbios_mapping",
     "get_netbios_cache",
     # Trusts
     "TrustInfo",
@@ -97,8 +91,6 @@ __all__ = [
     "is_known_external_trust",
     "resolve_unknown_sid_to_local_name",
     "resolve_trust_sid_to_name",
-    "TRUST_ATTRIBUTE_WITHIN_FOREST",
-    "TRUST_ATTRIBUTE_FOREST_TRANSITIVE",
     # Tier-0
     "fetch_tier0_members",
     "check_tier0_membership",
@@ -112,7 +104,6 @@ __all__ = [
     "is_probably_local_bare_name",
     "get_domain_sid_prefix",
     "looks_like_domain_user",
-    "resolve_rid_to_name",
     "resolve_special_sid_pattern",
     "sid_to_binary",
     "binary_to_sid",
@@ -128,6 +119,5 @@ __all__ = [
     "resolve_sid_via_bloodhound_api",
     "resolve_name_to_sid_via_ldap",
     "batch_get_user_attributes",
-    "get_user_pwd_last_set",
     "get_discovered_gc_server",
 ]

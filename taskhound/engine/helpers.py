@@ -5,35 +5,10 @@
 
 import os
 import traceback
-from dataclasses import dataclass, field
 from typing import Any
 
+from ..utils.helpers import netbios_from_fqdn
 from ..utils.logging import good, info, warn
-
-
-@dataclass
-class ConnectionContext:
-    """Context object holding SMB connection state and metadata."""
-
-    smb: Any = None
-    server_fqdn: str | None = None
-    server_sid: str | None = None
-    credguard_status: bool | None = None
-    laps_used: bool = False
-    laps_type_used: str | None = None
-    discovered_hostname: str | None = None
-    laps_cred: Any = None  # LAPSCredential if LAPS mode
-
-
-@dataclass
-class ProcessingContext:
-    """Context for task processing with validation and cache data."""
-
-    cred_validation_results: dict[str, Any] = field(default_factory=dict)
-    decrypted_creds: list[Any] = field(default_factory=list)
-    pwd_cache: dict[str, Any] = field(default_factory=dict)
-    tier0_cache: dict[str, tuple[bool, list]] = field(default_factory=dict)
-    backup_target_dir: str | None = None
 
 
 def setup_backup_directory(target: str, backup_dir: str | None, debug: bool = False) -> str | None:
@@ -594,13 +569,9 @@ def _compute_gmsa_hmac(domain_netbios: str, account: str) -> str | None:
             digestmod=hashlib.sha256,
         ).digest()
 
-        # Nibble-swapped hex encoding (Windows convention)
-        hex_letters = "0123456789abcdef"
-        result = ""
-        for b in bin_hash:
-            result += hex_letters[b & 0x0F]
-            result += hex_letters[b >> 0x04]
-        return result
+        # Nibble-swapped hex encoding (Windows convention): low nibble before high
+        hex_str = bin_hash.hex()
+        return "".join(hex_str[i + 1] + hex_str[i] for i in range(0, len(hex_str), 2))
     except Exception:
         return None
 
@@ -644,7 +615,7 @@ def _map_lsa_creds_to_service_rows(
     if gmsa_credentials and domain:
         # Derive NetBIOS domain name from FQDN (first component)
         # e.g., "ludus.domain" -> "LUDUS"
-        netbios = domain.split(".")[0].upper() if "." in domain else domain.upper()
+        netbios = netbios_from_fqdn(domain)
 
         for row in service_rows:
             if not row.is_gmsa or not row.start_name:

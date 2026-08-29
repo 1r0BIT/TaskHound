@@ -7,7 +7,7 @@ Tests cover:
 - LAPSFailure dataclass
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from taskhound.laps.models import (
@@ -41,7 +41,7 @@ class TestLAPSCredential:
 
     def test_optional_fields(self):
         """Should accept optional fields"""
-        expiration = datetime.now(timezone.utc) + timedelta(hours=24)
+        expiration = datetime.now(UTC) + timedelta(hours=24)
         cred = LAPSCredential(
             password="P@ss",
             username="admin",
@@ -57,7 +57,7 @@ class TestLAPSCredential:
 
     def test_is_expired_future(self):
         """Should return False for future expiration"""
-        expiration = datetime.now(timezone.utc) + timedelta(hours=24)
+        expiration = datetime.now(UTC) + timedelta(hours=24)
         cred = LAPSCredential(
             password="P@ss",
             username="admin",
@@ -70,7 +70,7 @@ class TestLAPSCredential:
 
     def test_is_expired_past(self):
         """Should return True for past expiration"""
-        expiration = datetime.now(timezone.utc) - timedelta(hours=1)
+        expiration = datetime.now(UTC) - timedelta(hours=1)
         cred = LAPSCredential(
             password="P@ss",
             username="admin",
@@ -94,7 +94,7 @@ class TestLAPSCredential:
 
     def test_to_cache_dict(self):
         """Should serialize to dictionary"""
-        expiration = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        expiration = datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC)
         cred = LAPSCredential(
             password="P@ss",
             username="admin",
@@ -283,36 +283,6 @@ class TestLAPSCache:
         assert stats["legacy"] == 5
         assert stats["mslaps"] == 3
 
-    def test_normalize_key_uppercase(self):
-        """Should normalize key to uppercase"""
-        result = LAPSCache._normalize_key("ws01")
-
-        assert result == "WS01"
-
-    def test_normalize_key_strips_dollar(self):
-        """Should strip trailing $"""
-        result = LAPSCache._normalize_key("WS01$")
-
-        assert result == "WS01"
-
-    def test_normalize_key_with_domain(self):
-        """Should include domain in key"""
-        result = LAPSCache._normalize_key("ws01", "EXAMPLE")
-
-        assert result == "EXAMPLE\\WS01"
-
-    def test_normalize_key_extracts_from_fqdn(self):
-        """Should extract short name from FQDN"""
-        result = LAPSCache._normalize_key("ws01.example.com")
-
-        assert result == "WS01"
-
-    def test_normalize_key_with_existing_domain_prefix(self):
-        """Should strip existing domain prefix and re-add."""
-        result = LAPSCache._normalize_key("OLDDOM\\WS01", "NEWDOM")
-        assert result == "NEWDOM\\WS01"
-
-
 # ============================================================================
 # Test: LAPSCache persistence methods
 # ============================================================================
@@ -340,7 +310,7 @@ class TestLAPSCachePersistence:
         mock_get_cache.return_value = mock_cache
 
         cache = LAPSCache()
-        expiration = datetime.now(timezone.utc) + timedelta(hours=12)
+        expiration = datetime.now(UTC) + timedelta(hours=12)
         cred = LAPSCredential(
             password="P@ss", username="admin", laps_type="mslaps",
             computer_name="WS01$", expiration=expiration
@@ -407,7 +377,7 @@ class TestLAPSCachePersistence:
         mock_cache = MagicMock()
         mock_cache.persistent_enabled = True
         # Return an expired credential
-        past_time = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        past_time = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
         mock_cache.get.return_value = {
             "password": "P@ss", "username": "admin", "laps_type": "legacy",
             "computer_name": "WS01$", "expiration": past_time
@@ -424,7 +394,7 @@ class TestLAPSCachePersistence:
         """_load_from_persistent returns credential when found and valid."""
         mock_cache = MagicMock()
         mock_cache.persistent_enabled = True
-        future_time = (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat()
+        future_time = (datetime.now(UTC) + timedelta(hours=12)).isoformat()
         mock_cache.get.return_value = {
             "password": "P@ss123", "username": "admin", "laps_type": "legacy",
             "computer_name": "WS01$", "expiration": future_time

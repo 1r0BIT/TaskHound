@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from ..utils.helpers import netbios_from_fqdn
+
 
 @dataclass
 class SeverityScore:
@@ -96,7 +98,7 @@ def _normalize_username(username: str) -> str:
         elif "@" in u:
             # UPN — derive netbios from FQDN domain part (first component)
             fqdn_domain = u.split("@", 1)[1]
-            domain_part = fqdn_domain.split(".")[0].upper() if "." in fqdn_domain else fqdn_domain.upper()
+            domain_part = netbios_from_fqdn(fqdn_domain)
         elif _report_netbios_domain:
             domain_part = _report_netbios_domain.upper()
         else:
@@ -1650,111 +1652,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             text-align: center;
         }
 
-        /* Account Risk Matrix */
-        .risk-matrix-section {
-            background: var(--bg-secondary);
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            border: 1px solid var(--border);
-            overflow-x: auto;
-        }
-
-        .risk-matrix-section h2 {
-            color: var(--text-primary);
-            margin-bottom: 1rem;
-            font-size: 1.1rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .risk-matrix {
-            border-collapse: collapse;
-            font-size: 0.8rem;
-            min-width: 100%;
-        }
-
-        .risk-matrix th {
-            background: var(--bg-card);
-            padding: 0.5rem 0.75rem;
-            text-align: center;
-            font-weight: 500;
-            color: var(--text-muted);
-            border: 1px solid var(--border);
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
-            white-space: nowrap;
-        }
-
-        .risk-matrix th:first-child {
-            text-align: left;
-            position: sticky;
-            left: 0;
-            z-index: 1;
-            background: var(--bg-card);
-        }
-
-        .risk-matrix td {
-            padding: 0.4rem 0.6rem;
-            border: 1px solid var(--border);
-            text-align: center;
-            vertical-align: middle;
-        }
-
-        .risk-matrix td:first-child {
-            text-align: left;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 0.8rem;
-            color: var(--text-secondary);
-            white-space: nowrap;
-            position: sticky;
-            left: 0;
-            z-index: 1;
-            background: var(--bg-secondary);
-        }
-
-        .risk-cell {
-            display: inline-block;
-            padding: 0.2rem 0.4rem;
-            border-radius: 3px;
-            font-size: 0.7rem;
-            font-weight: 600;
-            letter-spacing: 0.03em;
-            min-width: 24px;
-        }
-
-        .risk-cell.severity-critical {
-            background: var(--severity-critical-bg);
-            color: #fca5a5;
-            border: 1px solid var(--severity-critical);
-        }
-        .risk-cell.severity-high {
-            background: var(--severity-high-bg);
-            color: #fdba74;
-            border: 1px solid var(--severity-high);
-        }
-        .risk-cell.severity-medium {
-            background: var(--severity-medium-bg);
-            color: #fcd34d;
-            border: 1px solid var(--severity-medium);
-        }
-        .risk-cell.severity-low {
-            background: var(--severity-low-bg);
-            color: #93c5fd;
-            border: 1px solid var(--severity-low);
-        }
-        .risk-cell.severity-info {
-            background: rgba(75, 85, 99, 0.15);
-            color: var(--text-secondary);
-            border: 1px solid var(--severity-info);
-        }
-
-        .risk-matrix .multi-host {
-            font-weight: 600;
-        }
-
         /* Print styles */
         @media print {
             body, .container, .section, .host-block, .finding-row, .finding-detail {
@@ -1763,14 +1660,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
 
             .executive-summary, .header, .attack-path, .credential-summary,
-            .risk-matrix-section, .classification-reference, .disclaimer,
+            .classification-reference, .disclaimer,
             .failures-section {
                 background: white !important;
                 color: #1a1a1a !important;
             }
 
             .section, .host-block, .executive-summary, .header, .attack-path,
-            .credential-summary, .risk-matrix-section, .classification-reference,
+            .credential-summary, .classification-reference,
             .disclaimer, .failures-section, .stat-card, .severity-badge,
             .finding-detail, .finding-row {
                 border-color: #ddd !important;
@@ -2572,105 +2469,6 @@ def _generate_credential_summary(
     return summary_html
 
 
-def _generate_account_risk_matrix(
-    findings: list[tuple[SeverityScore, Any, str]],
-    service_rows: list[Any] | None = None,
-) -> str:
-    """Generate an account-vs-host risk matrix for privileged accounts."""
-    severity_order = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
-
-    # Collect data: account -> host -> {kinds, max_severity_level}
-    matrix_data: dict[str, dict[str, dict[str, Any]]] = {}
-
-    for severity, row, kind in findings:
-        task_type = str(_get_row_value(row, "type", "")).upper()
-        if task_type not in ("TIER-0", "PRIV"):
-            continue
-
-        account = _normalize_account_display(_get_finding_account(row, kind))
-        host = str(_get_row_value(row, "host", "Unknown"))
-
-        if account not in matrix_data:
-            matrix_data[account] = {}
-        if host not in matrix_data[account]:
-            matrix_data[account][host] = {"kinds": set(), "max_severity": "INFO"}
-
-        cell = matrix_data[account][host]
-        cell["kinds"].add(kind)
-
-        if severity_order.get(severity.level, 0) > severity_order.get(cell["max_severity"], 0):
-            cell["max_severity"] = severity.level
-
-    if not matrix_data:
-        return ""
-
-    # Determine unique hosts across all privileged accounts
-    all_hosts: list[str] = sorted({h for acct_data in matrix_data.values() for h in acct_data})
-    # Sort accounts: by highest severity across all hosts, then name
-    def account_sort_key(acct: str) -> tuple[int, str]:
-        max_sev = 0
-        for host_data in matrix_data[acct].values():
-            sev_val = severity_order.get(host_data["max_severity"], 0)
-            if sev_val > max_sev:
-                max_sev = sev_val
-        return (-max_sev, acct.lower())
-
-    sorted_accounts = sorted(matrix_data.keys(), key=account_sort_key)
-
-    # Check which accounts span multiple hosts (lateral movement)
-    multi_host_accounts = {acct for acct in matrix_data if len(matrix_data[acct]) > 1}
-
-    matrix_html = """
-        <div class="risk-matrix-section">
-            <h2>Account Risk Matrix</h2>
-            <table class="risk-matrix">
-                <thead>
-                    <tr>
-                        <th>Account</th>
-    """
-
-    for host in all_hosts:
-        matrix_html += f"<th>{html.escape(host)}</th>"
-
-    matrix_html += """
-                    </tr>
-                </thead>
-                <tbody>
-    """
-
-    for account in sorted_accounts:
-        multi_class = ' class="multi-host"' if account in multi_host_accounts else ""
-        matrix_html += f"<tr><td{multi_class}>{html.escape(account)}</td>"
-
-        for host in all_hosts:
-            cell_data = matrix_data[account].get(host)
-            if cell_data is None:
-                matrix_html += "<td></td>"
-            else:
-                kinds = cell_data["kinds"]
-                sev_level = cell_data["max_severity"]
-                sev_class = f"severity-{sev_level.lower()}"
-
-                label_parts: list[str] = []
-                if "task" in kinds:
-                    label_parts.append("T")
-                if "service" in kinds:
-                    label_parts.append("S")
-                label = " ".join(label_parts)
-
-                matrix_html += f'<td><span class="risk-cell {sev_class}">{label}</span></td>'
-
-        matrix_html += "</tr>"
-
-    matrix_html += """
-                </tbody>
-            </table>
-        </div>
-    """
-
-    return matrix_html
-
-
 def generate_html_report(
     rows: list[Any],
     output_path: str,
@@ -2695,7 +2493,7 @@ def generate_html_report(
     # Set module-level netbios domain for username normalization
     global _report_netbios_domain
     if domain:
-        _report_netbios_domain = domain.split(".")[0].upper() if "." in domain else domain.upper()
+        _report_netbios_domain = netbios_from_fqdn(domain)
     else:
         _report_netbios_domain = None
 

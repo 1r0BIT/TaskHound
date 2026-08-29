@@ -36,7 +36,7 @@ from .utils.console import (
     print_opengraph_section,
 )
 from .utils.date_parser import parse_timestamp
-from .utils.helpers import normalize_targets
+from .utils.helpers import netbios_from_fqdn, normalize_targets
 from .utils.logging import debug, good, info, set_verbosity, status, warn
 from .utils.network import preflight_credential_check, verify_ldap_connection
 
@@ -45,7 +45,6 @@ def _handle_opengraph(
     args: Any,
     all_rows: list[dict],
     opengraph_json_path: str | None,
-    opengraph_json_overwrites: bool,
     service_rows: list | None = None,
 ) -> None:
     """Handle BloodHound OpenGraph generation and upload."""
@@ -87,7 +86,7 @@ def _handle_opengraph(
 
     # Fallback: derive from FQDN first part
     if not netbios_name and args.domain:
-        netbios_name = args.domain.split(".")[0].upper()
+        netbios_name = netbios_from_fqdn(args.domain)
         debug(f"NetBIOS domain name (derived from FQDN): {netbios_name}")
 
     # Extract computer SIDs from task rows
@@ -248,11 +247,11 @@ def _handle_exports(
     laps_successes: int,
     laps_failures: list[LAPSFailure],
     service_rows: list | None = None,
-) -> tuple:
+) -> str | None:
     """Handle all export formats and summary output.
 
     Returns:
-        Tuple of (opengraph_json_path, opengraph_json_overwrites) for OpenGraph handling.
+        The opengraph_json_path for OpenGraph handling (or None).
     """
     from .output.writer import write_combined_json, write_service_csv
 
@@ -262,14 +261,12 @@ def _handle_exports(
 
     # Track if we need to auto-generate JSON for OpenGraph
     opengraph_json_path = None
-    opengraph_json_overwrites = False
 
     # Handle OpenGraph JSON (goes to same output_dir/opengraph/ as other OpenGraph files)
     if args.bh_opengraph:
         opengraph_dir = os.path.join(output_dir, "opengraph")
         os.makedirs(opengraph_dir, exist_ok=True)
         opengraph_json_path = os.path.join(opengraph_dir, "taskhound_data.json")
-        opengraph_json_overwrites = os.path.exists(opengraph_json_path)
         # Write OpenGraph JSON separately
         if all_rows:
             write_json(opengraph_json_path, all_rows, silent=True)
@@ -334,7 +331,7 @@ def _handle_exports(
         if os.path.exists(backup_dir):
             print_backup_section(backup_dir)
 
-    return opengraph_json_path, opengraph_json_overwrites
+    return opengraph_json_path
 
 
 def _auto_discover_targets(args: Any, bh_config: Any) -> list[str]:
@@ -750,7 +747,6 @@ This scan involves:
                 hv.loaded = True
                 hv.format_type = "bloodhound_live"
                 hv_loaded = True
-                len(hv.hv_computers) if hv.hv_computers else 0
                 good(f"Live BloodHound data loaded ({len(users_data)} users)")
 
                 # Test LDAP SID resolution capability
@@ -1048,8 +1044,6 @@ This scan involves:
             async_config = AsyncConfig(
                 workers=args.threads,
                 rate_limit=args.rate_limit,
-                timeout=args.timeout,
-                show_progress=True,
                 jitter=args.jitter,
             )
             async_engine = AsyncTaskHound(async_config)
@@ -1078,11 +1072,11 @@ This scan involves:
                         laps_failures.append(laps_result)
 
     # Handle exports and summary
-    opengraph_json_path, opengraph_json_overwrites = _handle_exports(
+    opengraph_json_path = _handle_exports(
         args, all_rows, hv_loaded, laps_cache, laps_successes, laps_failures,
         service_rows=all_service_rows,
     )
 
     # BloodHound OpenGraph Integration
     if args.bh_opengraph:
-        _handle_opengraph(args, all_rows, opengraph_json_path, opengraph_json_overwrites, service_rows=all_service_rows)
+        _handle_opengraph(args, all_rows, opengraph_json_path, service_rows=all_service_rows)

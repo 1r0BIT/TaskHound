@@ -2,7 +2,6 @@
 
 import threading
 import time
-from typing import List, Optional, Tuple
 
 from taskhound.engine.async_runner import (
     AsyncConfig,
@@ -18,11 +17,11 @@ from taskhound.models.task import TaskRow
 # Mock process function that simulates target processing
 def mock_process_target(
     target: str,
-    all_rows: List[TaskRow],
+    all_rows: list[TaskRow],
     delay: float = 0.1,
     should_fail: bool = False,
     **kwargs,
-) -> Tuple[List[str], Optional[bool]]:
+) -> tuple[list[str], bool | None]:
     """Mock process_target for testing."""
     if should_fail:
         raise Exception(f"Simulated failure for {target}")
@@ -46,15 +45,12 @@ class TestAsyncConfig:
         config = AsyncConfig()
         assert config.workers == 10
         assert config.rate_limit is None
-        assert config.timeout == 30
-        assert config.show_progress is True
         assert config.jitter is None
 
     def test_custom_values(self):
-        config = AsyncConfig(workers=20, rate_limit=5.0, timeout=60, jitter=3.0)
+        config = AsyncConfig(workers=20, rate_limit=5.0, jitter=3.0)
         assert config.workers == 20
         assert config.rate_limit == 5.0
-        assert config.timeout == 60
         assert config.jitter == 3.0
 
 
@@ -89,7 +85,7 @@ class TestAsyncTaskHound:
 
     def test_sequential_mode(self):
         """Test --threads 1 behaves like original sequential processing."""
-        config = AsyncConfig(workers=1, show_progress=False)
+        config = AsyncConfig(workers=1)
         engine = AsyncTaskHound(config)
 
         targets = ["host1", "host2", "host3"]
@@ -106,17 +102,15 @@ class TestAsyncTaskHound:
     def test_sequential_mode_with_jitter(self):
         """Test jitter adds delay between hosts in sequential mode."""
         jitter_seconds = 0.2
-        config = AsyncConfig(workers=1, show_progress=False, jitter=jitter_seconds)
+        config = AsyncConfig(workers=1, jitter=jitter_seconds)
         engine = AsyncTaskHound(config)
 
         targets = ["host1", "host2", "host3"]
-        start = time.perf_counter()
         results = engine.run(
             targets,
             mock_process_target,
             delay=0.01,
         )
-        elapsed = time.perf_counter() - start
 
         assert len(results) == 3
         assert all(r.success for r in results)
@@ -127,7 +121,7 @@ class TestAsyncTaskHound:
 
     def test_parallel_mode(self):
         """Test parallel processing with multiple workers."""
-        config = AsyncConfig(workers=3, show_progress=False)
+        config = AsyncConfig(workers=3)
         engine = AsyncTaskHound(config)
 
         targets = ["host1", "host2", "host3", "host4", "host5"]
@@ -149,7 +143,7 @@ class TestAsyncTaskHound:
 
     def test_handles_failures(self):
         """Test that failures are captured but don't stop processing."""
-        config = AsyncConfig(workers=2, show_progress=False)
+        config = AsyncConfig(workers=2)
         engine = AsyncTaskHound(config)
 
         def failing_process(target, all_rows, **kwargs):
@@ -179,7 +173,7 @@ class TestAsyncTaskHound:
     def test_rate_limiting(self):
         """Test that rate limiting slows down processing."""
         # 2 targets/second = 0.5s between targets
-        config = AsyncConfig(workers=10, rate_limit=2.0, show_progress=False)
+        config = AsyncConfig(workers=10, rate_limit=2.0)
         engine = AsyncTaskHound(config)
 
         targets = ["host1", "host2", "host3"]
@@ -199,7 +193,7 @@ class TestAsyncTaskHound:
 
     def test_rows_collected_per_target(self):
         """Test that each target gets its own row collector."""
-        config = AsyncConfig(workers=3, show_progress=False)
+        config = AsyncConfig(workers=3)
         engine = AsyncTaskHound(config)
 
         targets = ["host1", "host2", "host3"]
@@ -216,7 +210,7 @@ class TestAsyncTaskHound:
 
     def test_thread_safety_of_output_lock(self):
         """Test that output lock prevents interleaving."""
-        config = AsyncConfig(workers=5, show_progress=False)
+        config = AsyncConfig(workers=5)
         engine = AsyncTaskHound(config)
 
         output_order = []
@@ -367,7 +361,7 @@ class TestCacheThreadSafety:
             all_rows.append(TaskRow(host=target, path=f"\\Tasks\\{target}", computer_sid=cache.get("sids", target)))
             return [f"Processed {target}"], None
 
-        config = AsyncConfig(workers=5, show_progress=False)
+        config = AsyncConfig(workers=5)
         engine = AsyncTaskHound(config)
 
         targets = [f"host{i}" for i in range(20)]
@@ -393,7 +387,7 @@ class TestRealisticScenarios:
             all_rows.append(TaskRow(host=target, path=f"\\Tasks\\{target}", type="TASK"))
             return [f"OK: {target}"], None
 
-        config = AsyncConfig(workers=3, show_progress=False)
+        config = AsyncConfig(workers=3)
         engine = AsyncTaskHound(config)
 
         targets = ["host1", "host2_timeout", "host3", "host4_timeout", "host5"]
@@ -420,7 +414,7 @@ class TestRealisticScenarios:
             all_rows.append(TaskRow(host=target, path=f"\\Tasks\\{target}"))
             return [f"LAPS OK: {target}"], True  # True = LAPS success
 
-        config = AsyncConfig(workers=4, show_progress=False)
+        config = AsyncConfig(workers=4)
         engine = AsyncTaskHound(config)
 
         targets = ["host1", "host2_nolaps", "host3", "host4_nolaps", "host5"]
@@ -444,7 +438,7 @@ class TestRealisticScenarios:
             all_rows.append(TaskRow(host=target, path=f"\\Tasks\\{target}"))
             return [target], None
 
-        config = AsyncConfig(workers=20, show_progress=False)
+        config = AsyncConfig(workers=20)
         engine = AsyncTaskHound(config)
 
         targets = [f"host{i:03d}" for i in range(100)]
@@ -463,7 +457,7 @@ class TestRealisticScenarios:
 
     def test_rate_limit_accuracy(self):
         """Test that rate limiting is approximately accurate."""
-        config = AsyncConfig(workers=10, rate_limit=10.0, show_progress=False)  # 10/sec
+        config = AsyncConfig(workers=10, rate_limit=10.0)  # 10/sec
         engine = AsyncTaskHound(config)
 
         targets = [f"host{i}" for i in range(10)]
@@ -488,7 +482,7 @@ class TestSequentialServiceRows:
 
     def test_sequential_populates_service_rows(self):
         """Workers=1 (sequential mode) should collect service_rows per target."""
-        config = AsyncConfig(workers=1, show_progress=False)
+        config = AsyncConfig(workers=1)
         engine = AsyncTaskHound(config)
 
         def process_with_services(target, all_rows, all_service_rows=None, **kwargs):
@@ -515,7 +509,7 @@ class TestSequentialServiceRows:
 
     def test_sequential_service_rows_aggregation(self):
         """Verify aggregate_results collects service_rows from sequential results."""
-        config = AsyncConfig(workers=1, show_progress=False)
+        config = AsyncConfig(workers=1)
         engine = AsyncTaskHound(config)
 
         def process_with_services(target, all_rows, all_service_rows=None, **kwargs):

@@ -13,7 +13,6 @@ Tests cover:
 import pytest
 
 from taskhound.utils.helpers import (
-    BANNER,
     expand_cidr,
     is_cidr,
     is_ipv4,
@@ -331,18 +330,6 @@ class TestSanitizeJsonString:
 
 
 # ============================================================================
-# Test: BANNER constant
 # ============================================================================
 
 
-class TestBannerConstant:
-    """Tests for BANNER constant"""
-
-    def test_banner_contains_taskhound(self):
-        """Should contain ASCII art for TASKHOUND"""
-        assert "TTTTT" in BANNER
-        assert "DDDD" in BANNER
-
-    def test_banner_contains_author(self):
-        """Should contain author attribution"""
-        assert "0xr0BIT" in BANNER

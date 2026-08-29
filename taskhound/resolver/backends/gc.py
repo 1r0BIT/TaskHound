@@ -5,6 +5,7 @@
 
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
+from ...utils.helpers import domain_to_base_dn
 from ...utils.logging import debug, info, warn
 from ..constants import sid_to_binary
 
@@ -125,7 +126,7 @@ def resolve_sid_via_global_catalog(
             return None
 
         # Use forest root DN for search base
-        base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
+        base_dn = domain_to_base_dn(domain)
         debug(f"Using GC search base: {base_dn}")
 
         # Create search filter using binary SID

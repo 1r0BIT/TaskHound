@@ -684,25 +684,6 @@ class HighValueLoader:
             # AdminSDHolder is additional evidence alongside actual group membership
             tier0_reasons.append("AdminSDHolder")
 
-        # Check 3: BHCE-specific attributes (FALLBACK - only when no group data)
-        # This addresses the BHCE limitation where high-value auto-assigns tier0 tags
-        # IMPORTANT: Only classify as TIER-0 if we have actual group memberships
-        # Users with ONLY AdminSDHolder or ONLY BHCE tags should be PRIV, not TIER-0
-
-        if not has_actual_tier0_groups:
-            # User has no actual Tier-0 group memberships
-            # They may have AdminSDHolder (historical) or BHCE tags (auto-assigned)
-            # These should be classified as PRIV, not TIER-0
-            if self.format_type == "bhce" and user_data.get("istierzero"):
-                pass
-
-            system_tags = user_data.get("system_tags", "")
-            if system_tags and "admin_tier_0" in system_tags:
-                pass
-
-            # DO NOT add to tier0_reasons - this makes them PRIV instead of TIER-0
-            # AdminSDHolder alone or BHCE tags alone are NOT sufficient for TIER-0
-
         # Note: A user with high-value=true but NO actual Tier-0 groups will be classified as PRIV
         # A user with admincount=1 but NO actual Tier-0 groups will be classified as PRIV
         # This fixes false positives from historical AdminSDHolder protection

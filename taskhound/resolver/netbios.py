@@ -5,6 +5,7 @@
 
 from typing import Any
 
+from ..utils.helpers import domain_to_base_dn
 from ..utils.logging import debug
 
 # Module-level state
@@ -80,20 +81,6 @@ def resolve_netbios_to_fqdn(netbios_name: str) -> str | None:
     # No credentials stored - can't query LDAP
     debug("NETBIOS resolution unavailable - no LDAP credentials stored")
     return None
-
-
-def add_netbios_mapping(netbios_name: str, fqdn: str) -> None:
-    """
-    Manually add a NETBIOS → FQDN mapping to the cache.
-
-    Use this to populate the cache from BloodHound or other sources.
-
-    Args:
-        netbios_name: NETBIOS domain name (e.g., "YOURCOMPANY")
-        fqdn: Fully qualified domain name (e.g., "corp.example.com")
-    """
-    global _netbios_to_fqdn_cache
-    _netbios_to_fqdn_cache[netbios_name.upper()] = fqdn.upper()
 
 
 def get_netbios_cache() -> dict[str, str]:
@@ -177,7 +164,7 @@ def _load_netbios_cache_from_ldap() -> None:
             kerberos=kerberos,
         )
 
-        base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
+        base_dn = domain_to_base_dn(domain)
 
         # Query 1: crossRef objects (own forest domains)
         config_dn = f"CN=Partitions,CN=Configuration,{base_dn}"

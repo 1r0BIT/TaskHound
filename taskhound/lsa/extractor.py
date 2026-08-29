@@ -50,9 +50,6 @@ class MSDS_MANAGEDPASSWORD_BLOB(Structure):  # noqa: N801 — matches MS-ADTS na
         ("UnchangedPasswordInterval", ":"),
     )
 
-    def __init__(self, data=None):
-        Structure.__init__(self, data=data)
-
     def fromString(self, data):
         Structure.fromString(self, data)
         end = self["QueryPasswordIntervalOffset"] if self["PreviousPasswordOffset"] == 0 else self["PreviousPasswordOffset"]

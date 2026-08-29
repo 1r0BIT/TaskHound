@@ -2,7 +2,7 @@
 Test date parsing utilities.
 """
 
-from datetime import timezone
+from datetime import UTC
 
 from taskhound.utils.date_parser import (
     _FILETIME_EPOCH_DIFF,
@@ -22,7 +22,7 @@ class TestDateParser:
         assert dt.year == 2023
         assert dt.month == 1
         assert dt.day == 1
-        assert dt.tzinfo == timezone.utc
+        assert dt.tzinfo == UTC
 
     def test_parse_timestamp_windows(self):
         """Test parsing Windows FILETIME."""
@@ -33,7 +33,7 @@ class TestDateParser:
         assert dt.year == 2023
         assert dt.month == 1
         assert dt.day == 1
-        assert dt.tzinfo == timezone.utc
+        assert dt.tzinfo == UTC
 
     def test_parse_timestamp_string(self):
         """Test parsing string timestamps."""
@@ -67,14 +67,14 @@ class TestDateParser:
         dt = parse_iso_date("2023-01-01T12:00:00")
         assert dt.year == 2023
         assert dt.hour == 12
-        assert dt.tzinfo == timezone.utc
+        assert dt.tzinfo == UTC
 
     def test_parse_iso_date_z_suffix(self):
         """Test parsing ISO dates with Z suffix."""
         dt = parse_iso_date("2023-01-01T12:00:00Z")
         assert dt.year == 2023
         assert dt.hour == 12
-        assert dt.tzinfo == timezone.utc
+        assert dt.tzinfo == UTC
 
     def test_parse_iso_date_timezone(self):
         """Test parsing ISO dates with timezone offset."""
@@ -122,7 +122,7 @@ class TestParseAdTimestamp:
         ad_timestamp = (1704067200 + _FILETIME_EPOCH_DIFF) * 10_000_000
         result = parse_ad_timestamp(ad_timestamp)
         assert result is not None
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
 
 
 class TestParseFiletimeHex:
@@ -168,7 +168,7 @@ class TestParseFiletimeHex:
         hex_str = format(filetime, 'x')
         result = parse_filetime_hex(hex_str)
         assert result is not None
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
 
 
 class TestFiletimeEpochDiff:

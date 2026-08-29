@@ -8,32 +8,11 @@ from unittest.mock import MagicMock, patch
 from taskhound.utils.dns import (
     DEFAULT_DNS_TIMEOUT,
     DEFAULT_LDAP_TIMEOUT,
-    _is_ip_address,
     _test_port,
     discover_domain_controllers,
     get_working_dc,
     resolve_hostname,
-    reverse_lookup,
 )
-
-
-class TestIsIpAddress:
-    """Tests for _is_ip_address helper."""
-
-    def test_valid_ipv4(self):
-        """Should return True for valid IPv4."""
-        assert _is_ip_address("192.168.1.1") is True
-        assert _is_ip_address("10.0.0.1") is True
-        assert _is_ip_address("255.255.255.255") is True
-        assert _is_ip_address("0.0.0.0") is True
-
-    def test_invalid_ipv4(self):
-        """Should return False for invalid IPv4."""
-        assert _is_ip_address("192.168.1.256") is False
-        assert _is_ip_address("192.168.1") is False
-        assert _is_ip_address("hostname") is False
-        assert _is_ip_address("dc.corp.local") is False
-        assert _is_ip_address("") is False
 
 
 class TestTestPort:
@@ -172,28 +151,6 @@ class TestResolveHostname:
         mock_gethostbyname.side_effect = socket.gaierror("DNS failed")
 
         result = resolve_hostname("nonexistent.local")
-
-        assert result is None
-
-
-class TestReverseLookup:
-    """Tests for reverse_lookup function."""
-
-    @patch("socket.gethostbyaddr")
-    def test_reverse_lookup_success(self, mock_gethostbyaddr):
-        """Should resolve IP to hostname."""
-        mock_gethostbyaddr.return_value = ("dc.corp.local", [], ["192.168.1.1"])
-
-        result = reverse_lookup("192.168.1.1")
-
-        assert result == "dc.corp.local"
-
-    @patch("socket.gethostbyaddr")
-    def test_reverse_lookup_failure(self, mock_gethostbyaddr):
-        """Should return None on failure."""
-        mock_gethostbyaddr.side_effect = socket.herror("Not found")
-
-        result = reverse_lookup("192.168.1.1")
 
         assert result is None
 

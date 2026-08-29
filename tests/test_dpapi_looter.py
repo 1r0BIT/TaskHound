@@ -17,12 +17,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from taskhound.dpapi.decryptor import MasterkeyInfo, ScheduledTaskCredential
+from taskhound.dpapi.decryptor import MasterkeyInfo, ScheduledTaskCredential, _decrypt_dpapi_blob
 from taskhound.dpapi.looter import (
     CredentialLooter,
     OfflineDPAPICollector,
     _decrypt_credential_blob_offline,
-    _decrypt_dpapi_blob_data,
     collect_dpapi_files,
     decrypt_offline_dpapi_files,
     loot_credentials,
@@ -422,18 +421,18 @@ class TestDecryptCredentialBlobOffline:
 
 
 # ============================================================================
-# Unit Tests: _decrypt_dpapi_blob_data
+# Unit Tests: _decrypt_dpapi_blob (shared crypto core, now in decryptor.py)
 # ============================================================================
 
 
 class TestDecryptDpapiBlobData:
-    """Tests for _decrypt_dpapi_blob_data function"""
+    """Tests for the shared _decrypt_dpapi_blob crypto core"""
 
     def test_invalid_blob_returns_none(self, sample_masterkey_info):
         """Should return None for invalid blob data"""
-        result = _decrypt_dpapi_blob_data(
-            dpapi_blob_bytes=b"INVALID",
-            mk_info=sample_masterkey_info
+        result = _decrypt_dpapi_blob(
+            blob_bytes=b"INVALID",
+            masterkey=sample_masterkey_info
         )
         assert result is None
 
@@ -442,9 +441,9 @@ class TestDecryptDpapiBlobData:
         mk = MasterkeyInfo(guid="test", blob=b"x")
         mk._sha1 = "invalid_sha1_not_hex"  # Will cause unhexlify to fail
 
-        result = _decrypt_dpapi_blob_data(
-            dpapi_blob_bytes=b"BLOB",
-            mk_info=mk
+        result = _decrypt_dpapi_blob(
+            blob_bytes=b"BLOB",
+            masterkey=mk
         )
         assert result is None
 

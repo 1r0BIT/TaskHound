@@ -1,6 +1,5 @@
 """Tests for pre-flight credential validation (taskhound.utils.network.preflight_credential_check)."""
 
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest

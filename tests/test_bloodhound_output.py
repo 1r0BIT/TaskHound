@@ -93,32 +93,6 @@ class TestExtractHostFromConnector:
         assert result == "myserver"
 
 
-class TestUploadWithoutRequests:
-    """Tests for upload function when requests library is not available."""
-
-    def test_upload_fails_without_requests(self):
-        """Upload fails gracefully when requests not installed."""
-        from taskhound.output import bloodhound
-
-        # Save original value
-        original_has_requests = bloodhound.HAS_REQUESTS
-
-        try:
-            # Simulate requests not being installed
-            bloodhound.HAS_REQUESTS = False
-
-            with patch("taskhound.output.bloodhound.warn"):
-                result = bloodhound.upload_opengraph_to_bloodhound(
-                    opengraph_file="/tmp/test.json",
-                    bloodhound_url="http://localhost:8080",
-                )
-
-            assert result is False
-        finally:
-            # Restore original value
-            bloodhound.HAS_REQUESTS = original_has_requests
-
-
 class TestNormalizeEdgeCases:
     """Edge case tests for connector normalization."""
 
@@ -170,21 +144,6 @@ class TestSchemaInstallWiring:
         assert up.call_count == 2
         assert order == ["install", "upload", "upload"]  # schema must precede every upload
         assert results == [True, True]
-
-    def test_single_installs_schema_before_upload(self):
-        from taskhound.output import bloodhound
-
-        order = []
-        auth = Mock()
-        with patch.object(bloodhound, "_authenticate_with_fallback", return_value=auth), \
-             patch.object(bloodhound, "_install_schema",
-                          side_effect=lambda a: order.append("install") or True), \
-             patch.object(bloodhound, "_upload_file",
-                          side_effect=lambda *a, **k: order.append("upload") or True):
-            ok = bloodhound.upload_opengraph_to_bloodhound("a.json", "http://localhost:8080")
-
-        assert ok is True
-        assert order == ["install", "upload"]
 
     def test_failed_install_does_not_abort_upload(self):
         from taskhound.output import bloodhound

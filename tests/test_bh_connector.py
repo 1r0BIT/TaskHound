@@ -3,12 +3,13 @@ Tests for BloodHound connector module.
 """
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from taskhound.connectors.bloodhound import (
     BloodHoundConnector,
-    _get_alternate_protocol_uri,
     _safe_get_sam,
-    _sanitize_string_value,
 )
+from taskhound.output.bloodhound import _get_alternate_protocol_uri
 
 
 class TestSafeGetSam:
@@ -55,34 +56,6 @@ class TestSafeGetSam:
         result = _safe_get_sam(data, "SamAccountName")
 
         assert result == ""
-
-
-class TestSanitizeStringValue:
-    """Tests for _sanitize_string_value helper function"""
-
-    def test_returns_string_unchanged(self):
-        """Should return string as-is"""
-        result = _sanitize_string_value("test value")
-
-        assert result == "test value"
-
-    def test_handles_non_string(self):
-        """Should return non-string values unchanged"""
-        result = _sanitize_string_value(123)
-
-        assert result == 123
-
-    def test_handles_none(self):
-        """Should return None unchanged"""
-        result = _sanitize_string_value(None)
-
-        assert result is None
-
-    def test_handles_backslashes(self):
-        """Should handle strings with backslashes"""
-        result = _sanitize_string_value("C:\\Windows\\System32")
-
-        assert "Windows" in result
 
 
 class TestBloodHoundConnectorInit:
@@ -174,6 +147,40 @@ class TestBloodHoundConnectorRunCypherQuery:
 
         assert result == {"data": {"nodes": []}}
         connector.authenticator.request.assert_called_once()
+
+    @patch.object(BloodHoundConnector, '__init__', lambda x, **kwargs: None)
+    @patch('taskhound.connectors.bloodhound.GraphDatabase')
+    def test_legacy_driver_closes_on_success(self, mock_graph_db):
+        """_legacy_driver yields the bolt-URI/auth driver and closes it on exit (U-40)."""
+        connector = BloodHoundConnector.__new__(BloodHoundConnector)
+        connector.ip = "10.0.0.1"
+        connector.username = "neo4j"
+        connector.password = "pw"
+        mock_driver = MagicMock()
+        mock_graph_db.driver.return_value = mock_driver
+
+        with connector._legacy_driver() as driver:
+            assert driver is mock_driver
+
+        mock_graph_db.driver.assert_called_once_with("bolt://10.0.0.1:7687", auth=("neo4j", "pw"))
+        mock_driver.close.assert_called_once()
+
+    @patch.object(BloodHoundConnector, '__init__', lambda x, **kwargs: None)
+    @patch('taskhound.connectors.bloodhound.GraphDatabase')
+    def test_legacy_driver_closes_on_exception(self, mock_graph_db):
+        """Driver is closed even when the body raises — the leak fix that motivated U-40."""
+        connector = BloodHoundConnector.__new__(BloodHoundConnector)
+        connector.ip = "10.0.0.1"
+        connector.username = "neo4j"
+        connector.password = "pw"
+        mock_driver = MagicMock()
+        mock_graph_db.driver.return_value = mock_driver
+
+        with pytest.raises(RuntimeError):
+            with connector._legacy_driver():
+                raise RuntimeError("boom")
+
+        mock_driver.close.assert_called_once()
 
     @patch.object(BloodHoundConnector, '__init__', lambda x, **kwargs: None)
     @patch('taskhound.connectors.bloodhound.GraphDatabase')

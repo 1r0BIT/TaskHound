@@ -265,13 +265,6 @@ class TestLoadConfigNoFile:
             config = load_config()
         assert config == {}
 
-    def test_no_tomllib(self):
-        """Test that empty dict is returned when tomllib not available."""
-        with patch("taskhound.config.tomllib", None):
-            config = load_config()
-        assert config == {}
-
-
 class TestBuildParser:
     """Tests for build_parser function."""
 

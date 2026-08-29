@@ -24,6 +24,16 @@ from ..utils.helpers import sanitize_json_string
 from ..utils.logging import debug, good, status, warn
 
 
+def _bhce_nodes(data: dict | None) -> dict:
+    """Return the nodes map from a BHCE cypher response (data["data"]["nodes"]), or {}."""
+    return (data or {}).get("data", {}).get("nodes", {})
+
+
+def _first_node(nodes: dict) -> Any:
+    """Return the first node from a BHCE nodes map. Caller must ensure nodes is non-empty."""
+    return list(nodes.values())[0]
+
+
 def _safe_get_sam(data: dict, key: str) -> str:
     """
     Safely extract SAM account name from data, handling None values.
@@ -39,19 +49,6 @@ def _safe_get_sam(data: dict, key: str) -> str:
     if value is None:
         return ""
     return str(value).lower()
-
-
-def _sanitize_string_value(value: str) -> str:
-    """
-    Sanitize individual string values that might contain problematic backslashes.
-    This is for processing individual field values from databases/APIs.
-    """
-    if not isinstance(value, str):
-        return value
-
-    # For individual string values, we just need to ensure they're properly handled
-    # when converting to JSON later. The main issue is with JSON parsing, not storage.
-    return value
 
 
 class BloodHoundConnector:
@@ -128,6 +125,20 @@ class BloodHoundConnector:
             warn(f"Error executing Cypher query: {e}")
             return None
 
+    @contextlib.contextmanager
+    def _legacy_driver(self):
+        """Yield a Neo4j driver for the legacy bolt connection (port 7687); always closes it.
+
+        Callers must still guard `if GraphDatabase is None` first — the no-driver
+        return value differs per caller. The try/finally here guarantees the driver
+        is closed even when a caller returns from inside a `with driver.session()`.
+        """
+        driver = GraphDatabase.driver(f"bolt://{self.ip}:7687", auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
+        try:
+            yield driver
+        finally:
+            driver.close()
+
     def _run_cypher_query_legacy(self, query: str) -> dict | None:
         """
         Execute Cypher query against Legacy BloodHound via Neo4j Bolt.
@@ -139,15 +150,10 @@ class BloodHoundConnector:
             return None
 
         try:
-            uri = f"bolt://{self.ip}:7687"
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
-
-            with driver.session() as session:
+            with self._legacy_driver() as driver, driver.session() as session:
                 result = session.run(query)
                 # Convert Neo4j records to list of dicts
                 records = [dict(record) for record in result]
-
-            driver.close()
 
             # Return in BHCE-compatible format
             # BHCE returns: {"data": {"data": [...], "nodes": {...}}}
@@ -302,31 +308,6 @@ class BloodHoundConnector:
             warn("Install with: pip install neo4j")
             return False
 
-        # Legacy BloodHound typically uses port 7687
-        uri = f"bolt://{self.ip}:7687"
-
-        try:
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
-
-            # Test connection
-            with driver.session() as session:
-                result = session.run("MATCH (n) RETURN count(n) LIMIT 1")
-                record = result.single()
-                if record is None:
-                    return False
-                record[0]  # This will raise an exception if connection fails
-
-            status(f"[+] Connected to Legacy BloodHound at {self.ip}:7687")
-            status("[*] Collecting high-value user data from BloodHound (be patient)")
-
-        except Exception as e:
-            if "authentication" in str(e).lower() or "credentials" in str(e).lower():
-                warn("BloodHound login failed - invalid credentials")
-            else:
-                warn(f"BloodHound Legacy connection failed at {self.ip}:7687")
-                warn("Check if Neo4j is running and accessible")
-            return False
-
         # Comprehensive query for both high-value and Tier 0 users
         # This combines high-value detection with Tier 0 group membership
         comprehensive_query = """
@@ -354,30 +335,48 @@ class BloodHoundConnector:
         """
 
         try:
-            with driver.session() as session:
-                users_found: set[str] = set()
-
-                # Single comprehensive query instead of multiple queries
+            with self._legacy_driver() as driver:
+                # Test connection
                 try:
-                    result = session.run(comprehensive_query)
-                    for record in result:
-                        self._process_legacy_user(record, users_found)
+                    with driver.session() as session:
+                        result = session.run("MATCH (n) RETURN count(n) LIMIT 1")
+                        record = result.single()
+                        if record is None:
+                            return False
+                        record[0]  # This will raise an exception if connection fails
 
-                    if len(users_found) == 0:
-                        warn("No high-value or Tier 0 users found in Legacy BloodHound")
-                    else:
-                        good(f"Retrieved {len(users_found)} high-value users from Legacy BloodHound")
+                    status(f"[+] Connected to Legacy BloodHound at {self.ip}:7687")
+                    status("[*] Collecting high-value user data from BloodHound (be patient)")
 
                 except Exception as e:
-                    warn(f"Legacy BloodHound query failed: {e}")
+                    if "authentication" in str(e).lower() or "credentials" in str(e).lower():
+                        warn("BloodHound login failed - invalid credentials")
+                    else:
+                        warn(f"BloodHound Legacy connection failed at {self.ip}:7687")
+                        warn("Check if Neo4j is running and accessible")
                     return False
 
-            driver.close()
-            return True
+                with driver.session() as session:
+                    users_found: set[str] = set()
+
+                    # Single comprehensive query instead of multiple queries
+                    try:
+                        result = session.run(comprehensive_query)
+                        for record in result:
+                            self._process_legacy_user(record, users_found)
+
+                        if len(users_found) == 0:
+                            warn("No high-value or Tier 0 users found in Legacy BloodHound")
+                        else:
+                            good(f"Retrieved {len(users_found)} high-value users from Legacy BloodHound")
+
+                    except Exception as e:
+                        warn(f"Legacy BloodHound query failed: {e}")
+                        return False
+
+                return True
 
         except Exception as e:
-            with contextlib.suppress(Exception):
-                driver.close()
             warn(f"BloodHound query execution failed: {e}")
             return False
 
@@ -393,16 +392,7 @@ class BloodHoundConnector:
             RETURN g
             """
 
-            # Use run_cypher_query which handles auth automatically
-            # Note: run_cypher_query expects just the query string, not the full body
-            # But wait, run_cypher_query wraps it in {"query": query}.
-            # However, here we might need "include_properties": True?
-            # run_cypher_query implementation: body = json.dumps({"query": query}, separators=(",", ":")).encode()
-            # It does NOT include "include_properties": True.
-            # BHCE API v2 usually returns properties by default in "nodes" map if we return the node.
-            # Let's check if run_cypher_query is sufficient.
-            # The query returns 'g' (the node).
-
+            # run_cypher_query handles auth and returns the node in the "nodes" map
             data = self.run_cypher_query(group_query)
 
             if data:
@@ -479,46 +469,6 @@ class BloodHoundConnector:
             "lastlogon": all_props.get("lastlogon"),
         }
 
-    def search_node_by_name(self, name: str, node_type: str = "Computer") -> dict[str, str] | None:
-        """
-        Search for a node in BloodHound by name and return its node_id and objectId.
-
-        Args:
-            name: Node name to search for (e.g., "DC01.DOMAIN.LOCAL" or "ADMIN@DOMAIN.LOCAL")
-            node_type: Type of node ("Computer" or "User")
-
-        Returns:
-            Dict with 'node_id' and 'object_id' keys, or None if not found
-            Example: {"node_id": "19", "object_id": "S-1-5-21-...-1105"}
-        """
-        if self.bh_type != "bhce":
-            warn("search_node_by_name only supported for BHCE")
-            return None
-
-        query = f'MATCH (n:{node_type} {{name: "{name}"}}) RETURN n'
-
-        try:
-            data = self.run_cypher_query(query)
-
-            if data:
-                nodes = data.get("data", {}).get("nodes", {})
-
-                if nodes:
-                    # Get first (and should be only) node
-                    node_id = list(nodes.keys())[0]
-                    node_data = nodes[node_id]
-
-                    return {
-                        "node_id": node_id,
-                        "object_id": node_data.get("objectId", ""),
-                        "label": node_data.get("label", ""),
-                    }
-            return None
-
-        except Exception as e:
-            warn(f"Error searching for {node_type} {name}: {e}")
-            return None
-
     def get_all_computers(self) -> dict[str, str]:
         """
         Get all computer objects from BloodHound and return hostname -> SID mapping.
@@ -539,7 +489,7 @@ class BloodHoundConnector:
                 data = self.run_cypher_query(query)
 
                 if data:
-                    nodes = data.get("data", {}).get("nodes", {})
+                    nodes = _bhce_nodes(data)
 
                     for _, node_data in nodes.items():
                         object_id = node_data.get("objectId", "")
@@ -564,10 +514,7 @@ class BloodHoundConnector:
                     warn("neo4j library not installed - required for Legacy BloodHound")
                     return computers
 
-                uri = f"bolt://{self.ip}:7687"
-                driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
-
-                with driver.session() as session:
+                with self._legacy_driver() as driver, driver.session() as session:
                     result = session.run(query)
                     for record in result:
                         node = record["c"]
@@ -587,8 +534,6 @@ class BloodHoundConnector:
                         hostname = hostname.upper()
                         if hostname:
                             computers[hostname] = object_id.upper()
-
-                driver.close()
 
             debug(f"BloodHound: Loaded {len(computers)} computer SIDs")
             return computers
@@ -624,21 +569,16 @@ class BloodHoundConnector:
             data = self.run_cypher_query(query)
 
             if data:
-                nodes = data.get("data", {}).get("nodes", {})
+                nodes = _bhce_nodes(data)
 
-                if len(nodes) == 0:
+                if not nodes:
                     return None
-                elif len(nodes) == 1:
-                    # Perfect match!
-                    node = list(nodes.values())[0]
-                    return {"name": node.get("label"), "objectid": node.get("objectId")}
-                else:
-                    # Multiple matches - extremely rare but possible
-                    # Log warning and return first match
+                if len(nodes) > 1:
+                    # Multiple matches - extremely rare but possible; warn and take the first
                     domain_names = [n.get("label") for n in nodes.values()]
                     warn(f"Multiple domains match NETBIOS '{netbios_name}': {domain_names}")
-                    node = list(nodes.values())[0]
-                    return {"name": node.get("label"), "objectid": node.get("objectId")}
+                node = _first_node(nodes)
+                return {"name": node.get("label"), "objectid": node.get("objectId")}
             return None
 
         except Exception as e:
@@ -674,7 +614,7 @@ class BloodHoundConnector:
 
             if data:
                 # Parse nodes from BHCE response format (same as other methods)
-                nodes = data.get("data", {}).get("nodes", {})
+                nodes = _bhce_nodes(data)
 
                 for _, node_data in nodes.items():
                     # Extract name (label) and objectId from node
@@ -762,21 +702,16 @@ class BloodHoundConnector:
             data = self.run_cypher_query(query)
 
             if data:
-                nodes = data.get("data", {}).get("nodes", {})
+                nodes = _bhce_nodes(data)
 
-                if len(nodes) == 0:
+                if not nodes:
                     return None
-                elif len(nodes) == 1:
-                    # User found!
-                    node_id = list(nodes.keys())[0]
-                    node = list(nodes.values())[0]
-                    return {"name": node.get("label"), "objectid": node.get("objectId"), "node_id": node_id}
-                else:
+                if len(nodes) > 1:
                     # Multiple matches - should never happen for UPN (unique), but handle it
                     warn(f"Multiple users match UPN '{upn}': {[n.get('label') for n in nodes.values()]}")
-                    node_id = list(nodes.keys())[0]
-                    node = list(nodes.values())[0]
-                    return {"name": node.get("label"), "objectid": node.get("objectId"), "node_id": node_id}
+                node_id = list(nodes.keys())[0]
+                node = _first_node(nodes)
+                return {"name": node.get("label"), "objectid": node.get("objectId"), "node_id": node_id}
             return None
 
         except Exception as e:
@@ -844,10 +779,10 @@ class BloodHoundConnector:
             data = self.run_cypher_query(query)
 
             if data:
-                nodes = data.get("data", {}).get("nodes", {})
+                nodes = _bhce_nodes(data)
 
                 if nodes:
-                    node_data = list(nodes.values())[0]
+                    node_data = _first_node(nodes)
                     properties = node_data.get("properties", {})
 
                     return {
@@ -875,10 +810,7 @@ class BloodHoundConnector:
             debug("neo4j library not installed - cannot query Legacy BloodHound")
             return None
 
-        uri = f"bolt://{self.ip}:7687"
-
         try:
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
             identifier = identifier.strip()
 
             # Determine query type based on identifier format
@@ -899,7 +831,7 @@ class BloodHoundConnector:
                 debug(f"WARNING: Querying by sAMAccountName alone is ambiguous: {identifier}")
                 query = f"MATCH (u:User) WHERE toLower(u.samaccountname) = '{identifier.lower()}' RETURN u LIMIT 1"
 
-            with driver.session() as session:
+            with self._legacy_driver() as driver, driver.session() as session:
                 result = session.run(query)
                 record = result.single()
 
@@ -917,7 +849,6 @@ class BloodHoundConnector:
                         "domain": properties.get("domain", ""),
                     }
 
-            driver.close()
             return None
 
         except Exception as e:
@@ -962,7 +893,7 @@ class BloodHoundConnector:
             data = self.run_cypher_query(query)
 
             if data:
-                nodes = data.get("data", {}).get("nodes", {})
+                nodes = _bhce_nodes(data)
 
                 if nodes:
                     # Get first matching user
@@ -1027,7 +958,7 @@ class BloodHoundConnector:
             data = self.run_cypher_query(query)
 
             if data:
-                nodes = data.get("data", {}).get("nodes", {})
+                nodes = _bhce_nodes(data)
                 return len(nodes) > 0
 
             return False
@@ -1063,10 +994,7 @@ class BloodHoundConnector:
             # Build query - search by samaccountname (more reliable than UPN)
             query = f"MATCH (u:User) WHERE toLower(u.samaccountname) = '{query_username.lower()}' RETURN u"
 
-            uri = f"bolt://{self.ip}:7687"
-            driver = GraphDatabase.driver(uri, auth=(self.username, self.password))  # type: ignore[arg-type]  # Optional credentials validated before use
-
-            with driver.session() as session:
+            with self._legacy_driver() as driver, driver.session() as session:
                 result = session.run(query)
                 record = result.single()
 
@@ -1106,7 +1034,6 @@ class BloodHoundConnector:
                         "objectid": properties.get("objectid", ""),
                     }
 
-            driver.close()
             return None
 
         except Exception as e:
@@ -1232,6 +1159,8 @@ def connect_bloodhound(args) -> tuple[dict[str, Any] | None, BloodHoundConnector
 
     # Connection failed - try alternate protocol (http <-> https)
     if not is_legacy:  # Only for BHCE (Legacy uses bolt://)
+        from ..output.bloodhound import _get_alternate_protocol_uri
+
         alt_uri = _get_alternate_protocol_uri(connector_uri)
         if alt_uri:
             original_scheme = "https" if connector_uri.startswith("https://") else "http"
@@ -1262,29 +1191,3 @@ def connect_bloodhound(args) -> tuple[dict[str, Any] | None, BloodHoundConnector
     return None, None
 
 
-def _get_alternate_protocol_uri(uri: str) -> str | None:
-    """
-    Get the alternate protocol URI (http <-> https).
-
-    Only swaps the protocol, keeps the same port.
-
-    Args:
-        uri: Original URI (e.g., "http://localhost:8080")
-
-    Returns:
-        URI with alternate protocol, or None if not applicable
-    """
-    from urllib.parse import urlparse, urlunparse
-
-    parsed = urlparse(uri)
-
-    if parsed.scheme == "http":
-        # http -> https (keep same port)
-        new_netloc = f"{parsed.hostname}:{parsed.port}" if parsed.port else parsed.hostname
-        return urlunparse(("https", new_netloc, parsed.path, "", "", ""))
-    elif parsed.scheme == "https":
-        # https -> http (keep same port)
-        new_netloc = f"{parsed.hostname}:{parsed.port}" if parsed.port else parsed.hostname
-        return urlunparse(("http", new_netloc, parsed.path, "", "", ""))
-
-    return None

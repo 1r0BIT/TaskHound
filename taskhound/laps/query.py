@@ -4,6 +4,7 @@ import contextlib
 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
 from ..utils.date_parser import parse_ad_timestamp
+from ..utils.helpers import domain_to_base_dn
 from ..utils.ldap import (
     LDAPConnectionError as LAPSConnectionError_Base,
 )
@@ -147,7 +148,7 @@ def query_laps_passwords(
     info("LAPS: Querying computer objects for LAPS attributes...")
 
     # Build base DN
-    base_dn = ",".join([f"DC={part}" for part in domain.split(".")])
+    base_dn = domain_to_base_dn(domain)
 
     # LDAP filter: computers with any LAPS attribute populated
     # Include msLAPS-EncryptedPassword for Windows LAPS encrypted passwords
@@ -231,14 +232,6 @@ def query_laps_passwords(
         info(f"LAPS:   - Legacy LAPS: {stats['legacy']}")
     if stats["encrypted"] > 0:
         warn(f"LAPS:   - Encrypted (failed): {stats['encrypted']}", verbose_only=True)
-
-    # Save to persistent cache for future runs
-    if save_to_cache:
-        try:
-            cache.save_to_persistent_cache()
-            debug(f"LAPS: Saved {stats['total']} credentials to persistent cache")
-        except Exception as e:
-            debug(f"LAPS: Failed to save to persistent cache: {e}")
 
     return cache
 
