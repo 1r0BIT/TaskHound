@@ -2,7 +2,6 @@
 
 import threading
 import time
-from typing import List, Optional, Tuple
 
 from taskhound.engine.async_runner import (
     AsyncConfig,
@@ -18,11 +17,11 @@ from taskhound.models.task import TaskRow
 # Mock process function that simulates target processing
 def mock_process_target(
     target: str,
-    all_rows: List[TaskRow],
+    all_rows: list[TaskRow],
     delay: float = 0.1,
     should_fail: bool = False,
     **kwargs,
-) -> Tuple[List[str], Optional[bool]]:
+) -> tuple[list[str], bool | None]:
     """Mock process_target for testing."""
     if should_fail:
         raise Exception(f"Simulated failure for {target}")
@@ -107,13 +106,11 @@ class TestAsyncTaskHound:
         engine = AsyncTaskHound(config)
 
         targets = ["host1", "host2", "host3"]
-        start = time.perf_counter()
         results = engine.run(
             targets,
             mock_process_target,
             delay=0.01,
         )
-        elapsed = time.perf_counter() - start
 
         assert len(results) == 3
         assert all(r.success for r in results)

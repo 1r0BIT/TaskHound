@@ -7,6 +7,7 @@ Tests cover:
 """
 
 import base64
+from datetime import UTC
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -372,12 +373,12 @@ class TestGetBloodhoundDataAge:
 
     def test_calculates_age_from_lastseen(self):
         """Should calculate age from lastseen timestamp"""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from taskhound.utils.bh_api import get_bloodhound_data_age
 
         # Create a timestamp from 5 days ago
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         five_days_ago = now - timedelta(days=5)
         ts_str = five_days_ago.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 

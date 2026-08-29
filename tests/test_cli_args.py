@@ -179,7 +179,7 @@ def test_offline_mode_no_nameError_on_service_rows(tmp_path):
             "--no-confirm",
         ]
 
-        with patch.object(cli, "process_offline_directory", return_value=[]) as mock_proc, \
+        with patch.object(cli, "process_offline_directory", return_value=[]), \
              patch.object(cli, "_handle_exports", return_value=None) as mock_exports, \
              patch.object(cli, "_handle_opengraph"), \
              patch("taskhound.cli.HighValueLoader", return_value=MagicMock(loaded=False)):

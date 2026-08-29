@@ -3,7 +3,7 @@
 import json
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -20,7 +20,7 @@ class TestAnalyzePasswordFreshness:
 
     def test_missing_task_date(self):
         """Returns UNKNOWN when task_date is None."""
-        pwd_change_date = datetime.now(timezone.utc)
+        pwd_change_date = datetime.now(UTC)
         status, explanation = _analyze_password_freshness(None, pwd_change_date)
         assert status == "UNKNOWN"
         assert "Insufficient" in explanation
@@ -38,7 +38,7 @@ class TestAnalyzePasswordFreshness:
 
     def test_password_changed_before_task(self):
         """Returns GOOD when password was changed before task creation."""
-        pwd_change_date = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        pwd_change_date = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         task_date = "2025-06-15T10:00:00"  # After password change
         status, explanation = _analyze_password_freshness(task_date, pwd_change_date)
         assert status == "GOOD"
@@ -46,7 +46,7 @@ class TestAnalyzePasswordFreshness:
 
     def test_password_changed_after_task(self):
         """Returns BAD when password was changed after task creation."""
-        pwd_change_date = datetime(2025, 12, 1, 12, 0, 0, tzinfo=timezone.utc)
+        pwd_change_date = datetime(2025, 12, 1, 12, 0, 0, tzinfo=UTC)
         task_date = "2025-01-15T10:00:00"  # Before password change
         status, explanation = _analyze_password_freshness(task_date, pwd_change_date)
         assert status == "BAD"
@@ -54,13 +54,13 @@ class TestAnalyzePasswordFreshness:
 
     def test_invalid_task_date_format(self):
         """Returns UNKNOWN when task_date format is invalid."""
-        pwd_change_date = datetime.now(timezone.utc)
+        pwd_change_date = datetime.now(UTC)
         status, explanation = _analyze_password_freshness("not-a-date", pwd_change_date)
         assert status == "UNKNOWN"
 
     def test_task_date_with_microseconds(self):
         """Handles task dates with microseconds."""
-        pwd_change_date = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        pwd_change_date = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         task_date = "2025-06-15T10:00:00.1234567"
         status, _ = _analyze_password_freshness(task_date, pwd_change_date)
         assert status == "GOOD"
@@ -741,7 +741,7 @@ class TestAnalyzePasswordAge:
         """Create a loader with user data including password dates."""
         loader = HighValueLoader("/test.json")
         # Password changed on Jan 1, 2025
-        pwd_date = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        pwd_date = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
 
         loader.hv_users = {
             "admin": {"sid": "S-1-5-21-1234-5678-9012-500", "pwdlastset": pwd_date},

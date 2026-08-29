@@ -6,7 +6,7 @@
 #   - Legacy LAPS handling
 #   - Error handling and edge cases
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -42,7 +42,7 @@ class TestLAPSCredential:
 
     def test_expiration_not_expired(self):
         """Test credential that hasn't expired"""
-        future = datetime.now(timezone.utc) + timedelta(days=7)
+        future = datetime.now(UTC) + timedelta(days=7)
         cred = LAPSCredential(
             password="test",
             username="Admin",
@@ -54,7 +54,7 @@ class TestLAPSCredential:
 
     def test_expiration_expired(self):
         """Test credential that has expired"""
-        past = datetime.now(timezone.utc) - timedelta(days=1)
+        past = datetime.now(UTC) - timedelta(days=1)
         cred = LAPSCredential(
             password="test",
             username="Admin",
@@ -361,7 +361,7 @@ class TestLAPSCredentialSerialization:
 
     def test_to_cache_dict_with_expiration(self):
         """Test serializing credential with expiration to dict"""
-        exp = datetime(2025, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        exp = datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC)
         cred = LAPSCredential(
             password="pass",
             username="Admin",
@@ -420,7 +420,7 @@ class TestLAPSCredentialSerialization:
             laps_type="mslaps",
             computer_name="DESKTOP-ABC$",
             dns_hostname="DESKTOP-ABC.corp.local",
-            expiration=datetime.now(timezone.utc) + timedelta(days=30),
+            expiration=datetime.now(UTC) + timedelta(days=30),
             encrypted=False,
         )
 

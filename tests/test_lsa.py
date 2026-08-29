@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 from taskhound.lsa.extractor import (
     GMSACredential,
     LSAExtractionResult,
-    MSDS_MANAGEDPASSWORD_BLOB,
     ServiceCredential,
     _parse_gmsa_ntlm_from_lsa,
     extract_lsa_secrets,
@@ -204,10 +203,6 @@ class TestMapLsaCredsToServiceRows:
 
         _map_lsa_creds_to_service_rows(rows, creds, "dc01")
         assert rows[0].decrypted_password is None
-
-
-class TestMapLsaCredsToServiceRows:
-    """Test _map_lsa_creds_to_service_rows credential mapping."""
 
     def test_maps_credentials_to_rows(self):
         from taskhound.engine.helpers import _map_lsa_creds_to_service_rows
